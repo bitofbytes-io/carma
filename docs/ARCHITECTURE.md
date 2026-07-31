@@ -110,9 +110,12 @@ Due status is **computed, never stored**, so it can't drift:
 ```mermaid
 flowchart TD
   R[Reminder: vehicle + service type + interval] --> B{Any record of this type?}
-  B -->|no| DUE[Due - no history yet]
-  B -->|yes| T{"baseline date + months <= today?"}
-  B -->|yes| M{"max odometer >= baseline odometer + miles?"}
+  B -->|no| F[Use immutable created date and starting odometer snapshot]
+  B -->|yes| L[Use latest matching record date and odometer]
+  F --> T{"baseline date + months <= today?"}
+  F --> M{"effective odometer >= baseline odometer + miles?"}
+  L --> T
+  L --> M
   T -->|yes| DUE2[Overdue]
   M -->|yes| DUE2
   T -->|"within 30 days"| SOON[Due soon]
@@ -121,9 +124,12 @@ flowchart TD
   M -->|no| OK
 ```
 
-One SQL query joins reminders to the latest matching record and max odometer per
-vehicle; the handler classifies each row as overdue / due soon / ok. Logging a new
-record naturally resets the baseline.
+One SQL query joins reminders to the latest matching record and the vehicle's
+effective odometer (the greater of its manually maintained current odometer and all
+record readings); the handler classifies each row as overdue / due soon / ok. A
+reminder snapshots that effective odometer when first created. Edits preserve its
+creation date and snapshot, while logging a matching record naturally replaces both
+first-cycle baselines.
 
 ## Email reminders (stretch)
 

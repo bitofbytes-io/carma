@@ -35,6 +35,148 @@ func TestRecordBaselineOrderAndFiltering(t *testing.T) {
 	}
 }
 
+func TestMemoryVehicleOdometerAndReminderSnapshotSemantics(t *testing.T) {
+	m := NewMemory()
+	ctx := t.Context()
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	current := int64(1000)
+	v, err := m.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "Snapshot", CurrentOdometer: &current, CreatedAt: now, UpdatedAt: now})
+	if err != nil || v.LatestOdometer == nil || *v.LatestOdometer != current {
+		t.Fatalf("created vehicle=%+v err=%v", v, err)
+	}
+	types, _ := m.ListServiceTypes(ctx)
+	months := 6
+	created := now.Add(-time.Hour)
+	rm, err := m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMonths: &months, StartingOdometer: v.LatestOdometer, Enabled: true, CreatedAt: created, UpdatedAt: created})
+	if err != nil || rm.StartingOdometer == nil || *rm.StartingOdometer != current {
+		t.Fatalf("created reminder=%+v err=%v", rm, err)
+	}
+
+	changedStart := int64(9000)
+	later := now.Add(time.Hour)
+	updated, err := m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMonths: &months, StartingOdometer: &changedStart, Enabled: false, CreatedAt: later, UpdatedAt: later})
+	if err != nil || !updated.CreatedAt.Equal(created) || updated.StartingOdometer == nil || *updated.StartingOdometer != current || updated.Enabled {
+		t.Fatalf("updated reminder did not preserve baselines: %+v err=%v", updated, err)
+	}
+
+	recordMileage := int64(2500)
+	_, _ = m.CreateRecord(ctx, model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[1].ID, OccurredOn: now, OdometerMiles: &recordMileage, CreatedAt: now}, nil)
+	gotVehicle, err := m.GetVehicle(ctx, v.ID)
+	if err != nil || gotVehicle.CurrentOdometer == nil || *gotVehicle.CurrentOdometer != current || gotVehicle.LatestOdometer == nil || *gotVehicle.LatestOdometer != recordMileage {
+		t.Fatalf("effective vehicle mileage=%+v err=%v", gotVehicle, err)
+	}
+}
+
+func TestMemoryInitializesLegacyReminderOdometerOnce(t *testing.T) {
+	m := NewMemory()
+	ctx := t.Context()
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	v, _ := m.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "Legacy", CreatedAt: now, UpdatedAt: now})
+	types, _ := m.ListServiceTypes(ctx)
+	miles := int64(5000)
+	legacy, _ := m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometerPending: true, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	legacy, _ = m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, Enabled: false, CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)})
+	if !legacy.StartingOdometerPending || legacy.StartingOdometer != nil {
+		t.Fatalf("legacy pending state was not preserved by edit: %+v", legacy)
+	}
+	_, _ = m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[1].ID, IntervalMiles: &miles, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	recordMileage := int64(50000)
+	_, _ = m.CreateRecord(ctx, model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[2].ID, OccurredOn: now, OdometerMiles: &recordMileage, CreatedAt: now}, nil)
+
+	first := int64(42000)
+	v.CurrentOdometer = &first
+	v.UpdatedAt = now.Add(time.Hour)
+	if _, err := m.UpdateVehicle(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	second := int64(43000)
+	v.CurrentOdometer = &second
+	v.UpdatedAt = now.Add(2 * time.Hour)
+	if _, err := m.UpdateVehicle(ctx, v); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := m.ListReminders(ctx, &v.ID, true)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("legacy reminder=%+v err=%v", rows, err)
+	}
+	byType := map[uuid.UUID]model.Reminder{}
+	for _, row := range rows {
+		byType[row.ServiceTypeID] = row
+	}
+	legacy = byType[types[0].ID]
+	if legacy.StartingOdometer == nil || *legacy.StartingOdometer != recordMileage || legacy.StartingOdometerPending || legacy.LatestOdometer == nil || *legacy.LatestOdometer != recordMileage {
+		t.Fatalf("legacy reminder was not initialized exactly once: %+v", legacy)
+	}
+	unknown := byType[types[1].ID]
+	if unknown.StartingOdometer != nil || unknown.StartingOdometerPending || unknown.LatestOdometer == nil || *unknown.LatestOdometer != recordMileage {
+		t.Fatalf("new unknown reminder was retroactively initialized: %+v", unknown)
+	}
+}
+
+func TestPostgresLegacySnapshotUsesEffectiveOdometerQuery(t *testing.T) {
+	query := strings.ToLower(initializeReminderOdometerSQL)
+	for _, want := range []string{
+		"starting_odometer_miles=greatest($2::bigint",
+		"select max(odometer_miles) from records where vehicle_id=$1",
+		"starting_odometer_pending=false",
+		"and starting_odometer_pending",
+		"starting_odometer_miles is null",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("legacy snapshot query missing %q: %s", want, query)
+		}
+	}
+}
+
+func TestPostgresReminderUpsertPreservesBaselineStateQuery(t *testing.T) {
+	query := strings.ToLower(upsertReminderSQL)
+	parts := strings.Split(query, "on conflict")
+	if len(parts) != 2 {
+		t.Fatalf("missing conflict clause: %s", query)
+	}
+	for _, forbidden := range []string{"starting_odometer_miles=excluded", "starting_odometer_pending=excluded", "created_at=excluded"} {
+		if strings.Contains(parts[1], forbidden) {
+			t.Fatalf("upsert conflict overwrites baseline state with %q: %s", forbidden, query)
+		}
+	}
+	if !strings.Contains(query, "returning id,created_at,starting_odometer_miles,starting_odometer_pending") {
+		t.Fatalf("upsert does not return preserved state: %s", query)
+	}
+}
+
+func TestMemoryReminderStartingOdometerDoesNotAliasCallers(t *testing.T) {
+	m := NewMemory()
+	ctx := t.Context()
+	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	v, _ := m.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "Pointers", CreatedAt: now, UpdatedAt: now})
+	types, _ := m.ListServiceTypes(ctx)
+	miles := int64(5000)
+	starting := int64(1000)
+	created, err := m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometer: &starting, Enabled: true, CreatedAt: now, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	starting = 2000
+	*created.StartingOdometer = 3000
+	rows, _ := m.ListReminders(ctx, &v.ID, true)
+	if len(rows) != 1 || rows[0].StartingOdometer == nil || *rows[0].StartingOdometer != 1000 {
+		t.Fatalf("create aliases changed stored snapshot: %+v", rows)
+	}
+
+	replacement := int64(9000)
+	updated, err := m.UpsertReminder(ctx, model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometer: &replacement, Enabled: false, CreatedAt: now.Add(time.Hour), UpdatedAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement = 8000
+	*updated.StartingOdometer = 7000
+	*rows[0].StartingOdometer = 6000
+	rows, _ = m.ListReminders(ctx, &v.ID, true)
+	if rows[0].StartingOdometer == nil || *rows[0].StartingOdometer != 1000 || rows[0].Enabled {
+		t.Fatalf("update/return aliases changed stored snapshot: %+v", rows[0])
+	}
+}
+
 func TestRecordOrderingNullsLastAndDeterministicTies(t *testing.T) {
 	m := NewMemory()
 	ctx := t.Context()
