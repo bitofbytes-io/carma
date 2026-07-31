@@ -43,20 +43,50 @@ jobs:
           audience: ${{ vars.TS_AUDIENCE }}
           tags: tag:ci
           ping: ${{ env.MANAGER_HOST }}
-      - name: Verify registry route
+      - name: Verify and pin registry route
+        id: registry
         run: |
           set -euo pipefail
           registry_host="${IMAGE_REG%%:*}"
+          registry_port="443"
+          if [[ "${IMAGE_REG}" == *:* ]]; then
+            registry_port="${IMAGE_REG##*:}"
+          fi
+          if [[ ! "${registry_host}" =~ ^[A-Za-z0-9.-]+$ ]] ||
+             [[ ! "${registry_port}" =~ ^[0-9]+$ ]] ||
+             (( registry_port < 1 || registry_port > 65535 )); then
+            echo "Registry must be a hostname with an optional valid port" >&2
+            exit 1
+          fi
           registry_ip="$(getent ahostsv4 "${registry_host}" | awk '{print $1; exit}')"
           if [[ ! "${registry_ip}" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
             echo "Registry did not resolve to a Tailscale address" >&2
             exit 1
           fi
-          status="$(curl -sS -o /dev/null -w '%{http_code}' "https://${IMAGE_REG}/v2/")"
+          status="$(curl --resolve "${registry_host}:${registry_port}:${registry_ip}" -sS -o /dev/null -w '%{http_code}' "https://${IMAGE_REG}/v2/")"
           [[ "${status}" == 200 || "${status}" == 401 ]]
+
+          # Pin Docker CLI operations to the address used by the probe.
+          printf '%s %s\n' "${registry_ip}" "${registry_host}" | sudo tee -a /etc/hosts >/dev/null
+          [[ "$(getent ahostsv4 "${registry_host}" | awk '{print $1; exit}')" == "${registry_ip}" ]]
+          printf 'host=%s\nip=%s\n' "${registry_host}" "${registry_ip}" >> "${GITHUB_OUTPUT}"
       - uses: docker/setup-buildx-action@v4
         with:
+          name: carma-builder
           driver-opts: network=host
+      - name: Pin registry route in BuildKit
+        env:
+          REGISTRY_HOST: ${{ steps.registry.outputs.host }}
+          REGISTRY_IP: ${{ steps.registry.outputs.ip }}
+        run: |
+          set -euo pipefail
+          builder_container="buildx_buildkit_carma-builder0"
+          docker buildx inspect carma-builder --bootstrap >/dev/null
+          docker inspect "${builder_container}" >/dev/null
+          docker exec --user root "${builder_container}" sh -ec \
+            'printf "%s %s\n" "$1" "$2" >> /etc/hosts' -- "${REGISTRY_IP}" "${REGISTRY_HOST}"
+          pinned_ip="$(docker exec "${builder_container}" cat /etc/hosts | awk -v host="${REGISTRY_HOST}" '$2 == host {print $1; exit}')"
+          [[ "${pinned_ip}" == "${REGISTRY_IP}" ]]
       - uses: docker/login-action@v4
         with:
           registry: ${{ env.IMAGE_REG }}

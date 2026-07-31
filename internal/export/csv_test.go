@@ -3,12 +3,25 @@ package export
 import (
 	"bytes"
 	"encoding/csv"
-	"github.com/bitofbytes-io/carma/internal/model"
+	"errors"
 	"math"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/bitofbytes-io/carma/internal/model"
 )
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestCSVPropagatesFlushError(t *testing.T) {
+	want := errors.New("flush failed")
+	if err := CSV(failingWriter{err: want}, nil); !errors.Is(err, want) {
+		t.Fatalf("CSV error=%v want=%v", err, want)
+	}
+}
 
 func TestCSVFormatsCentsExactly(t *testing.T) {
 	for _, tc := range []struct {
@@ -18,7 +31,10 @@ func TestCSVFormatsCentsExactly(t *testing.T) {
 		{cents: 0, want: "0.00"},
 		{cents: 5, want: "0.05"},
 		{cents: 1234, want: "12.34"},
+		{cents: -1, want: "-0.01"},
+		{cents: -1234, want: "-12.34"},
 		{cents: math.MaxInt64, want: "92233720368547758.07"},
+		{cents: math.MinInt64, want: "-92233720368547758.08"},
 	} {
 		if got := formatCents(tc.cents); got != tc.want {
 			t.Fatalf("formatCents(%d)=%q want=%q", tc.cents, got, tc.want)

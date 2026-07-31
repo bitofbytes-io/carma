@@ -46,7 +46,7 @@ func ClearSession(w http.ResponseWriter, secure bool) {
 }
 func redirect(w http.ResponseWriter, r *http.Request) {
 	target := "/login"
-	if r.URL.Path != "/" {
+	if r.Method == http.MethodGet && r.URL.Path != "/" {
 		target += "?redirect=" + url.QueryEscape(r.URL.RequestURI())
 	}
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Request")), "true") {

@@ -10,7 +10,6 @@ import (
 
 func CSV(w io.Writer, records []model.Record) error {
 	c := csv.NewWriter(w)
-	defer c.Flush()
 	if err := c.Write([]string{"vehicle", "date", "service type", "odometer", "cost", "vendor", "notes", "receipt count", "logged by"}); err != nil {
 		return err
 	}
@@ -26,12 +25,20 @@ func CSV(w io.Writer, records []model.Record) error {
 			return err
 		}
 	}
+	c.Flush()
 	return c.Error()
 }
 
 func formatCents(cents int64) string {
-	fraction := strconv.FormatInt(cents%100+100, 10)[1:]
-	return strconv.FormatInt(cents/100, 10) + "." + fraction
+	whole, remainder := cents/100, cents%100
+	sign := ""
+	if cents < 0 {
+		sign = "-"
+		whole = -whole
+		remainder = -remainder
+	}
+	fraction := strconv.FormatInt(remainder+100, 10)[1:]
+	return sign + strconv.FormatInt(whole, 10) + "." + fraction
 }
 
 func spreadsheetText(value string) string {

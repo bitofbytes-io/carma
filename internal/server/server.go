@@ -968,10 +968,7 @@ func (s *Server) createServiceType(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, e)
 		return
 	}
-	dest := r.FormValue("return_to")
-	if !strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "//") {
-		dest = "/"
-	}
+	dest, _ := safeRedirectTarget(r.FormValue("return_to"))
 	http.Redirect(w, r, dest, 303)
 }
 

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +161,12 @@ func TestRecordWithPDFRangeAndFilteredCSV(t *testing.T) {
 	if _, _, err := f.store.GetAttachment(t.Context(), as[0].ID); err != repository.ErrNotFound {
 		t.Fatalf("attachment metadata remains: %v", err)
 	}
+	if object, err := f.s.assets.Open(t.Context(), as[0].StorageKey); err == nil {
+		_ = object.Close()
+		t.Fatalf("attachment asset remains at %q", as[0].StorageKey)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checking removed attachment asset: %v", err)
+	}
 }
 
 func TestMultipartTotalLimitIsEnforced(t *testing.T) {
@@ -197,6 +206,29 @@ func TestRecordEditUsesBrowserFormEncoding(t *testing.T) {
 	updated, _, err := f.store.GetRecord(t.Context(), rec.ID)
 	if err != nil || updated.Vendor != "After" || updated.Notes != "Edited through form" || updated.ServiceTypeID != types[1].ID || updated.OdometerMiles == nil || *updated.OdometerMiles != 250 || updated.CostCents == nil || *updated.CostCents != 1234 || updated.OccurredOn.Format("2006-01-02") != "2026-02-03" {
 		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+}
+
+func TestCreateServiceTypeAllowsOnlySafeReturnTargets(t *testing.T) {
+	f := setup(t)
+	for i, tc := range []struct {
+		name, target, want string
+	}{
+		{name: "safe relative", target: "/vehicles/123/records/new?from=custom", want: "/vehicles/123/records/new?from=custom"},
+		{name: "external", target: "https://evil.example/steal", want: "/"},
+		{name: "scheme relative", target: "//evil.example/steal", want: "/"},
+		{name: "encoded slash", target: `/%2f%2fevil.example/steal`, want: "/"},
+		{name: "backslash", target: `/\evil.example/steal`, want: "/"},
+		{name: "encoded backslash", target: `/%5c%5cevil.example/steal`, want: "/"},
+		{name: "malformed", target: `/%zz`, want: "/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := url.Values{"name": {"Return Target " + strconv.Itoa(i)}, "return_to": {tc.target}}
+			response := f.do(t, http.MethodPost, "/service-types", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != tc.want {
+				t.Fatalf("target=%q status=%d location=%q", tc.target, response.Code, response.Header().Get("Location"))
+			}
+		})
 	}
 }
 

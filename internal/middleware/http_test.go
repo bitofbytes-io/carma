@@ -107,3 +107,43 @@ func TestRequireAuthUsesHXRedirectForMissingAndInvalidSessions(t *testing.T) {
 		})
 	}
 }
+
+func TestRequireAuthUsesSafeFallbackForNonGETRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, method string
+		htmx         bool
+		wantStatus   int
+	}{
+		{name: "normal POST", method: http.MethodPost, wantStatus: http.StatusSeeOther},
+		{name: "HTMX POST", method: http.MethodPost, htmx: true, wantStatus: http.StatusOK},
+		{name: "normal HEAD", method: http.MethodHead, wantStatus: http.StatusSeeOther},
+		{name: "normal DELETE", method: http.MethodDelete, wantStatus: http.StatusSeeOther},
+		{name: "HTMX PATCH", method: http.MethodPatch, htmx: true, wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := auth.NewService(repository.NewMemory(), time.Hour)
+			handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("unauthenticated non-GET request reached protected handler")
+			}))
+			request := httptest.NewRequest(tc.method, "https://carma.example/records/123/delete?confirm=true", nil)
+			request.AddCookie(&http.Cookie{Name: CookieName, Value: "invalid-token"})
+			if tc.htmx {
+				request.Header.Set("HX-Request", "true")
+			}
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			if response.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d", response.Code, tc.wantStatus)
+			}
+			if tc.htmx {
+				if response.Header().Get("HX-Redirect") != "/login" || response.Header().Get("Location") != "" {
+					t.Fatalf("hx-redirect=%q location=%q", response.Header().Get("HX-Redirect"), response.Header().Get("Location"))
+				}
+			} else if response.Header().Get("Location") != "/login" || response.Header().Get("HX-Redirect") != "" {
+				t.Fatalf("location=%q hx-redirect=%q", response.Header().Get("Location"), response.Header().Get("HX-Redirect"))
+			}
+		})
+	}
+}
