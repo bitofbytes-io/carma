@@ -95,3 +95,22 @@ func TestCustomTypeUniqueCaseInsensitive(t *testing.T) {
 		t.Fatalf("got %v", e)
 	}
 }
+
+func TestGetAttachmentReturnsRecordContextAndNotFound(t *testing.T) {
+	m := NewMemory()
+	ctx := t.Context()
+	now := time.Now()
+	u, _ := m.UpsertUser(ctx, model.User{ID: uuid.New(), Email: "attachment@x", OAuthProvider: "google", OAuthSubject: "attachment", CreatedAt: now})
+	v, _ := m.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "Attachment Car", CreatedAt: now})
+	types, _ := m.ListServiceTypes(ctx)
+	r := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: u.ID, OccurredOn: now, CreatedAt: now}
+	a := model.Attachment{ID: uuid.New(), RecordID: r.ID, OriginalFilename: "receipt.pdf", StorageKey: "ab/key.pdf"}
+	_, _ = m.CreateRecord(ctx, r, []model.Attachment{a})
+	gotRecord, gotAttachment, err := m.GetAttachment(ctx, a.ID)
+	if err != nil || gotRecord.ID != r.ID || gotRecord.VehicleName != v.Nickname || gotAttachment.ID != a.ID {
+		t.Fatalf("record=%+v attachment=%+v err=%v", gotRecord, gotAttachment, err)
+	}
+	if _, _, err = m.GetAttachment(ctx, uuid.New()); err != ErrNotFound {
+		t.Fatalf("not found err=%v", err)
+	}
+}

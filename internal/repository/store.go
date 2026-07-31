@@ -29,6 +29,7 @@ type Store interface {
 
 	ListRecords(context.Context, model.RecordQuery) ([]model.Record, error)
 	GetRecord(context.Context, uuid.UUID) (model.Record, []model.Attachment, error)
+	GetAttachment(context.Context, uuid.UUID) (model.Record, model.Attachment, error)
 	CreateRecord(context.Context, model.Record, []model.Attachment) (model.Record, error)
 	UpdateRecord(context.Context, model.Record) (model.Record, error)
 	DeleteRecord(context.Context, uuid.UUID) ([]string, error)

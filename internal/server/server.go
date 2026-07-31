@@ -1,6 +1,10 @@
 package server
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -49,7 +53,7 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 }
 
 type pageData struct {
-	Title, Error, Flash                           string
+	Title, Error, Flash, Redirect                 string
 	Authenticated, Development, Editing, Archived bool
 	User                                          *model.User
 	NavVehicles, Vehicles                         []model.Vehicle
@@ -130,7 +134,8 @@ func (s *Server) fail(w http.ResponseWriter, e error) {
 }
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
-	d := pageData{Title: "Sign in", Development: s.cfg.AuthMode == config.AuthDevelopment, Error: r.URL.Query().Get("error")}
+	target, _ := safeRedirectTarget(r.URL.Query().Get("redirect"))
+	d := pageData{Title: "Sign in", Development: s.cfg.AuthMode == config.AuthDevelopment, Error: r.URL.Query().Get("error"), Redirect: target}
 	s.render(w, http.StatusOK, "login", d)
 }
 func (s *Server) devLogin(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +156,13 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	state, e := auth.State()
+	nonce, e := auth.State()
+	if e != nil {
+		s.fail(w, e)
+		return
+	}
+	target, _ := safeRedirectTarget(r.URL.Query().Get("redirect"))
+	state, e := signedOAuthState(nonce, target, s.cfg.GoogleClientSecret)
 	if e != nil {
 		s.fail(w, e)
 		return
@@ -161,7 +172,9 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	cookie, e := r.Cookie(oauthStateCookie)
-	if e != nil || cookie.Value == "" || r.URL.Query().Get("state") != cookie.Value {
+	state := r.URL.Query().Get("state")
+	target, validState := parseOAuthState(state, s.cfg.GoogleClientSecret)
+	if e != nil || cookie.Value == "" || !hmac.Equal([]byte(state), []byte(cookie.Value)) || !validState {
 		http.Redirect(w, r, "/login?error="+url.QueryEscape("Sign-in expired. Please try again."), http.StatusSeeOther)
 		return
 	}
@@ -181,7 +194,7 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	middleware.SetSession(w, token, s.cfg.SecureCookies(), s.cfg.SessionTTL)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, e := r.Cookie(middleware.CookieName); e == nil {
@@ -719,22 +732,7 @@ func (s *Server) findAttachment(r *http.Request) (model.Record, model.Attachment
 	if e != nil {
 		return model.Record{}, model.Attachment{}, repository.ErrNotFound
 	}
-	records, e := s.store.ListRecords(r.Context(), model.RecordQuery{})
-	if e != nil {
-		return model.Record{}, model.Attachment{}, e
-	}
-	for _, rec := range records {
-		full, as, e := s.store.GetRecord(r.Context(), rec.ID)
-		if e != nil {
-			continue
-		}
-		for _, a := range as {
-			if a.ID == id {
-				return full, a, nil
-			}
-		}
-	}
-	return model.Record{}, model.Attachment{}, repository.ErrNotFound
+	return s.store.GetAttachment(r.Context(), id)
 }
 func (s *Server) serveObject(w http.ResponseWriter, r *http.Request, key, name, contentType string) {
 	f, e := s.assets.Open(r.Context(), key)
@@ -1031,6 +1029,75 @@ func contentTypeForKey(k string) string {
 		return "application/octet-stream"
 	}
 }
+
+type oauthStatePayload struct {
+	Nonce    string `json:"n"`
+	Redirect string `json:"r"`
+}
+
+func signedOAuthState(nonce, redirect, secret string) (string, error) {
+	payload, e := json.Marshal(oauthStatePayload{Nonce: nonce, Redirect: redirect})
+	if e != nil {
+		return "", e
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(encoded))
+	return encoded + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func parseOAuthState(state, secret string) (string, bool) {
+	parts := strings.Split(state, ".")
+	if len(parts) != 2 {
+		return "/", false
+	}
+	signature, e := base64.RawURLEncoding.DecodeString(parts[1])
+	if e != nil {
+		return "/", false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(parts[0]))
+	if !hmac.Equal(signature, mac.Sum(nil)) {
+		return "/", false
+	}
+	payloadBytes, e := base64.RawURLEncoding.DecodeString(parts[0])
+	if e != nil {
+		return "/", false
+	}
+	var payload oauthStatePayload
+	if e = json.Unmarshal(payloadBytes, &payload); e != nil || payload.Nonce == "" {
+		return "/", false
+	}
+	target, ok := safeRedirectTarget(payload.Redirect)
+	if !ok {
+		return "/", false
+	}
+	return target, true
+}
+
+func safeRedirectTarget(raw string) (string, bool) {
+	if raw == "" {
+		return "/", true
+	}
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.Contains(raw, "\\") {
+		return "/", false
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return "/", false
+		}
+	}
+	u, e := url.ParseRequestURI(raw)
+	if e != nil || u.IsAbs() || u.Host != "" || !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") || strings.Contains(u.Path, "\\") {
+		return "/", false
+	}
+	decoded, e := url.PathUnescape(u.EscapedPath())
+	if e != nil || strings.Contains(decoded, "\\") || strings.HasPrefix(decoded, "//") {
+		return "/", false
+	}
+	return raw, true
+}
+
 func slug(v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
 	var b strings.Builder

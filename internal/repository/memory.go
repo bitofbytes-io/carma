@@ -324,6 +324,19 @@ func (m *Memory) GetRecord(_ context.Context, id uuid.UUID) (model.Record, []mod
 	sort.Slice(as, func(i, j int) bool { return as[i].CreatedAt.Before(as[j].CreatedAt) })
 	return m.enrichRecord(r), as, nil
 }
+func (m *Memory) GetAttachment(_ context.Context, id uuid.UUID) (model.Record, model.Attachment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	a, ok := m.attachments[id]
+	if !ok {
+		return model.Record{}, model.Attachment{}, ErrNotFound
+	}
+	r, ok := m.records[a.RecordID]
+	if !ok {
+		return model.Record{}, model.Attachment{}, ErrNotFound
+	}
+	return m.enrichRecord(r), a, nil
+}
 func (m *Memory) CreateRecord(_ context.Context, r model.Record, as []model.Attachment) (model.Record, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

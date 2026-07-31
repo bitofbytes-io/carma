@@ -22,9 +22,20 @@ func CSV(w io.Writer, records []model.Record) error {
 		if r.CostCents != nil {
 			cost = fmt.Sprintf("%.2f", float64(*r.CostCents)/100)
 		}
-		if err := c.Write([]string{r.VehicleName, r.OccurredOn.Format("2006-01-02"), r.ServiceTypeName, odo, cost, r.Vendor, r.Notes, strconv.Itoa(r.AttachmentCount), r.CreatedByName}); err != nil {
+		if err := c.Write([]string{spreadsheetText(r.VehicleName), r.OccurredOn.Format("2006-01-02"), spreadsheetText(r.ServiceTypeName), odo, cost, spreadsheetText(r.Vendor), spreadsheetText(r.Notes), strconv.Itoa(r.AttachmentCount), spreadsheetText(r.CreatedByName)}); err != nil {
 			return err
 		}
 	}
 	return c.Error()
+}
+
+func spreadsheetText(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@':
+		return "'" + value
+	}
+	return value
 }

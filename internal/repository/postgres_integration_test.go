@@ -52,7 +52,7 @@ func TestPostgresProductionPaths(t *testing.T) {
 		t.Fatalf("apply embedded migrations: %v", err)
 	}
 	_ = conn.Close(ctx)
-	store, err := repository.NewPostgres(ctx, scoped)
+	store, err := repository.NewPostgres(ctx, withPoolMaxConns(t, scoped, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +94,15 @@ func TestPostgresProductionPaths(t *testing.T) {
 	if _, err = store.CreateRecord(ctx, r2, []model.Attachment{a}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = store.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "PG Tacoma", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	listCtx, stopList := context.WithTimeout(ctx, 2*time.Second)
+	defer stopList()
+	vehicles, err := store.ListVehicles(listCtx, false)
+	if err != nil || len(vehicles) != 2 || vehicles[0].LastRecord == nil || vehicles[0].LastRecord.ID != r2.ID {
+		t.Fatalf("single-connection vehicle list: %+v %v", vehicles, err)
+	}
 	rows, err := store.ListRecords(ctx, model.RecordQuery{VehicleID: &vehicle.ID, Search: "beta", Sort: "mileage"})
 	if err != nil || len(rows) != 1 || rows[0].ID != r2.ID || rows[0].AttachmentCount != 1 {
 		t.Fatalf("filtered records: %+v %v", rows, err)
@@ -105,6 +114,13 @@ func TestPostgresProductionPaths(t *testing.T) {
 	_, attachments, err := store.GetRecord(ctx, r2.ID)
 	if err != nil || len(attachments) != 1 {
 		t.Fatalf("attachment metadata: %+v %v", attachments, err)
+	}
+	attachmentRecord, attachmentByID, err := store.GetAttachment(ctx, a.ID)
+	if err != nil || attachmentRecord.ID != r2.ID || attachmentByID.ID != a.ID {
+		t.Fatalf("attachment lookup: record=%+v attachment=%+v err=%v", attachmentRecord, attachmentByID, err)
+	}
+	if _, _, err = store.GetAttachment(ctx, uuid.New()); err != repository.ErrNotFound {
+		t.Fatalf("attachment not found: %v", err)
 	}
 	a2 := model.Attachment{ID: uuid.New(), RecordID: r2.ID, OriginalFilename: "photo.png", ContentType: "image/png", ByteSize: 8, StorageKey: "cd/00000000-0000-0000-0000-000000000002.png", CreatedAt: now.Add(time.Second)}
 	if err = store.AddAttachments(ctx, r2.ID, []model.Attachment{a2}); err != nil {
@@ -145,6 +161,18 @@ func withSearchPath(t *testing.T, dsn, schema string) string {
 	}
 	q := u.Query()
 	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func withPoolMaxConns(t *testing.T, dsn, max string) string {
+	t.Helper()
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	q.Set("pool_max_conns", max)
 	u.RawQuery = q.Encode()
 	return u.String()
 }

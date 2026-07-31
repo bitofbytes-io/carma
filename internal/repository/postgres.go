@@ -91,23 +91,34 @@ func scanVehicle(row pgx.Row) (model.Vehicle, error) {
 	return v, e
 }
 func (p *Postgres) ListVehicles(c context.Context, archived bool) ([]model.Vehicle, error) {
-	rows, e := p.pool.Query(c, `SELECT `+vehicleCols+`,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id) FROM vehicles v WHERE (archived_at IS NOT NULL)=$1 ORDER BY lower(nickname)`, archived)
+	rows, e := p.pool.Query(c, `SELECT `+vehicleCols+`,
+		(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id),
+		lr.id,lr.vehicle_id,lr.service_type_id,lr.created_by,lr.occurred_on,lr.odometer_miles,lr.cost_cents,lr.vendor,lr.notes,lr.created_at,lr.updated_at,lr.service_type_name
+		FROM vehicles v
+		LEFT JOIN LATERAL (
+			SELECT r.id,r.vehicle_id,r.service_type_id,r.created_by,r.occurred_on,r.odometer_miles,r.cost_cents,r.vendor,r.notes,r.created_at,r.updated_at,st.name AS service_type_name
+			FROM records r JOIN service_types st ON st.id=r.service_type_id
+			WHERE r.vehicle_id=v.id
+			ORDER BY r.occurred_on DESC,r.created_at DESC,r.id DESC LIMIT 1
+		) lr ON true
+		WHERE (v.archived_at IS NOT NULL)=$1 ORDER BY lower(v.nickname)`, archived)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
 	var out []model.Vehicle
 	for rows.Next() {
-		v, e := scanVehicle(rows)
+		var v model.Vehicle
+		var rid, rvid, typeID, createdBy *uuid.UUID
+		var occurred, created, updated *time.Time
+		var odometer, cost *int64
+		var vendor, notes, typeName *string
+		e = rows.Scan(&v.ID, &v.Nickname, &v.Year, &v.Make, &v.Model, &v.VIN, &v.LicensePlate, &v.PhotoKey, &v.Notes, &v.ArchivedAt, &v.CreatedAt, &v.UpdatedAt, &v.LatestOdometer, &rid, &rvid, &typeID, &createdBy, &occurred, &odometer, &cost, &vendor, &notes, &created, &updated, &typeName)
 		if e != nil {
 			return nil, e
 		}
-		var r model.Record
-		e = p.pool.QueryRow(c, `SELECT r.id,r.vehicle_id,r.service_type_id,r.created_by,r.occurred_on,r.odometer_miles,r.cost_cents,r.vendor,r.notes,r.created_at,r.updated_at,st.name FROM records r JOIN service_types st ON st.id=r.service_type_id WHERE r.vehicle_id=$1 ORDER BY r.occurred_on DESC,r.created_at DESC,r.id DESC LIMIT 1`, v.ID).Scan(&r.ID, &r.VehicleID, &r.ServiceTypeID, &r.CreatedBy, &r.OccurredOn, &r.OdometerMiles, &r.CostCents, &r.Vendor, &r.Notes, &r.CreatedAt, &r.UpdatedAt, &r.ServiceTypeName)
-		if e == nil {
-			v.LastRecord = &r
-		} else if !errors.Is(e, pgx.ErrNoRows) {
-			return nil, e
+		if rid != nil {
+			v.LastRecord = &model.Record{ID: *rid, VehicleID: *rvid, ServiceTypeID: *typeID, CreatedBy: *createdBy, OccurredOn: *occurred, OdometerMiles: odometer, CostCents: cost, Vendor: *vendor, Notes: *notes, CreatedAt: *created, UpdatedAt: *updated, ServiceTypeName: *typeName}
 		}
 		out = append(out, v)
 	}
@@ -222,6 +233,16 @@ func (p *Postgres) GetRecord(c context.Context, id uuid.UUID) (model.Record, []m
 		out = append(out, a)
 	}
 	return r, out, rows.Err()
+}
+func (p *Postgres) GetAttachment(c context.Context, id uuid.UUID) (model.Record, model.Attachment, error) {
+	row := p.pool.QueryRow(c, `SELECT r.id,r.vehicle_id,r.service_type_id,r.created_by,r.occurred_on,r.odometer_miles,r.cost_cents,r.vendor,r.notes,r.created_at,r.updated_at,v.nickname,st.name,COALESCE(NULLIF(u.display_name,''),u.email),(SELECT count(*) FROM attachments x WHERE x.record_id=r.id),a.id,a.record_id,a.original_filename,a.content_type,a.byte_size,a.storage_key,a.created_at FROM attachments a JOIN records r ON r.id=a.record_id JOIN vehicles v ON v.id=r.vehicle_id JOIN service_types st ON st.id=r.service_type_id JOIN users u ON u.id=r.created_by WHERE a.id=$1`, id)
+	var r model.Record
+	var a model.Attachment
+	e := row.Scan(&r.ID, &r.VehicleID, &r.ServiceTypeID, &r.CreatedBy, &r.OccurredOn, &r.OdometerMiles, &r.CostCents, &r.Vendor, &r.Notes, &r.CreatedAt, &r.UpdatedAt, &r.VehicleName, &r.ServiceTypeName, &r.CreatedByName, &r.AttachmentCount, &a.ID, &a.RecordID, &a.OriginalFilename, &a.ContentType, &a.ByteSize, &a.StorageKey, &a.CreatedAt)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return model.Record{}, model.Attachment{}, ErrNotFound
+	}
+	return r, a, e
 }
 func (p *Postgres) CreateRecord(c context.Context, r model.Record, as []model.Attachment) (model.Record, error) {
 	tx, e := p.pool.Begin(c)

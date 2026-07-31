@@ -142,6 +142,22 @@ func TestRecordWithPDFRangeAndFilteredCSV(t *testing.T) {
 	if e != nil || len(parsed) != 2 || parsed[1][5] != "Jiffy Lube" {
 		t.Fatalf("csv=%v err=%v", parsed, e)
 	}
+	unauth := httptest.NewRecorder()
+	f.router.ServeHTTP(unauth, httptest.NewRequest("GET", "http://example.com/attachments/"+as[0].ID.String(), nil))
+	if unauth.Code != http.StatusSeeOther || !strings.HasPrefix(unauth.Header().Get("Location"), "/login?redirect=") {
+		t.Fatalf("attachment auth: %d %s", unauth.Code, unauth.Header().Get("Location"))
+	}
+	notFound := f.do(t, "GET", "/attachments/"+uuid.NewString(), nil, "")
+	if notFound.Code != http.StatusNotFound {
+		t.Fatalf("attachment not found: %d", notFound.Code)
+	}
+	deleted := f.do(t, "POST", "/attachments/"+as[0].ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
+	if deleted.Code != http.StatusSeeOther || deleted.Header().Get("Location") != "/records/"+rows[0].ID.String() {
+		t.Fatalf("attachment delete redirect: %d %s", deleted.Code, deleted.Header().Get("Location"))
+	}
+	if _, _, err := f.store.GetAttachment(t.Context(), as[0].ID); err != repository.ErrNotFound {
+		t.Fatalf("attachment metadata remains: %v", err)
+	}
 }
 
 func TestMultipartTotalLimitIsEnforced(t *testing.T) {
@@ -158,6 +174,29 @@ func TestMultipartTotalLimitIsEnforced(t *testing.T) {
 	rows, _ := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &v.ID})
 	if len(rows) != 0 {
 		t.Fatal("oversized request created a record")
+	}
+}
+
+func TestRecordEditUsesBrowserFormEncoding(t *testing.T) {
+	f := setup(t)
+	v := createVehicle(t, f)
+	types, _ := f.store.ListServiceTypes(t.Context())
+	odo := int64(100)
+	cost := int64(500)
+	rec := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), OdometerMiles: &odo, CostCents: &cost, Vendor: "Before", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	_, _ = f.store.CreateRecord(t.Context(), rec, nil)
+	form := f.do(t, "GET", "/records/"+rec.ID.String()+"/edit", nil, "")
+	if form.Code != 200 || strings.Contains(form.Body.String(), `enctype="multipart/form-data"`) {
+		t.Fatalf("edit form must be urlencoded: %d %s", form.Code, form.Body.String())
+	}
+	values := url.Values{"occurred_on": {"2026-02-03"}, "service_type_id": {types[1].ID.String()}, "odometer": {"250"}, "cost": {"12.34"}, "vendor": {"After"}, "notes": {"Edited through form"}}
+	w := f.do(t, "POST", "/records/"+rec.ID.String(), strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("edit: %d %s", w.Code, w.Body.String())
+	}
+	updated, _, err := f.store.GetRecord(t.Context(), rec.ID)
+	if err != nil || updated.Vendor != "After" || updated.Notes != "Edited through form" || updated.ServiceTypeID != types[1].ID || updated.OdometerMiles == nil || *updated.OdometerMiles != 250 || updated.CostCents == nil || *updated.CostCents != 1234 || updated.OccurredOn.Format("2006-01-02") != "2026-02-03" {
+		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
 }
 
@@ -366,5 +405,118 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 				t.Fatalf("unfriendly rejection: %s", w.Header().Get("Location"))
 			}
 		})
+	}
+}
+
+func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
+	store := repository.NewMemory()
+	a, err := assets.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		AppEnv:             "production",
+		AuthMode:           config.AuthGoogle,
+		GoogleClientSecret: "state-signing-secret",
+		SessionTTL:         90 * 24 * time.Hour,
+		MaxUploadBytes:     25 << 20,
+	}
+	svc := auth.NewService(store, cfg.SessionTTL)
+	g := fakeGoogle{
+		claims:  auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: true},
+		allowed: true,
+	}
+	srv, err := New(cfg, store, a, svc, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := srv.Router()
+
+	completeLogin := func(t *testing.T, requestedTarget string) *httptest.ResponseRecorder {
+		t.Helper()
+		start := httptest.NewRecorder()
+		startRequest := httptest.NewRequest("GET", "https://carma.example/api/auth/google?redirect="+url.QueryEscape(requestedTarget), nil)
+		router.ServeHTTP(start, startRequest)
+
+		var state *http.Cookie
+		for _, cookie := range start.Result().Cookies() {
+			if cookie.Name == oauthStateCookie {
+				state = cookie
+				break
+			}
+		}
+		if state == nil {
+			t.Fatal("missing OAuth state cookie")
+		}
+
+		callback := httptest.NewRequest("GET", "https://carma.example/api/auth/google/callback?state="+url.QueryEscape(state.Value)+"&code=ok", nil)
+		callback.AddCookie(state)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, callback)
+		return response
+	}
+
+	deepLink := "/vehicles/123?sort=cost&direction=asc"
+	login := httptest.NewRecorder()
+	router.ServeHTTP(login, httptest.NewRequest("GET", "https://carma.example/login?redirect="+url.QueryEscape(deepLink), nil))
+	if login.Code != http.StatusOK || !strings.Contains(login.Body.String(), "/api/auth/google?redirect=%2Fvehicles%2F123%3Fsort%3Dcost%26direction%3Dasc") {
+		t.Fatalf("login did not preserve deep link: %d %s", login.Code, login.Body.String())
+	}
+
+	if response := completeLogin(t, deepLink); response.Code != http.StatusSeeOther || response.Header().Get("Location") != deepLink {
+		t.Fatalf("safe redirect: %d %q", response.Code, response.Header().Get("Location"))
+	}
+
+	for _, unsafe := range []string{
+		"https://evil.example/steal",
+		"//evil.example/steal",
+		`/%2f%2fevil.example/steal`,
+		`/\evil.example/steal`,
+		`/%5c%5cevil.example/steal`,
+		`/%zz`,
+	} {
+		t.Run("reject "+unsafe, func(t *testing.T) {
+			response := completeLogin(t, unsafe)
+			if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/" {
+				t.Fatalf("unsafe redirect %q: %d %q", unsafe, response.Code, response.Header().Get("Location"))
+			}
+		})
+	}
+}
+
+func TestGoogleOAuthRejectsTamperedState(t *testing.T) {
+	store := repository.NewMemory()
+	a, err := assets.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, GoogleClientSecret: "state-signing-secret", SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
+	svc := auth.NewService(store, cfg.SessionTTL)
+	g := fakeGoogle{claims: auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: true}, allowed: true}
+	srv, err := New(cfg, store, a, svc, g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := srv.Router()
+
+	state, err := signedOAuthState("nonce", "/vehicles/123", cfg.GoogleClientSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := "A" + state[1:]
+	if tampered == state {
+		tampered = "B" + state[1:]
+	}
+	callback := httptest.NewRequest("GET", "https://carma.example/api/auth/google/callback?state="+url.QueryEscape(tampered)+"&code=ok", nil)
+	callback.AddCookie(&http.Cookie{Name: oauthStateCookie, Value: tampered})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, callback)
+	if response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), "/login?error=") {
+		t.Fatalf("tampered state accepted: %d %q", response.Code, response.Header().Get("Location"))
+	}
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == middleware.CookieName && cookie.Value != "" {
+			t.Fatal("tampered state created a session")
+		}
 	}
 }
