@@ -12,6 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestBaseTemplateDeclaresSupportedColorSchemes(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type data struct {
+		Title         string
+		Authenticated bool
+		Development   bool
+		Error         string
+		Flash         string
+		Redirect      string
+	}
+	var b bytes.Buffer
+	if err := r.Render(&b, "login", data{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), `<meta name="color-scheme" content="light dark">`) {
+		t.Fatal("base template does not advertise light and dark color schemes")
+	}
+}
+
 func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 	r, err := New()
 	if err != nil {
