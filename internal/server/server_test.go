@@ -181,6 +181,77 @@ func createVehicle(t *testing.T, f fixture) model.Vehicle {
 	return vs[0]
 }
 
+func TestVehicleCurrentOdometerCreateEditAndValidation(t *testing.T) {
+	f := setup(t)
+	b, ct := formBody(t, map[string]string{"nickname": "Ranger", "year": "2026", "make": "Ford", "model": "Ranger", "current_odometer": "842"}, "", nil)
+	response := f.do(t, http.MethodPost, "/vehicles", b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	if len(vehicles) != 1 || vehicles[0].CurrentOdometer == nil || *vehicles[0].CurrentOdometer != 842 || vehicles[0].LatestOdometer == nil || *vehicles[0].LatestOdometer != 842 {
+		t.Fatalf("vehicle mileage not persisted: %+v", vehicles)
+	}
+	v := vehicles[0]
+
+	for _, invalid := range []string{"-1", "1.5", "999999999999999999999"} {
+		b, ct = formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": invalid}, "", nil)
+		response = f.do(t, http.MethodPost, "/vehicles/"+v.ID.String(), b, ct)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "Current odometer must be a nonnegative whole number.") {
+			t.Fatalf("odometer %q status=%d body=%s", invalid, response.Code, response.Body.String())
+		}
+	}
+
+	b, ct = formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": "910"}, "", nil)
+	response = f.do(t, http.MethodPost, "/vehicles/"+v.ID.String(), b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("edit status=%d body=%s", response.Code, response.Body.String())
+	}
+	updated, _ := f.store.GetVehicle(t.Context(), v.ID)
+	if updated.CurrentOdometer == nil || *updated.CurrentOdometer != 910 || updated.LatestOdometer == nil || *updated.LatestOdometer != 910 {
+		t.Fatalf("updated vehicle=%+v", updated)
+	}
+}
+
+func TestVehicleEditShowsEffectiveRecordMileage(t *testing.T) {
+	f := setup(t)
+	v := createVehicle(t, f)
+	types, _ := f.store.ListServiceTypes(t.Context())
+	odometer := int64(45123)
+	_, _ = f.store.CreateRecord(t.Context(), model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC), OdometerMiles: &odometer, CreatedAt: time.Now()}, nil)
+
+	response := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/edit", nil, "")
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `name="current_odometer"`) || !strings.Contains(body, `value="45123"`) {
+		t.Fatalf("edit form did not show effective mileage: %d %s", response.Code, body)
+	}
+}
+
+func TestNewReminderSnapshotsVehicleMileageAndIsNotImmediatelyOverdue(t *testing.T) {
+	f := setup(t)
+	b, ct := formBody(t, map[string]string{"nickname": "New car", "current_odometer": "1200"}, "", nil)
+	response := f.do(t, http.MethodPost, "/vehicles", b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create vehicle: %d %s", response.Code, response.Body.String())
+	}
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	types, _ := f.store.ListServiceTypes(t.Context())
+	values := url.Values{"service_type_id": {types[0].ID.String()}, "months": {"6"}, "miles": {"5000"}, "enabled": {"true"}}
+	response = f.do(t, http.MethodPost, "/vehicles/"+v.ID.String()+"/reminders", strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create reminder: %d %s", response.Code, response.Body.String())
+	}
+	rows, _ := f.store.ListReminders(t.Context(), &v.ID, true)
+	if len(rows) != 1 || rows[0].StartingOdometer == nil || *rows[0].StartingOdometer != 1200 || !rows[0].CreatedAt.Equal(f.s.now()) {
+		t.Fatalf("reminder snapshot=%+v", rows)
+	}
+	dashboard := f.do(t, http.MethodGet, "/", nil, "")
+	if strings.Contains(dashboard.Body.String(), "OVERDUE") || !strings.Contains(dashboard.Body.String(), "Nothing needs attention right now") {
+		t.Fatalf("new reminder was immediately due: %s", dashboard.Body.String())
+	}
+}
+
 func createAttachment(t *testing.T, f fixture) (model.Record, model.Attachment) {
 	t.Helper()
 	v := createVehicle(t, f)

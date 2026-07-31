@@ -39,3 +39,39 @@ func TestInitialMigrationDeclaresForeignKeyIndexes(t *testing.T) {
 		}
 	}
 }
+
+func TestReminderBaselineMigrationColumnsConstraintsAndBackfill(t *testing.T) {
+	up, err := fs.ReadFile(FS, "002_reminder_baselines.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"add column current_odometer_miles bigint",
+		"vehicles_current_odometer_nonnegative",
+		"current_odometer_miles is null or current_odometer_miles >= 0",
+		"select max(r.odometer_miles)",
+		"add column starting_odometer_miles bigint",
+		"reminders_starting_odometer_nonnegative",
+		"starting_odometer_miles is null or starting_odometer_miles >= 0",
+		"set starting_odometer_miles = v.current_odometer_miles",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("reminder baseline migration missing %q", declaration)
+		}
+	}
+	down, err := fs.ReadFile(FS, "002_reminder_baselines.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '002_reminder_baselines'",
+		"drop column if exists starting_odometer_miles",
+		"drop column if exists current_odometer_miles",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("reminder baseline down migration missing %q", declaration)
+		}
+	}
+}

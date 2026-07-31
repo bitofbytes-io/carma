@@ -132,6 +132,7 @@ func (m *Memory) ListVehicles(_ context.Context, archived bool) ([]model.Vehicle
 	return out, nil
 }
 func (m *Memory) enrichVehicle(v model.Vehicle) model.Vehicle {
+	v.LatestOdometer = cloneInt64(v.CurrentOdometer)
 	for _, r := range m.records {
 		if r.VehicleID != v.ID {
 			continue
@@ -169,7 +170,7 @@ func (m *Memory) CreateVehicle(_ context.Context, v model.Vehicle) (model.Vehicl
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.vehicles[v.ID] = v
-	return v, nil
+	return m.enrichVehicle(v), nil
 }
 func (m *Memory) UpdateVehicle(_ context.Context, v model.Vehicle) (model.Vehicle, error) {
 	m.mu.Lock()
@@ -181,7 +182,16 @@ func (m *Memory) UpdateVehicle(_ context.Context, v model.Vehicle) (model.Vehicl
 	v.CreatedAt = old.CreatedAt
 	v.ArchivedAt = old.ArchivedAt
 	m.vehicles[v.ID] = v
-	return v, nil
+	if v.CurrentOdometer != nil {
+		effectiveOdometer := m.enrichVehicle(v).LatestOdometer
+		for id, reminder := range m.reminders {
+			if reminder.VehicleID == v.ID && reminder.StartingOdometer == nil {
+				reminder.StartingOdometer = cloneInt64(effectiveOdometer)
+				m.reminders[id] = reminder
+			}
+		}
+	}
+	return m.enrichVehicle(v), nil
 }
 func (m *Memory) ArchiveVehicle(_ context.Context, id uuid.UUID) error {
 	m.mu.Lock()
@@ -448,6 +458,7 @@ func (m *Memory) ListReminders(_ context.Context, vehicleID *uuid.UUID, includeD
 		r := raw
 		r.VehicleName = v.Nickname
 		r.ServiceTypeName = m.types[r.ServiceTypeID].Name
+		r.LatestOdometer = cloneInt64(v.CurrentOdometer)
 		for _, rec := range m.records {
 			if rec.VehicleID == r.VehicleID {
 				if rec.OdometerMiles != nil && (r.LatestOdometer == nil || *rec.OdometerMiles > *r.LatestOdometer) {
@@ -483,12 +494,21 @@ func (m *Memory) UpsertReminder(_ context.Context, r model.Reminder) (model.Remi
 		if x.VehicleID == r.VehicleID && x.ServiceTypeID == r.ServiceTypeID {
 			r.ID = id
 			r.CreatedAt = x.CreatedAt
+			r.StartingOdometer = cloneInt64(x.StartingOdometer)
 			m.reminders[id] = r
 			return r, nil
 		}
 	}
 	m.reminders[r.ID] = r
 	return r, nil
+}
+
+func cloneInt64(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	x := *v
+	return &x
 }
 func (m *Memory) DeleteReminder(_ context.Context, id uuid.UUID) error {
 	m.mu.Lock()

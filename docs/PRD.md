@@ -44,7 +44,7 @@ filters, inspections) doesn't get forgotten.
 #### Vehicles
 
 - Add a vehicle with: nickname (required, e.g. "Dan's Outback"), year, make, model,
-  VIN, license plate, optional photo, notes.
+  VIN, license plate, optional current odometer, optional photo, notes.
 - Edit any field later.
 - Archive (soft-delete) a vehicle when sold; archived vehicles are hidden from the
   dashboard and reminders but their history remains viewable and exportable.
@@ -84,13 +84,18 @@ filters, inspections) doesn't get forgotten.
 - A reminder is defined per vehicle + service type with an interval in **months**,
   **miles**, or both (whichever comes first). Example: oil change every 6 months or
   5,000 miles.
-- Due computation (no stored state to maintain):
-  - *Baseline:* the most recent record on that vehicle with that service type. If
-    none exists, the reminder shows "no history yet" and is considered due.
+- Due computation:
+  - *First cycle:* when no matching service record exists, time starts at the
+    reminder's creation date and mileage starts at a snapshot of the vehicle's
+    effective odometer when the reminder is created. An unknown starting mileage
+    leaves only the mileage dimension unevaluable; a configured time interval still
+    evaluates normally.
+  - *Later cycles:* the most recent record on that vehicle with that service type
+    replaces both first-cycle baselines.
   - *Time:* due when `baseline date + interval_months <= today`.
   - *Mileage:* due when `latest known odometer on the vehicle >= baseline odometer +
-    interval_miles`. Latest known odometer is the max reading across the vehicle's
-    records.
+    interval_miles`. Latest known odometer is the greater of the manually entered
+    current odometer and the max reading across the vehicle's records.
   - "Due soon" threshold: within 30 days or 500 miles of due.
 - Dashboard shows an Overdue / Due soon panel across all vehicles; each vehicle page
   shows its own reminders with status.
@@ -128,11 +133,11 @@ All timestamps `timestamptz`, money in integer cents, soft deletes via `archived
 |---|---|
 | `users` | id, oauth_provider, oauth_subject, email, display_name, created_at |
 | `user_sessions` | id, user_id, token_hash, expires_at, created_at |
-| `vehicles` | id, nickname, year, make, model, vin, license_plate, photo_key, notes, archived_at, created_at |
+| `vehicles` | id, nickname, year, make, model, vin, license_plate, current_odometer_miles, photo_key, notes, archived_at, created_at |
 | `service_types` | id, name (unique), is_seeded, created_at |
 | `records` | id, vehicle_id FK, service_type_id FK, occurred_on (date), odometer_miles, cost_cents, vendor, notes, created_by FK users, created_at, updated_at |
 | `attachments` | id, record_id FK, original_filename, content_type, byte_size, storage_key (unique), created_at |
-| `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, enabled, extra_emails (stretch), created_at; unique (vehicle_id, service_type_id) |
+| `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, enabled, extra_emails (stretch), created_at; unique (vehicle_id, service_type_id) |
 | `reminder_notifications` (stretch) | id, reminder_id FK, sent_at, recipients |
 
 Notes:

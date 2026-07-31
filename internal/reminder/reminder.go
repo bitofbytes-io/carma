@@ -28,14 +28,14 @@ func Evaluate(r model.Reminder, today time.Time) Result {
 		res.Status = Disabled
 		return res
 	}
-	if r.Baseline == nil {
-		res.Status = Due
-		res.Detail = "No history yet"
-		return res
-	}
 	due, soon := false, false
 	if r.IntervalMonths != nil {
-		d := r.Baseline.OccurredOn.AddDate(0, *r.IntervalMonths, 0)
+		year, month, date := r.CreatedAt.Date()
+		baselineDate := time.Date(year, month, date, 0, 0, 0, 0, r.CreatedAt.Location())
+		if r.Baseline != nil {
+			baselineDate = r.Baseline.OccurredOn
+		}
+		d := baselineDate.AddDate(0, *r.IntervalMonths, 0)
 		res.DueDate = &d
 		if !today.Before(d) {
 			due = true
@@ -43,8 +43,20 @@ func Evaluate(r model.Reminder, today time.Time) Result {
 			soon = true
 		}
 	}
-	if r.IntervalMiles != nil && r.Baseline.OdometerMiles != nil {
-		d := *r.Baseline.OdometerMiles + *r.IntervalMiles
+	if r.IntervalMiles != nil {
+		baselineOdometer := r.StartingOdometer
+		if r.Baseline != nil {
+			baselineOdometer = r.Baseline.OdometerMiles
+		}
+		if baselineOdometer == nil {
+			if due {
+				res.Status = Due
+			} else if soon {
+				res.Status = Soon
+			}
+			return res
+		}
+		d := *baselineOdometer + *r.IntervalMiles
 		res.DueMileage = &d
 		if r.LatestOdometer != nil {
 			if *r.LatestOdometer >= d {

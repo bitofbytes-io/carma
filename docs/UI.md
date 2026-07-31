@@ -40,7 +40,7 @@ flowchart TD
   G --> H{Garage empty?}
   B -->|yes| H
   H -->|yes| I[Empty state: Add your first vehicle]
-  I --> J[Vehicle form: nickname, year/make/model, VIN, plate, photo]
+  I --> J[Vehicle form: nickname, year/make/model, VIN, plate, current odometer, photo]
   J --> K[Garage dashboard with vehicle card]
   H -->|no| K
 ```
@@ -64,7 +64,8 @@ flowchart TD
 ```mermaid
 flowchart TD
   A[Reminders settings: oil change every 6 mo / 5000 mi] --> B[Reminder enabled]
-  B --> C{Daily evaluation and page render}
+  B --> S[Snapshot creation date and current odometer for the first cycle]
+  S --> C{Daily evaluation and page render}
   C -->|"within 30 days / 500 miles"| D[Due soon - amber on dashboard]
   C -->|"past date or mileage threshold"| E[Overdue - red on dashboard]
   E -.->|stretch| F{Email sent in last 30 days?}
