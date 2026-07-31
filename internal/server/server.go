@@ -222,7 +222,6 @@ func loginErrorMessage(code string) string {
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, e := r.Cookie(middleware.CookieName); e == nil {
 		if e = s.auth.Logout(r.Context(), c.Value); e != nil {
-			middleware.ClearSession(w, s.cfg.SecureCookies())
 			s.fail(w, e)
 			return
 		}
@@ -746,12 +745,15 @@ func (s *Server) deleteAttachment(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, e)
 		return
 	}
-	key, e := s.store.DeleteAttachment(r.Context(), a.ID)
+	if e = s.assets.Delete(r.Context(), a.StorageKey); e != nil {
+		s.fail(w, e)
+		return
+	}
+	_, e = s.store.DeleteAttachment(r.Context(), a.ID)
 	if e != nil {
 		s.notFound(w, e)
 		return
 	}
-	_ = s.assets.Delete(r.Context(), key)
 	http.Redirect(w, r, "/records/"+rec.ID.String(), 303)
 }
 func (s *Server) findAttachment(r *http.Request) (model.Record, model.Attachment, error) {

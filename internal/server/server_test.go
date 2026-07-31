@@ -45,6 +45,30 @@ type deleteSessionErrorStore struct {
 
 func (s deleteSessionErrorStore) DeleteSession(context.Context, uuid.UUID) error { return s.err }
 
+type recordingAssetStore struct {
+	assets.Store
+	events    *[]string
+	deleteErr error
+}
+
+func (s recordingAssetStore) Delete(ctx context.Context, key string) error {
+	*s.events = append(*s.events, "asset")
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	return s.Store.Delete(ctx, key)
+}
+
+type recordingAttachmentStore struct {
+	repository.Store
+	events *[]string
+}
+
+func (s recordingAttachmentStore) DeleteAttachment(ctx context.Context, id uuid.UUID) (string, error) {
+	*s.events = append(*s.events, "metadata")
+	return s.Store.DeleteAttachment(ctx, id)
+}
+
 func (f fakeGoogle) AuthURL(state string) string {
 	return "https://accounts.example/auth?state=" + state
 }
@@ -86,7 +110,7 @@ func (f fixture) do(t *testing.T, method, path string, body io.Reader, contentTy
 	return w
 }
 
-func TestLogoutClearsCookieWhenSessionRevocationFails(t *testing.T) {
+func TestLogoutRetainsCookieWhenSessionRevocationFails(t *testing.T) {
 	f := setup(t)
 	revocationErr := errors.New("session revocation failed")
 	f.s.auth = auth.NewService(deleteSessionErrorStore{Store: f.store, err: revocationErr}, f.s.cfg.SessionTTL)
@@ -97,9 +121,8 @@ func TestLogoutClearsCookieWhenSessionRevocationFails(t *testing.T) {
 	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
 		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 	}
-	cookies := response.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != middleware.CookieName || cookies[0].Value != "" || cookies[0].MaxAge >= 0 {
-		t.Fatalf("revocation failure did not clear browser cookie: %+v", cookies)
+	if cookies := response.Header().Values("Set-Cookie"); len(cookies) != 0 {
+		t.Fatalf("revocation failure changed browser cookie: %v", cookies)
 	}
 	if !strings.Contains(response.Body.String(), "Something went wrong") {
 		t.Fatalf("revocation failure presented as success: %q", response.Body.String())
@@ -157,6 +180,96 @@ func createVehicle(t *testing.T, f fixture) model.Vehicle {
 	}
 	return vs[0]
 }
+
+func createAttachment(t *testing.T, f fixture) (model.Record, model.Attachment) {
+	t.Helper()
+	v := createVehicle(t, f)
+	types, err := f.store.ListServiceTypes(t.Context())
+	if err != nil || len(types) == 0 {
+		t.Fatalf("service types=%v err=%v", types, err)
+	}
+	b, ct := formBody(t, map[string]string{
+		"occurred_on":     "2026-07-30",
+		"service_type_id": types[0].ID.String(),
+		"odometer":        "62410",
+		"cost":            "89.00",
+		"vendor":          "Test Shop",
+	}, "receipt.pdf", []byte("%PDF-1.7\nfixture"))
+	response := f.do(t, http.MethodPost, "/vehicles/"+v.ID.String()+"/records", b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create record: %d %s", response.Code, response.Body.String())
+	}
+	records, err := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &v.ID})
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records=%v err=%v", records, err)
+	}
+	record, attachments, err := f.store.GetRecord(t.Context(), records[0].ID)
+	if err != nil || len(attachments) != 1 {
+		t.Fatalf("record=%v attachments=%v err=%v", record, attachments, err)
+	}
+	return record, attachments[0]
+}
+
+func TestDeleteAttachmentRetainsMetadataWhenAssetDeleteFails(t *testing.T) {
+	f := setup(t)
+	_, attachment := createAttachment(t, f)
+	events := []string{}
+	f.s.assets = recordingAssetStore{Store: f.s.assets, events: &events, deleteErr: errors.New("NFS unavailable")}
+	f.s.store = recordingAttachmentStore{Store: f.store, events: &events}
+	f.router = f.s.Router()
+
+	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
+
+	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	if !strings.Contains(response.Body.String(), "Something went wrong") {
+		t.Fatalf("asset deletion failure presented as success: %q", response.Body.String())
+	}
+	if len(events) != 1 || events[0] != "asset" {
+		t.Fatalf("delete events=%v, want asset only", events)
+	}
+	_, stored, err := f.store.GetAttachment(t.Context(), attachment.ID)
+	if err != nil || stored.StorageKey != attachment.StorageKey {
+		t.Fatalf("attachment metadata was not retained: attachment=%+v err=%v", stored, err)
+	}
+	object, err := f.s.assets.Open(t.Context(), attachment.StorageKey)
+	if err != nil {
+		t.Fatalf("attachment asset was not retained: %v", err)
+	}
+	_ = object.Close()
+}
+
+func TestDeleteAttachmentRemovesAssetBeforeMetadata(t *testing.T) {
+	f := setup(t)
+	record, attachment := createAttachment(t, f)
+	events := []string{}
+	f.s.assets = recordingAssetStore{Store: f.s.assets, events: &events}
+	f.s.store = recordingAttachmentStore{Store: f.store, events: &events}
+	f.router = f.s.Router()
+
+	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
+
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/records/"+record.ID.String() {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	if len(events) != 2 || events[0] != "asset" || events[1] != "metadata" {
+		t.Fatalf("delete events=%v, want [asset metadata]", events)
+	}
+	if _, _, err := f.store.GetAttachment(t.Context(), attachment.ID); err != repository.ErrNotFound {
+		t.Fatalf("attachment metadata remains: %v", err)
+	}
+	if object, err := f.s.assets.Open(t.Context(), attachment.StorageKey); err == nil {
+		_ = object.Close()
+		t.Fatalf("attachment asset remains at %q", attachment.StorageKey)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checking removed attachment asset: %v", err)
+	}
+	if err := f.s.assets.Delete(t.Context(), attachment.StorageKey); err != nil {
+		t.Fatalf("retrying asset deletion: %v", err)
+	}
+}
+
 func TestRecordWithPDFRangeAndFilteredCSV(t *testing.T) {
 	f := setup(t)
 	v := createVehicle(t, f)
