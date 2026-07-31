@@ -5,8 +5,22 @@ A self-hosted vehicle maintenance tracker for the household, planned for
 car in the garage, attach receipts, get reminded when routine service is due, and
 export the history when it's time to sell.
 
-**Status: planning.** This repo currently contains the project plan and design
-docs only - no application code yet.
+**Status: MVP implemented.** The repository contains the Go/HTMX application,
+PostgreSQL migrations, local memory preview, filesystem-backed receipt storage,
+container build, and CI workflow described by the project plan.
+
+## Local development
+
+Requirements: Go 1.26.x. Run `make run`, open `http://localhost:4700`, and use the
+clearly labeled local developer login. This mode uses an in-memory store and writes
+uploads below `.local/carma-assets`; configuration rejects development auth when
+`APP_ENV=production`.
+
+For PostgreSQL, run `make db-up`, `make migrate`, then `make run-postgres`.
+Production configuration uses Google OIDC and requires a verified email to match
+`AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`.
+
+Validation commands are `make test`, `make lint`, and `make build`.
 
 ## What it will do
 

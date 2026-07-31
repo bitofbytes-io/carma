@@ -1,0 +1,96 @@
+name: CI build -> push -> trigger deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: carma
+          POSTGRES_PASSWORD: carma
+          POSTGRES_DB: carma_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U carma -d carma_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgres://carma:carma@127.0.0.1:5432/carma_test?sslmode=disable
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make test lint build
+  build-and-trigger:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    environment: crystal1
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_REG: ${{ vars.IMAGE_REG }}
+      IMAGE_REPO: ${{ vars.IMAGE_REPO }}
+      MANAGER_HOST: ${{ vars.MANAGER_HOST }}
+      MANAGER_REPO_PATH: ${{ vars.MANAGER_REPO_PATH }}
+      PLATFORMS: linux/arm64/v8
+    steps:
+      - uses: actions/checkout@v6
+        with: {fetch-depth: 0}
+      - id: meta
+        run: echo "TAG=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ vars.TS_AUDIENCE }}
+          tags: tag:ci
+          ping: ${{ env.MANAGER_HOST }}
+      - name: Verify registry route
+        run: |
+          set -euo pipefail
+          registry_host="${IMAGE_REG%%:*}"
+          registry_ip="$(getent ahostsv4 "${registry_host}" | awk '{print $1; exit}')"
+          if [[ ! "${registry_ip}" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            echo "Registry did not resolve to a Tailscale address" >&2
+            exit 1
+          fi
+          status="$(curl -sS -o /dev/null -w '%{http_code}' "https://${IMAGE_REG}/v2/")"
+          [[ "${status}" == 200 || "${status}" == 401 ]]
+      - uses: docker/setup-buildx-action@v4
+        with:
+          driver-opts: network=host
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.IMAGE_REG }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ env.IMAGE_REG }}
+          TAG: ${{ steps.meta.outputs.TAG }}
+        run: make docker-buildx
+      - name: Install deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets.LOCAL_REPO_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.LOCAL_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Trigger deployment
+        run: |
+          : "${MANAGER_HOST:?missing MANAGER_HOST}"
+          : "${MANAGER_REPO_PATH:=/srv/git/carma-ci.git}"
+          git remote add local "ssh://git@${MANAGER_HOST}/${MANAGER_REPO_PATH}"
+          git push --force local HEAD:refs/heads/main

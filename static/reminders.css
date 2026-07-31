@@ -1,0 +1,6 @@
+.reminder-update { display: contents; }
+.reminder-row { grid-template-columns: 1.5fr 1fr 1fr .8fr .5fr auto auto; }
+@media (max-width: 760px) {
+  .reminder-update { display: contents; }
+  .reminder-row { grid-template-columns: 1fr 1fr; }
+}
