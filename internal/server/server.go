@@ -290,6 +290,9 @@ func (s *Server) editVehicle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.Editing = true
+	// Show the effective latest mileage in the editable field, including mileage
+	// known only from historical records on vehicles created before this field.
+	v.CurrentOdometer = v.LatestOdometer
 	d.Vehicle = v
 	s.render(w, http.StatusOK, "vehicle-form", d)
 }
@@ -373,6 +376,13 @@ func vehicleFromForm(r *http.Request) (model.Vehicle, string) {
 			return v, "Year is invalid."
 		}
 		v.Year = &n
+	}
+	if raw := strings.TrimSpace(r.FormValue("current_odometer")); raw != "" {
+		n, e := strconv.ParseInt(raw, 10, 64)
+		if e != nil || n < 0 {
+			return v, "Current odometer must be a nonnegative whole number."
+		}
+		v.CurrentOdometer = &n
 	}
 	return v, ""
 }
@@ -838,7 +848,7 @@ func (s *Server) upsertReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	rm := model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: stid, IntervalMonths: months, IntervalMiles: miles, Enabled: r.FormValue("enabled") == "true", CreatedAt: now, UpdatedAt: now}
+	rm := model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: stid, IntervalMonths: months, IntervalMiles: miles, StartingOdometer: v.LatestOdometer, Enabled: r.FormValue("enabled") == "true", CreatedAt: now, UpdatedAt: now}
 	if _, e = s.store.UpsertReminder(r.Context(), rm); e != nil {
 		s.fail(w, e)
 		return

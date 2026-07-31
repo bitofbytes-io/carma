@@ -22,6 +22,7 @@ type Vehicle struct {
 	Make, Model, VIN, LicensePlate, PhotoKey, Notes string
 	ArchivedAt                                      *time.Time
 	CreatedAt, UpdatedAt                            time.Time
+	CurrentOdometer                                 *int64
 	LatestOdometer                                  *int64
 	LastRecord                                      *Record
 }
@@ -51,6 +52,8 @@ type Reminder struct {
 	VehicleName, ServiceTypeName string
 	IntervalMonths               *int
 	IntervalMiles                *int64
+	StartingOdometer             *int64
+	StartingOdometerPending      bool
 	Enabled                      bool
 	CreatedAt, UpdatedAt         time.Time
 	Baseline                     *Record
