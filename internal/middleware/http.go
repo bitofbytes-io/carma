@@ -25,7 +25,11 @@ func RequireAuth(s *auth.Service, secure bool) func(http.Handler) http.Handler {
 				return
 			}
 			u, e := s.Validate(r.Context(), c.Value)
-			if e != nil || u == nil {
+			if e != nil {
+				http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if u == nil {
 				ClearSession(w, secure)
 				redirect(w, r)
 				return

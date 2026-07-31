@@ -57,13 +57,34 @@ func (m *Memory) FindUserByEmail(_ context.Context, e string) (*model.User, erro
 func (m *Memory) UpsertUser(_ context.Context, u model.User) (model.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var identityID, emailID uuid.UUID
 	for id, x := range m.users {
-		if (x.OAuthProvider == u.OAuthProvider && x.OAuthSubject == u.OAuthSubject) || strings.EqualFold(x.Email, u.Email) {
-			u.ID = id
-			u.CreatedAt = x.CreatedAt
-			m.users[id] = u
-			return u, nil
+		if x.OAuthProvider == u.OAuthProvider && x.OAuthSubject == u.OAuthSubject {
+			if identityID != uuid.Nil && identityID != id {
+				return u, ErrConflict
+			}
+			identityID = id
 		}
+		if strings.EqualFold(x.Email, u.Email) {
+			if emailID != uuid.Nil && emailID != id {
+				return u, ErrConflict
+			}
+			emailID = id
+		}
+	}
+	if identityID != uuid.Nil && emailID != uuid.Nil && identityID != emailID {
+		return u, ErrConflict
+	}
+	persistedID := identityID
+	if persistedID == uuid.Nil {
+		persistedID = emailID
+	}
+	if persistedID != uuid.Nil {
+		existing := m.users[persistedID]
+		u.ID = persistedID
+		u.CreatedAt = existing.CreatedAt
+		m.users[persistedID] = u
+		return u, nil
 	}
 	m.users[u.ID] = u
 	return u, nil
@@ -241,12 +262,13 @@ func (m *Memory) ListRecords(_ context.Context, q model.RecordQuery) ([]model.Re
 		}
 		out = append(out, r)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return compareRecords(out[i], out[j], q.Sort, q.Desc) })
+	field, descending := normalizedRecordSort(q.Sort, q.Desc)
+	sort.SliceStable(out, func(i, j int) bool { return compareRecords(out[i], out[j], field, descending) })
 	return out, nil
 }
 func compareRecords(a, b model.Record, field string, desc bool) bool {
 	cmp := 0
-	primaryDesc := desc || field == ""
+	primaryDesc := desc
 	switch field {
 	case "mileage":
 		if a.OdometerMiles == nil || b.OdometerMiles == nil {
@@ -360,6 +382,10 @@ func (m *Memory) UpdateRecord(_ context.Context, r model.Record) (model.Record, 
 		return r, ErrNotFound
 	}
 	if _, ok := m.types[r.ServiceTypeID]; !ok {
+		return r, ErrNotFound
+	}
+	r.VehicleID = old.VehicleID
+	if _, ok := m.vehicles[r.VehicleID]; !ok {
 		return r, ErrNotFound
 	}
 	r.CreatedAt = old.CreatedAt

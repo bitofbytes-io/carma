@@ -6,6 +6,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/model"
 	"io"
 	"strconv"
+	"unicode"
 )
 
 func CSV(w io.Writer, records []model.Record) error {
@@ -30,12 +31,16 @@ func CSV(w io.Writer, records []model.Record) error {
 }
 
 func spreadsheetText(value string) string {
-	if value == "" {
-		return value
-	}
-	switch value[0] {
-	case '=', '+', '-', '@':
-		return "'" + value
+	for _, character := range value {
+		if unicode.IsSpace(character) {
+			continue
+		}
+		switch character {
+		case '=', '+', '-', '@':
+			return "'" + value
+		default:
+			return value
+		}
 	}
 	return value
 }

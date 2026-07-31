@@ -27,11 +27,15 @@ func TestCSVParsesAndMatchesRows(t *testing.T) {
 
 func TestCSVNeutralizesSpreadsheetFormulaText(t *testing.T) {
 	var records []model.Record
-	for _, prefix := range []string{"=", "+", "-", "@"} {
-		value := prefix + "danger"
-		records = append(records, model.Record{VehicleName: value, OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: value, Vendor: value, Notes: value, CreatedByName: value})
+	var hazardous []string
+	for _, whitespace := range []string{"", " ", "\t", "\r", "\n", " \t\r\n", "\u00a0"} {
+		for _, prefix := range []string{"=", "+", "-", "@"} {
+			value := whitespace + prefix + "danger"
+			hazardous = append(hazardous, value)
+			records = append(records, model.Record{VehicleName: value, OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: value, Vendor: value, Notes: value, CreatedByName: value})
+		}
 	}
-	records = append(records, model.Record{VehicleName: "Outback", OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Oil change", Vendor: "DIY", Notes: "ordinary text", CreatedByName: "Daniel"})
+	records = append(records, model.Record{VehicleName: " Outback", OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "\tOil change", Vendor: "\rDIY", Notes: "\nordinary text", CreatedByName: "\u00a0Daniel"})
 	var b bytes.Buffer
 	if err := CSV(&b, records); err != nil {
 		t.Fatal(err)
@@ -40,16 +44,17 @@ func TestCSVNeutralizesSpreadsheetFormulaText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, prefix := range []string{"=", "+", "-", "@"} {
+	for i, value := range hazardous {
 		for _, column := range []int{0, 2, 5, 6, 8} {
-			want := "'" + prefix + "danger"
+			// encoding/csv intentionally removes CR immediately before LF while reading.
+			want := "'" + strings.ReplaceAll(value, "\r\n", "\n")
 			if rows[i+1][column] != want {
 				t.Fatalf("row %d column %d got %q want %q", i+1, column, rows[i+1][column], want)
 			}
 		}
 	}
 	normal := rows[len(rows)-1]
-	want := []string{"Outback", "Oil change", "DIY", "ordinary text", "Daniel"}
+	want := []string{" Outback", "\tOil change", "\rDIY", "\nordinary text", "\u00a0Daniel"}
 	for i, column := range []int{0, 2, 5, 6, 8} {
 		if normal[column] != want[i] {
 			t.Fatalf("normal column %d changed to %q", column, normal[column])

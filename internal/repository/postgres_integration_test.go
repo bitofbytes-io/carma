@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"io/fs"
 	"net/url"
 	"os"
 	"strings"
@@ -44,14 +45,102 @@ func TestPostgresProductionPaths(t *testing.T) {
 		}
 	})
 	scoped := withSearchPath(t, dsn, schema)
-	conn, err := pgx.Connect(ctx, scoped)
+	connections := make([]*pgx.Conn, 2)
+	for i := range connections {
+		connections[i], err = pgx.Connect(ctx, scoped)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	startMigrations := make(chan struct{})
+	migrationResults := make(chan error, len(connections))
+	for _, connection := range connections {
+		go func(conn *pgx.Conn) {
+			<-startMigrations
+			migrationResults <- database.Migrate(ctx, conn, migrations.FS)
+		}(connection)
+	}
+	close(startMigrations)
+	for range connections {
+		if err = <-migrationResults; err != nil {
+			t.Fatalf("concurrent embedded migration: %v", err)
+		}
+	}
+	migrationFiles, err := fs.Glob(migrations.FS, "*.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = database.Migrate(ctx, conn, migrations.FS); err != nil {
-		t.Fatalf("apply embedded migrations: %v", err)
+	var appliedMigrations int
+	if err = connections[0].QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&appliedMigrations); err != nil || appliedMigrations != len(migrationFiles) {
+		t.Fatalf("applied migrations=%d want=%d err=%v", appliedMigrations, len(migrationFiles), err)
 	}
-	_ = conn.Close(ctx)
+	for _, connection := range connections {
+		if err = connection.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	concurrentStore, err := repository.NewPostgres(ctx, withPoolMaxConns(t, scoped, "4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrentAuth := auth.NewService(concurrentStore, 90*24*time.Hour)
+	type loginResult struct {
+		user model.User
+		err  error
+	}
+	const loginRunners = 8
+	startLogins := make(chan struct{})
+	loginResults := make(chan loginResult, loginRunners)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	concurrentClaims := auth.Claims{Subject: "concurrent-user", Email: "concurrent@example.com", Name: "Concurrent User", EmailVerified: true}
+	for i := 0; i < loginRunners; i++ {
+		go func() {
+			<-startLogins
+			user, _, loginErr := concurrentAuth.Login(ctx, concurrentClaims)
+			loginResults <- loginResult{user: user, err: loginErr}
+		}()
+	}
+	close(startLogins)
+	var persistedUserID uuid.UUID
+	for i := 0; i < loginRunners; i++ {
+		result := <-loginResults
+		if result.err != nil {
+			t.Fatalf("concurrent first login: %v", result.err)
+		}
+		if persistedUserID == uuid.Nil {
+			persistedUserID = result.user.ID
+		} else if result.user.ID != persistedUserID {
+			t.Fatalf("logins returned different persisted IDs: %s and %s", persistedUserID, result.user.ID)
+		}
+	}
+	byIdentity, err := concurrentStore.FindUserByOAuth(ctx, "google", concurrentClaims.Subject)
+	if err != nil || byIdentity == nil || byIdentity.ID != persistedUserID {
+		t.Fatalf("concurrent identity lookup: user=%+v err=%v", byIdentity, err)
+	}
+	byEmail, err := concurrentStore.FindUserByEmail(ctx, concurrentClaims.Email)
+	if err != nil || byEmail == nil || byEmail.ID != persistedUserID {
+		t.Fatalf("concurrent email lookup: user=%+v err=%v", byEmail, err)
+	}
+
+	legacy, _, err := concurrentAuth.Login(ctx, auth.Claims{Subject: "legacy-subject", Email: "linked@example.com", Name: "Legacy Name", EmailVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, _, err := concurrentAuth.Login(ctx, auth.Claims{Subject: "linked-subject", Email: "LINKED@example.com", Name: "Linked Name", EmailVerified: true})
+	if err != nil || linked.ID != legacy.ID || linked.CreatedAt != legacy.CreatedAt {
+		t.Fatalf("email-linked login: legacy=%+v linked=%+v err=%v", legacy, linked, err)
+	}
+	oldIdentity, err := concurrentStore.FindUserByOAuth(ctx, "google", "legacy-subject")
+	if err != nil || oldIdentity != nil {
+		t.Fatalf("legacy identity still linked: user=%+v err=%v", oldIdentity, err)
+	}
+	linkedIdentity, err := concurrentStore.FindUserByOAuth(ctx, "google", "linked-subject")
+	if err != nil || linkedIdentity == nil || linkedIdentity.ID != legacy.ID || linkedIdentity.DisplayName != "Linked Name" {
+		t.Fatalf("new identity link: user=%+v err=%v", linkedIdentity, err)
+	}
+	concurrentStore.Close()
+
 	store, err := repository.NewPostgres(ctx, withPoolMaxConns(t, scoped, "1"))
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +157,6 @@ func TestPostgresProductionPaths(t *testing.T) {
 		t.Fatalf("session persistence failed: user=%v err=%v", validated, err)
 	}
 
-	now := time.Now().UTC().Truncate(time.Microsecond)
 	vehicle, err := store.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "PG Outback", CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +172,7 @@ func TestPostgresProductionPaths(t *testing.T) {
 	r2 := r1
 	r2.ID = uuid.MustParse("00000000-0000-0000-0000-000000000002")
 	r2.Vendor = "Beta"
+	r2.OccurredOn = date.AddDate(0, 0, 1)
 	r2.OdometerMiles = &miles
 	r2.CreatedAt = now.Add(time.Second)
 	r2.UpdatedAt = r2.CreatedAt
@@ -110,6 +199,27 @@ func TestPostgresProductionPaths(t *testing.T) {
 	all, err := store.ListRecords(ctx, model.RecordQuery{VehicleID: &vehicle.ID, Sort: "mileage"})
 	if err != nil || len(all) != 2 || all[1].ID != r1.ID {
 		t.Fatalf("NULLS LAST order: %+v %v", all, err)
+	}
+	for _, query := range []model.RecordQuery{
+		{VehicleID: &vehicle.ID, Sort: "unrecognized"},
+		{VehicleID: &vehicle.ID, Sort: "unrecognized", Desc: true},
+	} {
+		all, err = store.ListRecords(ctx, query)
+		if err != nil || len(all) != 2 || all[0].ID != r2.ID {
+			t.Fatalf("unknown sort did not normalize to date descending: %+v %v", all, err)
+		}
+	}
+	for _, query := range []struct {
+		value model.RecordQuery
+		first uuid.UUID
+	}{
+		{value: model.RecordQuery{VehicleID: &vehicle.ID, Sort: "date"}, first: r1.ID},
+		{value: model.RecordQuery{VehicleID: &vehicle.ID, Sort: "date", Desc: true}, first: r2.ID},
+	} {
+		all, err = store.ListRecords(ctx, query.value)
+		if err != nil || len(all) != 2 || all[0].ID != query.first {
+			t.Fatalf("date sort first=%s rows=%+v err=%v", query.first, all, err)
+		}
 	}
 	_, attachments, err := store.GetRecord(ctx, r2.ID)
 	if err != nil || len(attachments) != 1 {

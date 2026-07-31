@@ -17,6 +17,14 @@ import (
 	"github.com/bitofbytes-io/carma/internal/server"
 )
 
+const (
+	serverReadHeaderTimeout = 10 * time.Second
+	// serverUploadTimeout allows the configured 128 MiB multipart request budget
+	// to arrive over a slow mobile connection without leaving requests unbounded.
+	serverUploadTimeout = 5 * time.Minute
+	serverIdleTimeout   = 2 * time.Minute
+)
+
 func main() {
 	if e := run(); e != nil {
 		slog.Error("carma stopped", "error", e)
@@ -56,7 +64,7 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	httpServer := &http.Server{Addr: ":" + cfg.Port, Handler: app.Router(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
+	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
 	go func() {
 		slog.Info("carma listening", "port", cfg.Port, "store", cfg.DataStore, "auth", cfg.AuthMode)
@@ -73,4 +81,15 @@ func run() error {
 		return httpServer.Shutdown(shutdown)
 	}
 	return nil
+}
+
+func newHTTPServer(port string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + port,
+		Handler:           handler,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverUploadTimeout,
+		WriteTimeout:      serverUploadTimeout,
+		IdleTimeout:       serverIdleTimeout,
+	}
 }

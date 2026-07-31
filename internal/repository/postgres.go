@@ -29,6 +29,7 @@ func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 func (p *Postgres) Close() { p.pool.Close() }
 
 const userCols = `id, oauth_provider, oauth_subject, email, display_name, avatar_url, created_at, updated_at, last_login_at`
+const userUpsertAdvisoryLockID int64 = 0x4341524d41555352 // "CARMAUSR"
 
 func scanUser(row pgx.Row) (*model.User, error) {
 	var u model.User
@@ -44,20 +45,52 @@ func (p *Postgres) FindUserByOAuth(c context.Context, provider, sub string) (*mo
 func (p *Postgres) FindUserByEmail(c context.Context, email string) (*model.User, error) {
 	return scanUser(p.pool.QueryRow(c, `SELECT `+userCols+` FROM users WHERE lower(email)=lower($1)`, email))
 }
+
+// UpsertUser serializes the short identity-resolution transaction because the
+// same logical user can conflict on either OAuth identity or normalized email.
 func (p *Postgres) UpsertUser(c context.Context, u model.User) (model.User, error) {
-	tag, e := p.pool.Exec(c, `UPDATE users SET oauth_provider=$2,oauth_subject=$3,email=$4,display_name=$5,avatar_url=$6,updated_at=$7,last_login_at=$8 WHERE id=$1`, u.ID, u.OAuthProvider, u.OAuthSubject, u.Email, u.DisplayName, u.AvatarURL, u.UpdatedAt, u.LastLoginAt)
+	tx, e := p.pool.Begin(c)
 	if e != nil {
 		return u, e
 	}
-	if tag.RowsAffected() == 0 {
-		e = p.pool.QueryRow(c, `INSERT INTO users(id,oauth_provider,oauth_subject,email,display_name,avatar_url,created_at,updated_at,last_login_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+userCols, u.ID, u.OAuthProvider, u.OAuthSubject, u.Email, u.DisplayName, u.AvatarURL, u.CreatedAt, u.UpdatedAt, u.LastLoginAt).Scan(&u.ID, &u.OAuthProvider, &u.OAuthSubject, &u.Email, &u.DisplayName, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt)
+	defer func() { _ = tx.Rollback(c) }()
+	if _, e = tx.Exec(c, `SELECT pg_advisory_xact_lock($1)`, userUpsertAdvisoryLockID); e != nil {
 		return u, e
 	}
-	got, e := scanUser(p.pool.QueryRow(c, `SELECT `+userCols+` FROM users WHERE id=$1`, u.ID))
+
+	var persistedID uuid.UUID
+	e = tx.QueryRow(c, `SELECT id FROM users
+		WHERE (oauth_provider=$1 AND oauth_subject=$2) OR lower(email)=lower($3)
+		ORDER BY (oauth_provider=$1 AND oauth_subject=$2) DESC
+		LIMIT 1 FOR UPDATE`, u.OAuthProvider, u.OAuthSubject, u.Email).Scan(&persistedID)
+	switch {
+	case e == nil:
+		e = tx.QueryRow(c, `UPDATE users SET
+			oauth_provider=$2,
+			oauth_subject=$3,
+			email=$4,
+			display_name=$5,
+			avatar_url=$6,
+			updated_at=$7,
+			last_login_at=$8
+			WHERE id=$1 RETURNING `+userCols,
+			persistedID, u.OAuthProvider, u.OAuthSubject, u.Email, u.DisplayName, u.AvatarURL, u.UpdatedAt, u.LastLoginAt,
+		).Scan(&u.ID, &u.OAuthProvider, &u.OAuthSubject, &u.Email, &u.DisplayName, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt)
+	case errors.Is(e, pgx.ErrNoRows):
+		e = tx.QueryRow(c, `INSERT INTO users(id,oauth_provider,oauth_subject,email,display_name,avatar_url,created_at,updated_at,last_login_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+userCols,
+			u.ID, u.OAuthProvider, u.OAuthSubject, u.Email, u.DisplayName, u.AvatarURL, u.CreatedAt, u.UpdatedAt, u.LastLoginAt,
+		).Scan(&u.ID, &u.OAuthProvider, &u.OAuthSubject, &u.Email, &u.DisplayName, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt)
+	default:
+		return u, e
+	}
 	if e != nil {
 		return u, e
 	}
-	return *got, nil
+	if e = tx.Commit(c); e != nil {
+		return u, e
+	}
+	return u, nil
 }
 func (p *Postgres) CreateSession(c context.Context, s model.Session, h string) error {
 	_, e := p.pool.Exec(c, `INSERT INTO user_sessions(id,user_id,token_hash,expires_at,created_at,user_agent,ip_address) VALUES($1,$2,$3,$4,$5,$6,$7)`, s.ID, s.UserID, h, s.ExpiresAt, s.CreatedAt, s.UserAgent, s.IPAddress)
@@ -199,9 +232,10 @@ func (p *Postgres) ListRecords(c context.Context, q model.RecordQuery) ([]model.
 }
 
 func recordOrder(q model.RecordQuery) string {
+	q.Sort, q.Desc = normalizedRecordSort(q.Sort, q.Desc)
 	order := "r.occurred_on DESC,r.created_at DESC,r.id DESC"
 	dir := "ASC"
-	if q.Desc || q.Sort == "" {
+	if q.Desc {
 		dir = "DESC"
 	}
 	switch q.Sort {
@@ -249,7 +283,7 @@ func (p *Postgres) CreateRecord(c context.Context, r model.Record, as []model.At
 	if e != nil {
 		return r, e
 	}
-	defer tx.Rollback(c)
+	defer func() { _ = tx.Rollback(c) }()
 	_, e = tx.Exec(c, `INSERT INTO records(id,vehicle_id,service_type_id,occurred_on,odometer_miles,cost_cents,vendor,notes,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, r.ID, r.VehicleID, r.ServiceTypeID, r.OccurredOn, r.OdometerMiles, r.CostCents, r.Vendor, r.Notes, r.CreatedBy, r.CreatedAt, r.UpdatedAt)
 	if e != nil {
 		return r, e
@@ -276,7 +310,7 @@ func (p *Postgres) DeleteRecord(c context.Context, id uuid.UUID) ([]string, erro
 	if e != nil {
 		return nil, e
 	}
-	defer tx.Rollback(c)
+	defer func() { _ = tx.Rollback(c) }()
 	rows, e := tx.Query(c, `SELECT storage_key FROM attachments WHERE record_id=$1`, id)
 	if e != nil {
 		return nil, e
@@ -308,7 +342,7 @@ func (p *Postgres) AddAttachments(c context.Context, rid uuid.UUID, as []model.A
 	if e != nil {
 		return e
 	}
-	defer tx.Rollback(c)
+	defer func() { _ = tx.Rollback(c) }()
 	for _, a := range as {
 		if _, e = tx.Exec(c, `INSERT INTO attachments(id,record_id,original_filename,content_type,byte_size,storage_key,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, a.ID, rid, a.OriginalFilename, a.ContentType, a.ByteSize, a.StorageKey, a.CreatedAt); e != nil {
 			return e

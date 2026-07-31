@@ -26,6 +26,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -46,7 +48,9 @@ jobs:
       PLATFORMS: linux/arm64/v8
     steps:
       - uses: actions/checkout@v6
-        with: {fetch-depth: 0}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - id: meta
         run: echo "TAG=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
       - uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
