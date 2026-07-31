@@ -38,6 +38,13 @@ type fakeGoogle struct {
 	allowed bool
 }
 
+type deleteSessionErrorStore struct {
+	repository.Store
+	err error
+}
+
+func (s deleteSessionErrorStore) DeleteSession(context.Context, uuid.UUID) error { return s.err }
+
 func (f fakeGoogle) AuthURL(state string) string {
 	return "https://accounts.example/auth?state=" + state
 }
@@ -78,6 +85,49 @@ func (f fixture) do(t *testing.T, method, path string, body io.Reader, contentTy
 	f.router.ServeHTTP(w, r)
 	return w
 }
+
+func TestLogoutClearsCookieWhenSessionRevocationFails(t *testing.T) {
+	f := setup(t)
+	revocationErr := errors.New("session revocation failed")
+	f.s.auth = auth.NewService(deleteSessionErrorStore{Store: f.store, err: revocationErr}, f.s.cfg.SessionTTL)
+	f.router = f.s.Router()
+
+	response := f.do(t, http.MethodPost, "/logout", nil, "")
+
+	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != middleware.CookieName || cookies[0].Value != "" || cookies[0].MaxAge >= 0 {
+		t.Fatalf("revocation failure did not clear browser cookie: %+v", cookies)
+	}
+	if !strings.Contains(response.Body.String(), "Something went wrong") {
+		t.Fatalf("revocation failure presented as success: %q", response.Body.String())
+	}
+	user, err := f.s.auth.Validate(t.Context(), f.cookie.Value)
+	if err != nil || user == nil {
+		t.Fatalf("session was not reusable after failed revocation: user=%v err=%v", user, err)
+	}
+}
+
+func TestLogoutRevokesSessionAndClearsCookie(t *testing.T) {
+	f := setup(t)
+
+	response := f.do(t, http.MethodPost, "/logout", nil, "")
+
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login" {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != middleware.CookieName || cookies[0].Value != "" || cookies[0].MaxAge >= 0 {
+		t.Fatalf("logout did not clear browser cookie: %+v", cookies)
+	}
+	user, err := f.s.auth.Validate(t.Context(), f.cookie.Value)
+	if err != nil || user != nil {
+		t.Fatalf("session remains valid after logout: user=%v err=%v", user, err)
+	}
+}
+
 func formBody(t *testing.T, fields map[string]string, filename string, file []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	var b bytes.Buffer

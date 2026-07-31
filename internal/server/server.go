@@ -221,7 +221,11 @@ func loginErrorMessage(code string) string {
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, e := r.Cookie(middleware.CookieName); e == nil {
-		_ = s.auth.Logout(r.Context(), c.Value)
+		if e = s.auth.Logout(r.Context(), c.Value); e != nil {
+			middleware.ClearSession(w, s.cfg.SecureCookies())
+			s.fail(w, e)
+			return
+		}
 	}
 	middleware.ClearSession(w, s.cfg.SecureCookies())
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
