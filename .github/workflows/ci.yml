@@ -1,0 +1,179 @@
+name: CI build -> push -> trigger deploy
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - run: make test lint build
+  build-and-trigger:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    concurrency:
+      group: carma-crystal-deploy
+      cancel-in-progress: false
+    environment: crystal1
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      IMAGE_REG: ${{ vars.IMAGE_REG }}
+      IMAGE_REPO: ${{ vars.IMAGE_REPO }}
+      MANAGER_HOST: ${{ vars.MANAGER_HOST }}
+      MANAGER_REPO_PATH: ${{ vars.MANAGER_REPO_PATH }}
+      TS_AUDIENCE: ${{ vars.TS_AUDIENCE }}
+      DEPLOY_REQUEST_REF: refs/deploy/requests/${{ github.run_id }}-${{ github.run_attempt }}
+      PLATFORMS: linux/arm64/v8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Derive image tag
+        id: meta
+        run: echo "tag=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${IMAGE_REG:?Missing crystal1 variable IMAGE_REG}"
+          : "${IMAGE_REPO:?Missing repository variable IMAGE_REPO}"
+          : "${MANAGER_HOST:?Missing crystal1 variable MANAGER_HOST}"
+          : "${MANAGER_REPO_PATH:?Missing crystal1 variable MANAGER_REPO_PATH}"
+          : "${TS_AUDIENCE:?Missing crystal1 variable TS_AUDIENCE}"
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          audience: ${{ env.TS_AUDIENCE }}
+          tags: tag:ci
+          ping: ${{ env.MANAGER_HOST }}
+      - name: Verify and pin registry route
+        id: registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          registry_host="${IMAGE_REG%%:*}"
+          registry_port="443"
+          if [[ "${IMAGE_REG}" == *:* ]]; then
+            registry_port="${IMAGE_REG##*:}"
+          fi
+          if [[ ! "${registry_host}" =~ ^[A-Za-z0-9.-]+$ ]] ||
+             [[ ! "${registry_port}" =~ ^[0-9]+$ ]] ||
+             (( registry_port < 1 || registry_port > 65535 )); then
+            echo "Registry must be a hostname with an optional valid port" >&2
+            exit 1
+          fi
+          registry_ip="$(getent ahostsv4 "${registry_host}" | awk '{print $1; exit}')"
+          if [[ ! "${registry_ip}" =~ ^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+            echo "Registry did not resolve to a Tailscale address" >&2
+            exit 1
+          fi
+          status="$(curl --resolve "${registry_host}:${registry_port}:${registry_ip}" -sS -o /dev/null -w '%{http_code}' "https://${IMAGE_REG}/v2/")"
+          [[ "${status}" == 200 || "${status}" == 401 ]]
+
+          # Pin Docker CLI operations to the address used by the probe.
+          printf '%s %s\n' "${registry_ip}" "${registry_host}" | sudo tee -a /etc/hosts >/dev/null
+          [[ "$(getent ahostsv4 "${registry_host}" | awk '{print $1; exit}')" == "${registry_ip}" ]]
+          printf 'host=%s\nip=%s\n' "${registry_host}" "${registry_ip}" >> "${GITHUB_OUTPUT}"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        with:
+          name: carma-builder
+          driver-opts: network=host
+      - name: Pin registry route in BuildKit
+        shell: bash
+        env:
+          REGISTRY_HOST: ${{ steps.registry.outputs.host }}
+          REGISTRY_IP: ${{ steps.registry.outputs.ip }}
+        run: |
+          set -euo pipefail
+          builder_container="buildx_buildkit_carma-builder0"
+          docker buildx inspect carma-builder --bootstrap >/dev/null
+          docker inspect "${builder_container}" >/dev/null
+          docker exec --user root "${builder_container}" sh -ec \
+            'printf "%s %s\n" "$1" "$2" >> /etc/hosts' -- "${REGISTRY_IP}" "${REGISTRY_HOST}"
+          pinned_ip="$(docker exec "${builder_container}" cat /etc/hosts | awk -v host="${REGISTRY_HOST}" '$2 == host {print $1; exit}')"
+          [[ "${pinned_ip}" == "${REGISTRY_IP}" ]]
+      - name: Log in to registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ${{ env.IMAGE_REG }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ env.IMAGE_REG }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: make docker-buildx
+
+      - name: Install deployment SSH material
+        shell: bash
+        env:
+          DEPLOY_KEY: ${{ secrets.LOCAL_REPO_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.LOCAL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Push main to Crystal deployment repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add crystal "ssh://git@${MANAGER_HOST}/${MANAGER_REPO_PATH}"
+          if git ls-remote --exit-code crystal refs/heads/main >/dev/null 2>&1; then
+            git fetch --no-tags crystal \
+              refs/heads/main:refs/remotes/crystal/main
+            if ! git merge-base --is-ancestor refs/remotes/crystal/main HEAD; then
+              echo "Crystal main is newer than this workflow revision; refusing a stale deployment" >&2
+              exit 1
+            fi
+          fi
+          git push --atomic crystal \
+            HEAD:refs/heads/main \
+            "HEAD:${DEPLOY_REQUEST_REF}"
+
+      - name: Verify Crystal deployed this revision
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force crystal \
+            refs/deploy/status:refs/remotes/crystal/deploy-status
+          git show refs/remotes/crystal/deploy-status:status.json > "${RUNNER_TEMP}/carma-deploy-status.json"
+          jq -e --arg revision "${EXPECTED_REVISION}" '
+            . as $status |
+            $status.schema == 1 and
+            $status.state == "succeeded" and
+            $status.revision == $revision and
+            $status.services["proxy_carma"].revision == $revision and
+            $status.services["proxy_carma"].desired == 3 and
+            $status.services["proxy_carma"].running == 3
+          ' "${RUNNER_TEMP}/carma-deploy-status.json"
+
+      - name: Remove deployment request ref
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: git push crystal ":${DEPLOY_REQUEST_REF}"

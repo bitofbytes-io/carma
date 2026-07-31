@@ -1,5 +1,9 @@
-.DS_Store
+.local/
 bin/
 local.mk
+.DS_Store
 .env
-.local/
+/carma
+/carma-migrate
+.playwright-cli/
+output/

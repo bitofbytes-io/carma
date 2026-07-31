@@ -1,0 +1,15 @@
+# Send only inputs used by the Dockerfile. This excludes credentials, local
+# state, VCS/browser artifacts, docs, binaries, and build output by default.
+**
+!Dockerfile
+!.dockerignore
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!migrations/
+!migrations/**
+!static/
+!static/**

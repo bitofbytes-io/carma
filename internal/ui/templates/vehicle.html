@@ -1,0 +1,25 @@
+{{define "content"}}
+<section class="vehicle-hero">
+  {{if .Vehicle.PhotoKey}}<img src="/vehicles/{{.Vehicle.ID}}/photo" alt="">{{end}}
+  <div><h1>{{.Vehicle.Nickname}}{{if .Vehicle.Year}} · {{.Vehicle.Year}}{{end}} {{.Vehicle.Make}} {{.Vehicle.Model}}</h1><p class="muted">{{num .Vehicle.LatestOdometer}} {{if .Vehicle.LatestOdometer}}mi{{end}}{{if .Vehicle.VIN}} · VIN {{.Vehicle.VIN}}{{end}}{{if .Vehicle.LicensePlate}} · {{.Vehicle.LicensePlate}}{{end}}</p></div>
+  <div class="hero-actions"><a class="secondary" href="/vehicles/{{.Vehicle.ID}}/edit">Edit</a><a class="secondary accent" href="/vehicles/{{.Vehicle.ID}}/reminders">Reminders</a></div>
+</section>
+{{if .Vehicle.ArchivedAt}}<div class="alert">This vehicle is archived. Its history remains available.</div>{{end}}
+<div class="detail-grid">
+  {{template "records-section" .}}
+  <aside class="card reminder-panel"><div class="section-head"><h2>Reminders</h2></div>{{if .Reminders}}{{range .Reminders}}<div class="reminder-summary"><span class="dot {{.Status}}"></span><div><strong>{{.Reminder.ServiceTypeName}}</strong> <span class="status {{.Status}}">{{.Status}}</span><small>{{if .Reminder.IntervalMonths}}{{.Reminder.IntervalMonths}} mo{{end}}{{if .Reminder.IntervalMiles}} / {{.Reminder.IntervalMiles}} mi{{end}}</small></div></div>{{end}}{{else}}<p class="muted">No reminders configured.</p>{{end}}<a href="/vehicles/{{.Vehicle.ID}}/reminders">Manage reminders ›</a></aside>
+</div>
+{{end}}
+{{define "records-section"}}<section class="card records-card" id="records-section">
+  <div class="section-head"><h2>Records</h2><a class="primary" href="/vehicles/{{.Vehicle.ID}}/records/new">＋ Add record</a></div>
+  <form method="get" class="filters" hx-get="/vehicles/{{.Vehicle.ID}}" hx-trigger="submit, input changed delay:300ms, change" hx-target="#records-section" hx-swap="outerHTML" hx-push-url="true">
+    <input name="q" aria-label="Search records" placeholder="Search records…" value="{{.Params.Get "q"}}">
+    <select name="type" aria-label="Filter by service type"><option value="">All types</option>{{range .Types}}<option value="{{.ID}}" {{selected .ID.String ($.Params.Get "type")}}>{{.Name}}</option>{{end}}</select>
+    <input type="date" name="from" value="{{.Params.Get "from"}}" aria-label="From date"><input type="date" name="to" value="{{.Params.Get "to"}}" aria-label="To date">
+    <select name="sort" aria-label="Sort records by"><option value="date">Date</option><option value="mileage" {{selected "mileage" (.Params.Get "sort")}}>Mileage</option><option value="cost" {{selected "cost" (.Params.Get "sort")}}>Cost</option></select>
+    <select name="direction" aria-label="Sort direction"><option value="desc">Newest/highest</option><option value="asc" {{selected "asc" (.Params.Get "direction")}}>Oldest/lowest</option></select>
+    <button class="secondary">Apply</button><a class="secondary" href="/vehicles/{{.Vehicle.ID}}/export.csv?{{query .Params}}">⇩ Export CSV</a>
+  </form>
+  {{template "record-list" .}}
+</section>{{end}}
+{{define "record-list"}}<div class="record-list" id="records-list"><div class="record-row header"><span>Date</span><span>Service type</span><span>Mileage</span><span>Cost</span><span></span></div>{{range .Records}}<a class="record-row" href="/records/{{.ID}}"><span data-label="Date">{{date .OccurredOn}}</span><strong data-label="Service">{{.ServiceTypeName}}</strong><span data-label="Mileage">{{num .OdometerMiles}}</span><span data-label="Cost">{{money .CostCents}}</span><span>{{if .AttachmentCount}}📎 {{.AttachmentCount}}{{end}}</span></a>{{else}}<p class="empty-row">No records match this view.</p>{{end}}</div>{{end}}

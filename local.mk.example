@@ -1,0 +1,3 @@
+# Copy to local.mk for machine-specific overrides. local.mk is gitignored.
+# PORT=4700
+# DATABASE_URL=postgres://carma:carma@localhost:5435/carma?sslmode=disable

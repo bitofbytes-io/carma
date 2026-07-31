@@ -154,6 +154,7 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `SESSION_TTL` | default `2160h` | session lifetime |
 | `ASSET_ROOT` | stack env (`/data/assets`) | receipt/photo storage root |
 | `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
+| `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
 | `SMTP_URL` (stretch) | secret `carma_smtp_url` | email reminders |
 
 ## CI/CD pipeline
