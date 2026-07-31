@@ -243,7 +243,7 @@ func TestNewReminderSnapshotsVehicleMileageAndIsNotImmediatelyOverdue(t *testing
 		t.Fatalf("create reminder: %d %s", response.Code, response.Body.String())
 	}
 	rows, _ := f.store.ListReminders(t.Context(), &v.ID, true)
-	if len(rows) != 1 || rows[0].StartingOdometer == nil || *rows[0].StartingOdometer != 1200 || !rows[0].CreatedAt.Equal(f.s.now()) {
+	if len(rows) != 1 || rows[0].StartingOdometer == nil || *rows[0].StartingOdometer != 1200 || rows[0].StartingOdometerPending || !rows[0].CreatedAt.Equal(f.s.now()) {
 		t.Fatalf("reminder snapshot=%+v", rows)
 	}
 	dashboard := f.do(t, http.MethodGet, "/", nil, "")

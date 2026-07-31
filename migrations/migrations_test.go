@@ -54,7 +54,11 @@ func TestReminderBaselineMigrationColumnsConstraintsAndBackfill(t *testing.T) {
 		"add column starting_odometer_miles bigint",
 		"reminders_starting_odometer_nonnegative",
 		"starting_odometer_miles is null or starting_odometer_miles >= 0",
+		"add column starting_odometer_pending boolean not null default false",
+		"reminders_starting_odometer_pending_state",
+		"not starting_odometer_pending or starting_odometer_miles is null",
 		"set starting_odometer_miles = v.current_odometer_miles",
+		"starting_odometer_pending = (v.current_odometer_miles is null)",
 	} {
 		if !strings.Contains(sql, declaration) {
 			t.Fatalf("reminder baseline migration missing %q", declaration)
@@ -67,6 +71,7 @@ func TestReminderBaselineMigrationColumnsConstraintsAndBackfill(t *testing.T) {
 	downSQL := strings.ToLower(string(down))
 	for _, declaration := range []string{
 		"delete from schema_migrations where version = '002_reminder_baselines'",
+		"drop column if exists starting_odometer_pending",
 		"drop column if exists starting_odometer_miles",
 		"drop column if exists current_odometer_miles",
 	} {

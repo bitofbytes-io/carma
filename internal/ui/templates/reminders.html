@@ -3,7 +3,7 @@
   <div class="section-head"><h1>Reminders · {{.Vehicle.Nickname}}</h1><a class="secondary" href="/vehicles/{{.Vehicle.ID}}">Back to vehicle</a></div>
   {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   {{template "reminder-list" .}}
-  <p class="muted reminder-help">A new reminder starts from the date you add it and the vehicle's current mileage. A matching service record becomes the new baseline.</p>
+  <p class="muted reminder-help">A new reminder starts from the date you add it and the vehicle's current mileage. If mileage is unknown, mileage tracking starts after the first matching service record.</p>
 </section>
 {{end}}
 

@@ -114,7 +114,8 @@ func (p *Postgres) DeleteSession(c context.Context, id uuid.UUID) error {
 }
 
 const vehicleCols = `v.id,v.nickname,v.year,v.make,v.model,v.vin,v.license_plate,v.photo_key,v.notes,v.archived_at,v.created_at,v.updated_at,v.current_odometer_miles`
-const initializeReminderOdometerSQL = `UPDATE reminders SET starting_odometer_miles=GREATEST($2::bigint,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=$1)) WHERE vehicle_id=$1 AND starting_odometer_miles IS NULL`
+const initializeReminderOdometerSQL = `UPDATE reminders SET starting_odometer_miles=GREATEST($2::bigint,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=$1)),starting_odometer_pending=false WHERE vehicle_id=$1 AND starting_odometer_pending AND starting_odometer_miles IS NULL`
+const upsertReminderSQL = `INSERT INTO reminders(id,vehicle_id,service_type_id,interval_months,interval_miles,starting_odometer_miles,starting_odometer_pending,enabled,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(vehicle_id,service_type_id) DO UPDATE SET interval_months=excluded.interval_months,interval_miles=excluded.interval_miles,enabled=excluded.enabled,updated_at=excluded.updated_at RETURNING id,created_at,starting_odometer_miles,starting_odometer_pending`
 
 func scanVehicle(row pgx.Row) (model.Vehicle, error) {
 	var v model.Vehicle
@@ -383,7 +384,7 @@ func (p *Postgres) DeleteAttachment(c context.Context, id uuid.UUID) (string, er
 }
 
 func (p *Postgres) ListReminders(c context.Context, vid *uuid.UUID, disabled bool) ([]model.Reminder, error) {
-	rows, e := p.pool.Query(c, `SELECT rm.id,rm.vehicle_id,rm.service_type_id,v.nickname,st.name,rm.interval_months,rm.interval_miles,rm.starting_odometer_miles,rm.enabled,rm.created_at,rm.updated_at,b.id,b.occurred_on,b.odometer_miles,b.created_at,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records x WHERE x.vehicle_id=rm.vehicle_id)) FROM reminders rm JOIN vehicles v ON v.id=rm.vehicle_id JOIN service_types st ON st.id=rm.service_type_id LEFT JOIN LATERAL(SELECT r.id,r.occurred_on,r.odometer_miles,r.created_at FROM records r WHERE r.vehicle_id=rm.vehicle_id AND r.service_type_id=rm.service_type_id ORDER BY r.occurred_on DESC,r.created_at DESC,r.id DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR rm.vehicle_id=$1) AND ($2 OR rm.enabled) AND ($1::uuid IS NOT NULL OR v.archived_at IS NULL) ORDER BY lower(v.nickname),lower(st.name)`, vid, disabled)
+	rows, e := p.pool.Query(c, `SELECT rm.id,rm.vehicle_id,rm.service_type_id,v.nickname,st.name,rm.interval_months,rm.interval_miles,rm.starting_odometer_miles,rm.starting_odometer_pending,rm.enabled,rm.created_at,rm.updated_at,b.id,b.occurred_on,b.odometer_miles,b.created_at,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records x WHERE x.vehicle_id=rm.vehicle_id)) FROM reminders rm JOIN vehicles v ON v.id=rm.vehicle_id JOIN service_types st ON st.id=rm.service_type_id LEFT JOIN LATERAL(SELECT r.id,r.occurred_on,r.odometer_miles,r.created_at FROM records r WHERE r.vehicle_id=rm.vehicle_id AND r.service_type_id=rm.service_type_id ORDER BY r.occurred_on DESC,r.created_at DESC,r.id DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR rm.vehicle_id=$1) AND ($2 OR rm.enabled) AND ($1::uuid IS NOT NULL OR v.archived_at IS NULL) ORDER BY lower(v.nickname),lower(st.name)`, vid, disabled)
 	if e != nil {
 		return nil, e
 	}
@@ -394,7 +395,7 @@ func (p *Postgres) ListReminders(c context.Context, vid *uuid.UUID, disabled boo
 		var bid *uuid.UUID
 		var date, created *time.Time
 		var odo *int64
-		if e := rows.Scan(&r.ID, &r.VehicleID, &r.ServiceTypeID, &r.VehicleName, &r.ServiceTypeName, &r.IntervalMonths, &r.IntervalMiles, &r.StartingOdometer, &r.Enabled, &r.CreatedAt, &r.UpdatedAt, &bid, &date, &odo, &created, &r.LatestOdometer); e != nil {
+		if e := rows.Scan(&r.ID, &r.VehicleID, &r.ServiceTypeID, &r.VehicleName, &r.ServiceTypeName, &r.IntervalMonths, &r.IntervalMiles, &r.StartingOdometer, &r.StartingOdometerPending, &r.Enabled, &r.CreatedAt, &r.UpdatedAt, &bid, &date, &odo, &created, &r.LatestOdometer); e != nil {
 			return nil, e
 		}
 		if bid != nil {
@@ -405,7 +406,7 @@ func (p *Postgres) ListReminders(c context.Context, vid *uuid.UUID, disabled boo
 	return out, rows.Err()
 }
 func (p *Postgres) UpsertReminder(c context.Context, r model.Reminder) (model.Reminder, error) {
-	e := p.pool.QueryRow(c, `INSERT INTO reminders(id,vehicle_id,service_type_id,interval_months,interval_miles,starting_odometer_miles,enabled,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(vehicle_id,service_type_id) DO UPDATE SET interval_months=excluded.interval_months,interval_miles=excluded.interval_miles,enabled=excluded.enabled,updated_at=excluded.updated_at RETURNING id,created_at,starting_odometer_miles`, r.ID, r.VehicleID, r.ServiceTypeID, r.IntervalMonths, r.IntervalMiles, r.StartingOdometer, r.Enabled, r.CreatedAt, r.UpdatedAt).Scan(&r.ID, &r.CreatedAt, &r.StartingOdometer)
+	e := p.pool.QueryRow(c, upsertReminderSQL, r.ID, r.VehicleID, r.ServiceTypeID, r.IntervalMonths, r.IntervalMiles, r.StartingOdometer, r.StartingOdometerPending, r.Enabled, r.CreatedAt, r.UpdatedAt).Scan(&r.ID, &r.CreatedAt, &r.StartingOdometer, &r.StartingOdometerPending)
 	return r, e
 }
 func (p *Postgres) DeleteReminder(c context.Context, id uuid.UUID) error {

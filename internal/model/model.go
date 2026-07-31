@@ -53,6 +53,7 @@ type Reminder struct {
 	IntervalMonths               *int
 	IntervalMiles                *int64
 	StartingOdometer             *int64
+	StartingOdometerPending      bool
 	Enabled                      bool
 	CreatedAt, UpdatedAt         time.Time
 	Baseline                     *Record

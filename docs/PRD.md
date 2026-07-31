@@ -88,8 +88,9 @@ filters, inspections) doesn't get forgotten.
   - *First cycle:* when no matching service record exists, time starts at the
     reminder's creation date and mileage starts at a snapshot of the vehicle's
     effective odometer when the reminder is created. An unknown starting mileage
-    leaves only the mileage dimension unevaluable; a configured time interval still
-    evaluates normally.
+    leaves only the mileage dimension unevaluable until a matching service record
+    exists; later vehicle mileage edits do not retroactively change that snapshot.
+    A configured time interval still evaluates normally.
   - *Later cycles:* the most recent record on that vehicle with that service type
     replaces both first-cycle baselines.
   - *Time:* due when `baseline date + interval_months <= today`.
@@ -137,7 +138,7 @@ All timestamps `timestamptz`, money in integer cents, soft deletes via `archived
 | `service_types` | id, name (unique), is_seeded, created_at |
 | `records` | id, vehicle_id FK, service_type_id FK, occurred_on (date), odometer_miles, cost_cents, vendor, notes, created_by FK users, created_at, updated_at |
 | `attachments` | id, record_id FK, original_filename, content_type, byte_size, storage_key (unique), created_at |
-| `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, enabled, extra_emails (stretch), created_at; unique (vehicle_id, service_type_id) |
+| `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, starting_odometer_pending (migration repair marker), enabled, extra_emails (stretch), created_at; unique (vehicle_id, service_type_id) |
 | `reminder_notifications` (stretch) | id, reminder_id FK, sent_at, recipients |
 
 Notes:
