@@ -203,6 +203,7 @@ func (p *Postgres) CreateServiceType(c context.Context, t model.ServiceType) (mo
 }
 
 const recordSelect = `SELECT r.id,r.vehicle_id,r.service_type_id,r.created_by,r.occurred_on,r.odometer_miles,r.cost_cents,r.vendor,r.notes,r.created_at,r.updated_at,v.nickname,st.name,COALESCE(NULLIF(u.display_name,''),u.email),(SELECT count(*) FROM attachments a WHERE a.record_id=r.id) FROM records r JOIN vehicles v ON v.id=r.vehicle_id JOIN service_types st ON st.id=r.service_type_id JOIN users u ON u.id=r.created_by`
+const recordFilter = ` WHERE ($1::uuid IS NULL OR r.vehicle_id=$1) AND ($2::uuid IS NULL OR r.service_type_id=$2) AND ($3::date IS NULL OR r.occurred_on >= $3) AND ($4::date IS NULL OR r.occurred_on <= $4) AND ($5='' OR st.name ILIKE '%'||$5||'%' ESCAPE E'\\' OR r.vendor ILIKE '%'||$5||'%' ESCAPE E'\\' OR r.notes ILIKE '%'||$5||'%' ESCAPE E'\\')`
 
 func scanRecord(row pgx.Row) (model.Record, error) {
 	var r model.Record
@@ -214,8 +215,8 @@ func scanRecord(row pgx.Row) (model.Record, error) {
 }
 func (p *Postgres) ListRecords(c context.Context, q model.RecordQuery) ([]model.Record, error) {
 	order := recordOrder(q)
-	sql := recordSelect + ` WHERE ($1::uuid IS NULL OR r.vehicle_id=$1) AND ($2::uuid IS NULL OR r.service_type_id=$2) AND ($3::date IS NULL OR r.occurred_on >= $3) AND ($4::date IS NULL OR r.occurred_on <= $4) AND ($5='' OR st.name ILIKE '%'||$5||'%' OR r.vendor ILIKE '%'||$5||'%' OR r.notes ILIKE '%'||$5||'%') ORDER BY ` + order
-	rows, e := p.pool.Query(c, sql, q.VehicleID, q.ServiceTypeID, q.From, q.To, q.Search)
+	sql := recordSelect + recordFilter + ` ORDER BY ` + order
+	rows, e := p.pool.Query(c, sql, q.VehicleID, q.ServiceTypeID, q.From, q.To, escapeLikePattern(q.Search))
 	if e != nil {
 		return nil, e
 	}
@@ -229,6 +230,10 @@ func (p *Postgres) ListRecords(c context.Context, q model.RecordQuery) ([]model.
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func escapeLikePattern(value string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }
 
 func recordOrder(q model.RecordQuery) string {

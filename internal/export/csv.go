@@ -2,7 +2,6 @@ package export
 
 import (
 	"encoding/csv"
-	"fmt"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"io"
 	"strconv"
@@ -21,13 +20,18 @@ func CSV(w io.Writer, records []model.Record) error {
 			odo = strconv.FormatInt(*r.OdometerMiles, 10)
 		}
 		if r.CostCents != nil {
-			cost = fmt.Sprintf("%.2f", float64(*r.CostCents)/100)
+			cost = formatCents(*r.CostCents)
 		}
 		if err := c.Write([]string{spreadsheetText(r.VehicleName), r.OccurredOn.Format("2006-01-02"), spreadsheetText(r.ServiceTypeName), odo, cost, spreadsheetText(r.Vendor), spreadsheetText(r.Notes), strconv.Itoa(r.AttachmentCount), spreadsheetText(r.CreatedByName)}); err != nil {
 			return err
 		}
 	}
 	return c.Error()
+}
+
+func formatCents(cents int64) string {
+	fraction := strconv.FormatInt(cents%100+100, 10)[1:]
+	return strconv.FormatInt(cents/100, 10) + "." + fraction
 }
 
 func spreadsheetText(value string) string {

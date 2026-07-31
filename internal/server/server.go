@@ -32,7 +32,12 @@ import (
 	"github.com/google/uuid"
 )
 
-const oauthStateCookie = "carma_oauth_state"
+const (
+	oauthStateCookie     = "carma_oauth_state"
+	loginErrorExpired    = "expired"
+	loginErrorOAuth      = "oauth"
+	loginErrorNotInvited = "not-invited"
+)
 
 type Server struct {
 	cfg    *config.Config
@@ -135,7 +140,7 @@ func (s *Server) fail(w http.ResponseWriter, e error) {
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
 	target, _ := safeRedirectTarget(r.URL.Query().Get("redirect"))
-	d := pageData{Title: "Sign in", Development: s.cfg.AuthMode == config.AuthDevelopment, Error: r.URL.Query().Get("error"), Redirect: target}
+	d := pageData{Title: "Sign in", Development: s.cfg.AuthMode == config.AuthDevelopment, Error: loginErrorMessage(r.URL.Query().Get("error")), Redirect: target}
 	s.render(w, http.StatusOK, "login", d)
 }
 func (s *Server) devLogin(w http.ResponseWriter, r *http.Request) {
@@ -175,17 +180,17 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	target, validState := parseOAuthState(state, s.cfg.GoogleClientSecret)
 	if e != nil || cookie.Value == "" || !hmac.Equal([]byte(state), []byte(cookie.Value)) || !validState {
-		http.Redirect(w, r, "/login?error="+url.QueryEscape("Sign-in expired. Please try again."), http.StatusSeeOther)
+		http.Redirect(w, r, loginErrorLocation(loginErrorExpired), http.StatusSeeOther)
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: oauthStateCookie, Path: "/api/auth/google/callback", MaxAge: -1, HttpOnly: true, Secure: s.cfg.SecureCookies(), SameSite: http.SameSiteLaxMode})
 	claims, e := s.google.Exchange(r.Context(), r.URL.Query().Get("code"))
 	if e != nil {
-		http.Redirect(w, r, "/login?error="+url.QueryEscape("Google sign-in could not be completed. Please try again."), http.StatusSeeOther)
+		http.Redirect(w, r, loginErrorLocation(loginErrorOAuth), http.StatusSeeOther)
 		return
 	}
 	if !claims.EmailVerified || !s.google.Allowed(claims.Email) {
-		http.Redirect(w, r, "/login?error="+url.QueryEscape("This verified Google account is not invited to Carma."), http.StatusSeeOther)
+		http.Redirect(w, r, loginErrorLocation(loginErrorNotInvited), http.StatusSeeOther)
 		return
 	}
 	_, token, e := s.auth.Login(r.Context(), claims)
@@ -196,6 +201,24 @@ func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {
 	middleware.SetSession(w, token, s.cfg.SecureCookies(), s.cfg.SessionTTL)
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
+
+func loginErrorLocation(code string) string {
+	return "/login?error=" + url.QueryEscape(code)
+}
+
+func loginErrorMessage(code string) string {
+	switch code {
+	case loginErrorExpired:
+		return "Sign-in expired. Please try again."
+	case loginErrorOAuth:
+		return "Google sign-in could not be completed. Please try again."
+	case loginErrorNotInvited:
+		return "This verified Google account is not invited to Carma."
+	default:
+		return ""
+	}
+}
+
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if c, e := r.Cookie(middleware.CookieName); e == nil {
 		_ = s.auth.Logout(r.Context(), c.Value)

@@ -51,12 +51,15 @@ CREATE TABLE records (
   created_by UUID NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX records_vehicle_order_idx ON records(vehicle_id, occurred_on DESC, created_at DESC, id DESC);
+CREATE INDEX records_created_by_idx ON records(created_by);
+CREATE INDEX records_service_type_id_idx ON records(service_type_id);
 
 CREATE TABLE attachments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(), record_id UUID NOT NULL REFERENCES records(id) ON DELETE CASCADE,
   original_filename TEXT NOT NULL, content_type TEXT NOT NULL, byte_size BIGINT NOT NULL CHECK(byte_size >= 0),
   storage_key TEXT NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX attachments_record_id_idx ON attachments(record_id);
 
 CREATE TABLE reminders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(), vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,

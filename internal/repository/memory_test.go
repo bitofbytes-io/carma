@@ -107,6 +107,46 @@ func TestPostgresOrderClauseMatchesMemoryContract(t *testing.T) {
 		}
 	}
 }
+
+func TestEscapeLikePatternTreatsSearchMetacharactersLiterally(t *testing.T) {
+	for input, want := range map[string]string{
+		`ordinary`:  `ordinary`,
+		`100%`:      `100\%`,
+		`code_name`: `code\_name`,
+		`path\file`: `path\\file`,
+		`%_\`:       `\%\_\\`,
+	} {
+		if got := escapeLikePattern(input); got != want {
+			t.Fatalf("escapeLikePattern(%q)=%q want=%q", input, got, want)
+		}
+	}
+	if got := strings.Count(recordFilter, `ESCAPE E'\\'`); got != 3 {
+		t.Fatalf("record filter has %d explicit LIKE escape clauses", got)
+	}
+}
+
+func TestMemorySearchTreatsSQLWildcardsLiterally(t *testing.T) {
+	m := NewMemory()
+	ctx := t.Context()
+	now := time.Now()
+	user, _ := m.UpsertUser(ctx, model.User{ID: uuid.New(), OAuthProvider: "google", OAuthSubject: "literal-search", Email: "literal-search@example.com", CreatedAt: now})
+	vehicle, _ := m.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "Search", CreatedAt: now})
+	types, _ := m.ListServiceTypes(ctx)
+	literal := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: types[0].ID, CreatedBy: user.ID, OccurredOn: now, Notes: `literal % underscore_ slash\ marker`, CreatedAt: now}
+	decoy := literal
+	decoy.ID = uuid.New()
+	decoy.Notes = "literal percent underscoreX slashX marker"
+	_, _ = m.CreateRecord(ctx, literal, nil)
+	_, _ = m.CreateRecord(ctx, decoy, nil)
+
+	for _, search := range []string{"%", "_", `\`} {
+		rows, err := m.ListRecords(ctx, model.RecordQuery{VehicleID: &vehicle.ID, Search: search})
+		if err != nil || len(rows) != 1 || rows[0].ID != literal.ID {
+			t.Fatalf("literal search %q rows=%+v err=%v", search, rows, err)
+		}
+	}
+}
+
 func TestCustomTypeUniqueCaseInsensitive(t *testing.T) {
 	m := NewMemory()
 	ctx := t.Context()

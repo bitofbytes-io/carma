@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"net/url"
 	"testing"
 	"time"
 
@@ -32,6 +32,7 @@ func TestRequireAuthReturnsUnavailableWithoutClearingCookieOnStoreError(t *testi
 	}))
 	request := httptest.NewRequest(http.MethodGet, "https://carma.example/vehicles", nil)
 	request.AddCookie(&http.Cookie{Name: CookieName, Value: "valid-shape-token"})
+	request.Header.Set("HX-Request", "true")
 	response := httptest.NewRecorder()
 
 	handler.ServeHTTP(response, request)
@@ -41,6 +42,9 @@ func TestRequireAuthReturnsUnavailableWithoutClearingCookieOnStoreError(t *testi
 	}
 	if cookies := response.Header().Values("Set-Cookie"); len(cookies) != 0 {
 		t.Fatalf("store failure changed session cookie: %v", cookies)
+	}
+	if redirect := response.Header().Get("HX-Redirect"); redirect != "" {
+		t.Fatalf("store failure redirected HTMX request to %q", redirect)
 	}
 }
 
@@ -55,11 +59,51 @@ func TestRequireAuthClearsInvalidSessionAndRedirects(t *testing.T) {
 
 	handler.ServeHTTP(response, request)
 
-	if response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), "/login?redirect=") {
+	wantRedirect := "/login?redirect=" + url.QueryEscape("/vehicles/123?sort=cost")
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != wantRedirect || response.Header().Get("HX-Redirect") != "" {
 		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 	}
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].Name != CookieName || cookies[0].MaxAge >= 0 || !cookies[0].Secure {
 		t.Fatalf("invalid session cookie was not cleared securely: %+v", cookies)
+	}
+}
+
+func TestRequireAuthUsesHXRedirectForMissingAndInvalidSessions(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		cookie      *http.Cookie
+		wantCleared bool
+	}{
+		{name: "missing"},
+		{name: "invalid", cookie: &http.Cookie{Name: CookieName, Value: "invalid-token"}, wantCleared: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := auth.NewService(repository.NewMemory(), time.Hour)
+			handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("unauthenticated HTMX request reached protected handler")
+			}))
+			request := httptest.NewRequest(http.MethodGet, "https://carma.example/vehicles/123?sort=cost", nil)
+			request.Header.Set("HX-Request", "true")
+			if tc.cookie != nil {
+				request.AddCookie(tc.cookie)
+			}
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			wantRedirect := "/login?redirect=" + url.QueryEscape("/vehicles/123?sort=cost")
+			if response.Code != http.StatusOK || response.Header().Get("HX-Redirect") != wantRedirect || response.Header().Get("Location") != "" {
+				t.Fatalf("status=%d hx-redirect=%q location=%q", response.Code, response.Header().Get("HX-Redirect"), response.Header().Get("Location"))
+			}
+			cookies := response.Result().Cookies()
+			if tc.wantCleared {
+				if len(cookies) != 1 || cookies[0].Name != CookieName || cookies[0].MaxAge >= 0 {
+					t.Fatalf("invalid HTMX session cookie not cleared: %+v", cookies)
+				}
+			} else if len(cookies) != 0 {
+				t.Fatalf("missing session unexpectedly changed cookies: %+v", cookies)
+			}
+		})
 	}
 }

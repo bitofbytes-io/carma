@@ -4,10 +4,35 @@ import (
 	"bytes"
 	"encoding/csv"
 	"github.com/bitofbytes-io/carma/internal/model"
+	"math"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCSVFormatsCentsExactly(t *testing.T) {
+	for _, tc := range []struct {
+		cents int64
+		want  string
+	}{
+		{cents: 0, want: "0.00"},
+		{cents: 5, want: "0.05"},
+		{cents: 1234, want: "12.34"},
+		{cents: math.MaxInt64, want: "92233720368547758.07"},
+	} {
+		if got := formatCents(tc.cents); got != tc.want {
+			t.Fatalf("formatCents(%d)=%q want=%q", tc.cents, got, tc.want)
+		}
+		var output bytes.Buffer
+		if err := CSV(&output, []model.Record{{OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), CostCents: &tc.cents}}); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := csv.NewReader(strings.NewReader(output.String())).ReadAll()
+		if err != nil || len(rows) != 2 || rows[1][4] != tc.want {
+			t.Fatalf("CSV cents=%d rows=%v err=%v", tc.cents, rows, err)
+		}
+	}
+}
 
 func TestCSVParsesAndMatchesRows(t *testing.T) {
 	v := int64(42)

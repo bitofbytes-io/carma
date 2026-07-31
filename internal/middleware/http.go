@@ -49,6 +49,11 @@ func redirect(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		target += "?redirect=" + url.QueryEscape(r.URL.RequestURI())
 	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("HX-Request")), "true") {
+		w.Header().Set("HX-Redirect", target)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 func SameOrigin(next http.Handler) http.Handler {

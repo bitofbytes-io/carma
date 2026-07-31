@@ -401,7 +401,7 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 			if hasSession != tc.wantSession {
 				t.Fatalf("session=%v location=%s", hasSession, w.Header().Get("Location"))
 			}
-			if !tc.wantSession && !strings.Contains(w.Header().Get("Location"), "not+invited") {
+			if !tc.wantSession && w.Header().Get("Location") != "/login?error="+loginErrorNotInvited {
 				t.Fatalf("unfriendly rejection: %s", w.Header().Get("Location"))
 			}
 		})
@@ -511,12 +511,38 @@ func TestGoogleOAuthRejectsTamperedState(t *testing.T) {
 	callback.AddCookie(&http.Cookie{Name: oauthStateCookie, Value: tampered})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, callback)
-	if response.Code != http.StatusSeeOther || !strings.HasPrefix(response.Header().Get("Location"), "/login?error=") {
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login?error="+loginErrorExpired {
 		t.Fatalf("tampered state accepted: %d %q", response.Code, response.Header().Get("Location"))
 	}
 	for _, cookie := range response.Result().Cookies() {
 		if cookie.Name == middleware.CookieName && cookie.Value != "" {
 			t.Fatal("tampered state created a session")
 		}
+	}
+}
+
+func TestLoginPageAllowsOnlyKnownErrorCodes(t *testing.T) {
+	f := setup(t)
+	for _, tc := range []struct {
+		code, message string
+	}{
+		{loginErrorExpired, "Sign-in expired. Please try again."},
+		{loginErrorOAuth, "Google sign-in could not be completed. Please try again."},
+		{loginErrorNotInvited, "This verified Google account is not invited to Carma."},
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "http://example.com/login?error="+url.QueryEscape(tc.code), nil)
+		f.router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), tc.message) {
+			t.Fatalf("known code %q: status=%d body=%s", tc.code, response.Code, response.Body.String())
+		}
+	}
+
+	attackerText := `<script>ATTACKER-CONTROLLED</script>`
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://example.com/login?error="+url.QueryEscape(attackerText), nil)
+	f.router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "ATTACKER-CONTROLLED") {
+		t.Fatalf("unknown error rendered attacker text: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
