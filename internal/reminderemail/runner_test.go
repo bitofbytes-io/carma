@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,6 +141,37 @@ func TestRunnerSuppressionBoundaryAndRetryAfterFailure(t *testing.T) {
 	report, err = runner.Run(context.Background(), Options{})
 	if err != nil || report.Sent != 1 || len(store.notifications) != 1 {
 		t.Fatalf("retry report=%+v notifications=%d err=%v", report, len(store.notifications), err)
+	}
+}
+
+func TestRunnerAuditFailureRemainsEligibleForAtLeastOnceRetry(t *testing.T) {
+	now := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	month, reminderID := 1, uuid.New()
+	store := &fakeStore{
+		lockAvailable: true,
+		emails:        []string{"user@example.com"},
+		reminders:     []model.Reminder{{ID: reminderID, VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true, CreatedAt: now.AddDate(0, -2, 0)}},
+		auditErr:      errors.New("audit unavailable"),
+	}
+	sender := &fakeSender{}
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner.now = func() time.Time { return now }
+
+	report, err := runner.Run(context.Background(), Options{})
+	if err == nil || !strings.Contains(err.Error(), "audit reminder") || report.Failed != 1 || report.Sent != 0 {
+		t.Fatalf("audit failure report=%+v err=%v", report, err)
+	}
+	if len(sender.messages) != 1 || len(store.notifications) != 0 {
+		t.Fatalf("audit failure sends=%d persisted notifications=%d", len(sender.messages), len(store.notifications))
+	}
+
+	// SMTP already accepted the first message, but without a successful audit it
+	// remains eligible. The accepted at-least-once contract permits this retry to
+	// send a duplicate across the narrow send/audit failure window.
+	store.auditErr = nil
+	report, err = runner.Run(context.Background(), Options{})
+	if err != nil || report.Sent != 1 || len(sender.messages) != 2 || len(store.notifications) != 1 {
+		t.Fatalf("retry report=%+v sends=%d notifications=%d err=%v", report, len(sender.messages), len(store.notifications), err)
 	}
 }
 

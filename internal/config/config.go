@@ -123,7 +123,7 @@ func requiredSecretFile(key string) (string, error) {
 
 func validateReminderEmail(c ReminderEmail) error {
 	for key, value := range map[string]string{
-		"SMTP_HOST": c.SMTPHost, "SMTP_USERNAME": c.SMTPUsername, "SMTP_PASSWORD": c.SMTPPassword,
+		"SMTP_HOST": c.SMTPHost, "SMTP_USERNAME": c.SMTPUsername, "SMTP_PASSWORD_FILE": c.SMTPPassword,
 		"SMTP_FROM_ADDRESS": c.FromAddress, "SMTP_FROM_NAME": c.FromName, "SMTP_TLS_MODE": c.TLSMode, "PUBLIC_URL": c.PublicURL,
 	} {
 		if value == "" {

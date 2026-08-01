@@ -157,11 +157,13 @@ func TestSMTPAcceptedMessageSurvivesQUITFailure(t *testing.T) {
 }
 
 func TestSMTPContextBoundsUnresponsiveTLSHandshake(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listenContext, cancelListen := context.WithTimeout(context.Background(), time.Second)
+	defer cancelListen()
+	listener, err := (&net.ListenConfig{}).Listen(listenContext, "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	accepted := make(chan net.Conn, 1)
 	go func() {
 		connection, acceptErr := listener.Accept()
@@ -227,20 +229,23 @@ func testTLSCertificate(t *testing.T) (tls.Certificate, *x509.CertPool) {
 
 func startSMTPServer(t *testing.T, certificate tls.Certificate, username, password string, failQuit bool, fixtureOptions ...smtpFixtureOptions) (string, <-chan smtpCapture, <-chan error) {
 	t.Helper()
-	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
+	listenContext, cancelListen := context.WithTimeout(context.Background(), time.Second)
+	defer cancelListen()
+	rawListener, err := (&net.ListenConfig{}).Listen(listenContext, "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
+	listener := tls.NewListener(rawListener, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
 	capture := make(chan smtpCapture, 1)
 	done := make(chan error, 1)
 	go func() {
-		defer listener.Close()
+		defer func() { _ = listener.Close() }()
 		connection, err := listener.Accept()
 		if err != nil {
 			done <- err
 			return
 		}
-		defer connection.Close()
+		defer func() { _ = connection.Close() }()
 		reader, writer := bufio.NewReader(connection), bufio.NewWriter(connection)
 		writeReply := func(reply string) error {
 			if _, err := writer.WriteString(reply); err != nil {
