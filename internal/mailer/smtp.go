@@ -116,14 +116,14 @@ func (s *SMTP) Send(ctx context.Context, message Message) (messageID string, err
 	messageID = fmt.Sprintf("<%s@%s>", s.newID(), messageIDDomain(s.fromAddress))
 	data, err := client.Data()
 	if err != nil {
-		return "", fmt.Errorf("SMTP DATA: %w", err)
+		return "", sanitizedSMTPStatusError("SMTP DATA rejected", err)
 	}
 	if err = writeMessage(data, s.now(), s.fromName, s.fromAddress, messageID, message); err != nil {
 		_ = data.Close()
 		return "", err
 	}
 	if err = data.Close(); err != nil {
-		return "", fmt.Errorf("SMTP message acceptance: %w", err)
+		return "", sanitizedSMTPStatusError("SMTP message rejected", err)
 	}
 	// DATA completion is the SMTP acceptance point. A subsequent QUIT failure
 	// must not turn an accepted message into an unaudited retry.

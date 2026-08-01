@@ -110,10 +110,9 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 		}
 		report.Evaluated++
 		result := reminder.Evaluate(candidate, runTime)
-		if result.Status != reminder.Due {
-			continue
+		if result.Status == reminder.Due {
+			report.Due++
 		}
-		report.Due++
 		if options.RequireRecipientCount != nil {
 			if err := loadRecipients(); err != nil {
 				return report, errors.Join(err, errors.Join(sendErrors...))
@@ -122,7 +121,16 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 				return report, errors.Join(fmt.Errorf("%w: required %d, found %d", ErrRecipientCountMismatch, *options.RequireRecipientCount, len(recipients)), errors.Join(sendErrors...))
 			}
 		}
-		suppressed, err := r.store.ReminderNotificationSince(ctx, candidate.ID, runTime.Add(-SuppressionWindow))
+		if result.Status != reminder.Due {
+			continue
+		}
+		suppressionCutoff := runTime.Add(-SuppressionWindow)
+		if candidate.Baseline != nil && candidate.Baseline.CreatedAt.After(suppressionCutoff) {
+			// A newly logged matching record starts a new maintenance cycle. Use
+			// when Carma learned of that baseline, not its historical service date.
+			suppressionCutoff = candidate.Baseline.CreatedAt.UTC()
+		}
+		suppressed, err := r.store.ReminderNotificationSince(ctx, candidate.ID, suppressionCutoff)
 		if err != nil {
 			report.Failed++
 			sendErrors = append(sendErrors, fmt.Errorf("check reminder %s suppression: %w", candidate.ID, err))

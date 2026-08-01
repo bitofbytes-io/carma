@@ -12,6 +12,7 @@ import (
 
 	"github.com/bitofbytes-io/carma/internal/database"
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/bitofbytes-io/carma/migrations"
 	"github.com/google/uuid"
@@ -121,6 +122,44 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	// representable cutoff after the stored send rather than a nanosecond delta.
 	if suppressed, err := storeOne.ReminderNotificationSince(context.Background(), reminderID, sentAt.Add(time.Second)); err != nil || suppressed {
 		t.Fatalf("after boundary suppressed=%t err=%v", suppressed, err)
+	}
+
+	cycleVehicleID, cycleServiceID, cycleReminderID := uuid.New(), uuid.New(), uuid.New()
+	cycleBaselineCreated := time.Date(2026, time.March, 22, 12, 0, 0, 0, time.UTC)
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO vehicles(id,nickname) VALUES($1,'New cycle vehicle')`, []any{cycleVehicleID}},
+		{`INSERT INTO service_types(id,name) VALUES($1,'New cycle service')`, []any{cycleServiceID}},
+		{`INSERT INTO reminders(id,vehicle_id,service_type_id,interval_months) VALUES($1,$2,$3,1)`, []any{cycleReminderID, cycleVehicleID, cycleServiceID}},
+		{`INSERT INTO records(id,vehicle_id,service_type_id,occurred_on,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$6)`, []any{uuid.New(), cycleVehicleID, cycleServiceID, time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC), userID, cycleBaselineCreated}},
+	} {
+		if _, err = seed.Exec(context.Background(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cycleReminders, err := storeOne.ListReminders(context.Background(), &cycleVehicleID, false)
+	if err != nil || len(cycleReminders) != 1 || cycleReminders[0].Baseline == nil {
+		t.Fatalf("cycle reminders=%+v err=%v", cycleReminders, err)
+	}
+	cycleRunTime := time.Date(2026, time.April, 1, 12, 0, 0, 0, time.UTC)
+	if result := reminder.Evaluate(cycleReminders[0], cycleRunTime); result.Status != reminder.Due {
+		t.Fatalf("new cycle status = %s, want overdue", result.Status)
+	}
+	priorCycleNotification := model.ReminderNotification{ID: uuid.New(), ReminderID: cycleReminderID, SentAt: cycleBaselineCreated.Add(-time.Second), Recipients: []string{"user@example.com"}, MessageID: "<prior-cycle@bitofbytes.io>"}
+	if err = storeOne.CreateReminderNotification(context.Background(), priorCycleNotification); err != nil {
+		t.Fatal(err)
+	}
+	if suppressed, err := storeOne.ReminderNotificationSince(context.Background(), cycleReminderID, cycleReminders[0].Baseline.CreatedAt); err != nil || suppressed {
+		t.Fatalf("prior-cycle notification suppressed=%t err=%v", suppressed, err)
+	}
+	currentCycleNotification := model.ReminderNotification{ID: uuid.New(), ReminderID: cycleReminderID, SentAt: cycleBaselineCreated.Add(time.Second), Recipients: []string{"user@example.com"}, MessageID: "<current-cycle@bitofbytes.io>"}
+	if err = storeOne.CreateReminderNotification(context.Background(), currentCycleNotification); err != nil {
+		t.Fatal(err)
+	}
+	if suppressed, err := storeOne.ReminderNotificationSince(context.Background(), cycleReminderID, cycleReminders[0].Baseline.CreatedAt); err != nil || !suppressed {
+		t.Fatalf("current-cycle notification suppressed=%t err=%v", suppressed, err)
 	}
 
 	unlockOne, acquired, err := storeOne.TryReminderEmailLock(context.Background())

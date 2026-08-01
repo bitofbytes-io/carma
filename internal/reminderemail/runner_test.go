@@ -144,6 +144,37 @@ func TestRunnerSuppressionBoundaryAndRetryAfterFailure(t *testing.T) {
 	}
 }
 
+func TestRunnerNewBaselineStartsNewSuppressionCycle(t *testing.T) {
+	now := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	month, reminderID := 1, uuid.New()
+	baselineCreated := now.Add(-10 * 24 * time.Hour)
+	reminder := model.Reminder{
+		ID: reminderID, VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true,
+		Baseline: &model.Record{OccurredOn: now.AddDate(0, -2, 0), CreatedAt: baselineCreated},
+	}
+	for _, test := range []struct {
+		name         string
+		notifiedAt   time.Time
+		wantSent     int
+		wantSuppress int
+	}{
+		{name: "prior cycle notification does not suppress", notifiedAt: baselineCreated.Add(-time.Second), wantSent: 1},
+		{name: "notification at new baseline suppresses inclusively", notifiedAt: baselineCreated, wantSuppress: 1},
+		{name: "notification after new baseline suppresses", notifiedAt: baselineCreated.Add(time.Second), wantSuppress: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}, notifications: []model.ReminderNotification{{ReminderID: reminderID, SentAt: test.notifiedAt}}}
+			sender := &fakeSender{}
+			runner := NewRunner(store, sender, "https://carma.bitofbytes.io", slog.New(slog.NewTextHandler(io.Discard, nil)))
+			runner.now = func() time.Time { return now }
+			report, err := runner.Run(context.Background(), Options{})
+			if err != nil || report.Due != 1 || report.Sent != test.wantSent || report.Suppressed != test.wantSuppress {
+				t.Fatalf("report=%+v err=%v", report, err)
+			}
+		})
+	}
+}
+
 func TestRunnerAuditFailureRemainsEligibleForAtLeastOnceRetry(t *testing.T) {
 	now := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 	month, reminderID := 1, uuid.New()
@@ -241,6 +272,43 @@ func TestRunnerRequiredRecipientCountMatchAndMismatch(t *testing.T) {
 		}
 		if store.lockCalls != 0 || len(sender.messages) != 0 || len(store.notifications) != 0 {
 			t.Fatalf("dry mismatch mutated: locks=%d sends=%d audits=%d", store.lockCalls, len(sender.messages), len(store.notifications))
+		}
+	})
+}
+
+func TestRunnerRequiredRecipientCountGuardsNonDueTarget(t *testing.T) {
+	now := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	month, targetID := 12, uuid.New()
+	reminder := model.Reminder{ID: targetID, VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true, CreatedAt: now}
+	newRunner := func() (*Runner, *fakeStore, *fakeSender) {
+		store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}}
+		sender := &fakeSender{}
+		runner := NewRunner(store, sender, "https://carma.bitofbytes.io", slog.New(slog.NewTextHandler(io.Discard, nil)))
+		runner.now = func() time.Time { return now }
+		return runner, store, sender
+	}
+
+	t.Run("matching count returns non-due without mutation", func(t *testing.T) {
+		runner, store, sender := newRunner()
+		required := 1
+		report, err := runner.Run(context.Background(), Options{ReminderID: &targetID, RequireRecipientCount: &required})
+		if err != nil || report.Evaluated != 1 || report.Due != 0 || report.RecipientCount != 1 {
+			t.Fatalf("report=%+v err=%v", report, err)
+		}
+		if len(sender.messages) != 0 || len(store.notifications) != 0 {
+			t.Fatalf("non-due match mutated: sends=%d audits=%d", len(sender.messages), len(store.notifications))
+		}
+	})
+
+	t.Run("mismatching count fails closed before non-due return", func(t *testing.T) {
+		runner, store, sender := newRunner()
+		required := 2
+		report, err := runner.Run(context.Background(), Options{ReminderID: &targetID, RequireRecipientCount: &required})
+		if !errors.Is(err, ErrRecipientCountMismatch) || report.Evaluated != 1 || report.Due != 0 || report.RecipientCount != 1 {
+			t.Fatalf("report=%+v err=%v", report, err)
+		}
+		if len(sender.messages) != 0 || len(store.notifications) != 0 {
+			t.Fatalf("non-due mismatch mutated: sends=%d audits=%d", len(sender.messages), len(store.notifications))
 		}
 	})
 }

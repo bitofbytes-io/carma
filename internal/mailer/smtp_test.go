@@ -55,6 +55,8 @@ type smtpCapture struct {
 
 type smtpFixtureOptions struct {
 	rejectRecipientNumber int
+	rejectData            bool
+	rejectDataCommand     bool
 }
 
 func TestSMTPImplicitTLSAuthenticatedDelivery(t *testing.T) {
@@ -136,6 +138,48 @@ func TestSMTPRecipientRejectionResetsWholeTransactionBeforeDATA(t *testing.T) {
 	got := <-capture
 	if got.rcptAttempts != 2 || !got.resetSeen || got.dataAttempted || got.data != "" {
 		t.Fatalf("transaction was not all-or-none: %+v", got)
+	}
+}
+
+func TestSMTPFinalDATARejectionIsSanitized(t *testing.T) {
+	serverTLS, roots := testTLSCertificate(t)
+	address, capture, done := startSMTPServer(t, serverTLS, "carma", "password", false, smtpFixtureOptions{rejectData: true})
+	sender, _ := NewSMTP(address, "carma", "password", "carma@bitofbytes.io", "Carma")
+	sender.tlsConfig.RootCAs = roots
+	_, err := sender.Send(context.Background(), Message{Recipients: []string{"private@example.com"}, Subject: "subject", Body: "rejected body"})
+	var statusErr *SMTPStatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != 554 || statusErr.Class != 5 {
+		t.Fatalf("status error = %#v, err=%v", statusErr, err)
+	}
+	if strings.Contains(err.Error(), "private@example.com") || strings.Contains(err.Error(), "private relay detail") {
+		t.Fatalf("DATA rejection leaked relay text: %v", err)
+	}
+	if serverErr := <-done; serverErr != nil && !errors.Is(serverErr, io.EOF) {
+		t.Fatal(serverErr)
+	}
+	if got := <-capture; !got.dataAttempted || !strings.Contains(got.data, "rejected body") {
+		t.Fatalf("server did not exercise final DATA rejection: %+v", got)
+	}
+}
+
+func TestSMTPDATACommandRejectionIsSanitized(t *testing.T) {
+	serverTLS, roots := testTLSCertificate(t)
+	address, capture, done := startSMTPServer(t, serverTLS, "carma", "password", false, smtpFixtureOptions{rejectDataCommand: true})
+	sender, _ := NewSMTP(address, "carma", "password", "carma@bitofbytes.io", "Carma")
+	sender.tlsConfig.RootCAs = roots
+	_, err := sender.Send(context.Background(), Message{Recipients: []string{"private@example.com"}, Subject: "subject", Body: "must not transmit"})
+	var statusErr *SMTPStatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != 554 || statusErr.Class != 5 {
+		t.Fatalf("status error = %#v, err=%v", statusErr, err)
+	}
+	if strings.Contains(err.Error(), "private@example.com") || strings.Contains(err.Error(), "private DATA command detail") {
+		t.Fatalf("DATA command rejection leaked relay text: %v", err)
+	}
+	if serverErr := <-done; serverErr != nil && !errors.Is(serverErr, io.EOF) {
+		t.Fatal(serverErr)
+	}
+	if got := <-capture; !got.dataAttempted || got.data != "" {
+		t.Fatalf("DATA command rejection transmitted a body: %+v", got)
 	}
 }
 
@@ -296,7 +340,9 @@ func startSMTPServer(t *testing.T, certificate tls.Certificate, username, passwo
 				err = writeReply("250 transaction reset\r\n")
 			case command == "DATA":
 				got.dataAttempted = true
-				if err = writeReply("354 send data\r\n"); err == nil {
+				if options.rejectDataCommand {
+					err = writeReply("554 private@example.com rejected: private DATA command detail\r\n")
+				} else if err = writeReply("354 send data\r\n"); err == nil {
 					var data strings.Builder
 					for {
 						dataLine, dataErr := reader.ReadString('\n')
@@ -311,7 +357,11 @@ func startSMTPServer(t *testing.T, certificate tls.Certificate, username, passwo
 					}
 					got.data = data.String()
 					if err == nil {
-						err = writeReply("250 accepted\r\n")
+						if options.rejectData {
+							err = writeReply("554 private@example.com rejected: private relay detail\r\n")
+						} else {
+							err = writeReply("250 accepted\r\n")
+						}
 					}
 				}
 			case command == "QUIT":
