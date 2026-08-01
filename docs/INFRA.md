@@ -19,7 +19,7 @@ Everything below follows the naming conventions already used by dined and noted.
 | App port | `4700` |
 | Postgres | bahamut `192.168.1.2:8432`, role + db `carma` |
 | NFS share | bahamut `/volume1/carma-assets` → volume `carma_assets` → `/data/assets` |
-| Secrets | `carma_database_url`, `carma_google_client_id`, `carma_google_client_secret`, (stretch) `carma_smtp_url` |
+| Secrets | `carma_database_url`, `carma_google_client_id`, `carma_google_client_secret`, `carma_smtp_password` |
 | Bare CI repo | `/srv/git/carma-ci.git` on crystal1 |
 | GitHub environment | Carma repository-specific `crystal1` environment |
 
@@ -114,8 +114,8 @@ secrets:
     external: true
 ```
 
-(When email reminders ship: add `carma_smtp_url` to secrets and
-`SMTP_URL_FILE: /run/secrets/carma_smtp_url` to environment.)
+Email reminders use separate SMTP settings and mount the password-only external
+secret `carma_smtp_password` at `/run/secrets/carma_smtp_password`.
 
 ### 2. Traefik router (`traefik/dynamic/dynamic.routers-services.yml`)
 
@@ -265,11 +265,16 @@ Ordered; items 1-6 can happen before any code exists.
 11. **Monitoring** - add an Uptime Kuma HTTP monitor for
     `https://carma.bitofbytes.io/health` using the existing notification channel.
 
-## Stretch: email reminders
+## Email reminders
 
-- Create secret `carma_smtp_url` (e.g. a Gmail app password:
-  `smtp://user%40gmail.com:<app-pw>@smtp.gmail.com:587`, or the household Synology
-  mail relay).
-- Add the secret + `SMTP_URL_FILE` env to `carma-stack.yml` and redeploy.
-- No other infra changes; the scheduler activates itself when the secret is
-  present.
+- Use the dedicated non-admin MailPlus account `carma@bitofbytes.io` and store its
+  unique password outside the repository.
+- Submit to `mail.bitofbytes.io:465` with implicit TLS. Certificate chain and
+  hostname verification must remain enabled.
+- Never put the password in a URL, environment variable, command argument, or log.
+- Use `/app/carma-reminders --dry-run --reminder-id <uuid>` for a read-only
+  eligibility check. Remove `--dry-run` for the controlled send, confirm inbox
+  delivery plus one audit row, then rerun to prove 30-day suppression.
+- Rotate through a temporary versioned Swarm secret targeted to the same container
+  path, recreate the fixed-name secret, switch back, and remove the temporary secret
+  only after every replica and a targeted proof are healthy.

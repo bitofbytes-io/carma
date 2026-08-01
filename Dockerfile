@@ -5,7 +5,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma ./cmd/carma \
- && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma-migrate ./cmd/carma-migrate
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma-migrate ./cmd/carma-migrate \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma-reminders ./cmd/carma-reminders
 
 FROM alpine:3.23
 WORKDIR /app
@@ -14,7 +15,7 @@ RUN apk add --no-cache ca-certificates wget \
  && adduser -u 10001 -S -G carma carma \
  && mkdir -p /data/assets \
  && chown -R carma:carma /app /data/assets
-COPY --from=builder /out/carma /out/carma-migrate ./
+COPY --from=builder /out/carma /out/carma-migrate /out/carma-reminders ./
 COPY --chown=carma:carma static ./static
 ENV PORT=4700 ASSET_ROOT=/data/assets
 USER carma

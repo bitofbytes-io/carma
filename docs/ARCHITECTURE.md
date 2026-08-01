@@ -18,7 +18,7 @@ automatic migration job in the deploy hook.
 | Auth | Google OAuth/OIDC + email allowlist + hashed cookie sessions | dined |
 | File storage | Opaque-key filesystem store on NFS volume (`/data/assets`) | noted |
 | Export | `encoding/csv` (stdlib); XLSX later via `github.com/xuri/excelize/v2` | new |
-| Email (stretch) | stdlib/`net/smtp`-compatible client, config via `carma_smtp_url` secret | new |
+| Email | stdlib SMTP over implicit TLS, password via `carma_smtp_password` | new |
 
 ### Why a monolith + HTMX and not an SPA
 
@@ -35,7 +35,7 @@ flowchart LR
   Traefik -->|"http://carma:4700"| App["proxy_carma x3 (Go + HTMX)"]
   App --> PG[("Postgres @ bahamut:8432, db carma")]
   App --> NFS["NFS volume carma_assets -> bahamut /volume1/carma-assets"]
-  App -.->|stretch| SMTP["SMTP relay (email reminders)"]
+  App --> SMTP["SMTP relay (overdue reminders)"]
 ```
 
 - **Port:** 4700 (dined uses 4600, noted 8080; each app gets its own).
@@ -62,8 +62,9 @@ carma/
 │   ├── model/            # domain types + validation
 │   ├── repository/       # pgx SQL for vehicles/records/attachments/reminders
 │   ├── assets/           # filesystem asset store (ported from noted)
-│   ├── reminder/         # due-status computation + (stretch) scheduler
-│   ├── mailer/           # (stretch) SMTP client
+│   ├── reminder/         # due-status computation
+│   ├── reminderemail/    # scheduler, runner, and message rendering
+│   ├── mailer/           # implicit-TLS SMTP client
 │   ├── export/           # CSV (later XLSX) writers
 │   └── ui/               # html/template views, HTMX partials
 ├── migrations/           # 001_..., embedded via embed.go
@@ -131,15 +132,15 @@ reminder snapshots that effective odometer when first created. Edits preserve it
 creation date and snapshot, while logging a matching record naturally replaces both
 first-cycle baselines.
 
-## Email reminders (stretch)
+## Email reminders
 
-- `internal/reminder.Scheduler`: ticker fires daily; takes a Postgres advisory lock
+- `internal/reminderemail.Schedule`: runs at startup and daily; its runner takes a Postgres session advisory lock
   (`pg_try_advisory_lock`) so only one of the 3 replicas sends.
 - For each enabled, overdue reminder: skip if a `reminder_notifications` row exists
   within the last 30 days; otherwise send and log.
-- `internal/mailer`: plain SMTP using `carma_smtp_url`
-  (`smtp://user:pass@host:587`), read via the `*_FILE` secret pattern. Absent secret
-  = scheduler never starts; the feature is fully optional at runtime.
+- `internal/mailer`: authenticated SMTP over certificate-verified implicit TLS.
+  Separate configuration fields keep the password in a password-only `*_FILE` secret.
+  `REMINDER_EMAIL_ENABLED=false` leaves the scheduler off.
 - Email content: vehicle, service type, baseline (last done date/mileage), what
   triggered it (time or mileage), and a link to the vehicle page.
 
@@ -161,7 +162,7 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `ASSET_ROOT` | stack env (`/data/assets`) | receipt/photo storage root |
 | `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
 | `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
-| `SMTP_URL` (stretch) | secret `carma_smtp_url` | email reminders |
+| `SMTP_PASSWORD` | secret `carma_smtp_password` via `SMTP_PASSWORD_FILE` | email reminders |
 
 ## CI/CD pipeline
 

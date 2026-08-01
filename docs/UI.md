@@ -59,7 +59,7 @@ flowchart TD
   G --> H[Matching reminder baseline resets automatically]
 ```
 
-### Reminder lifecycle (email delivery is stretch)
+### Reminder lifecycle
 
 ```mermaid
 flowchart TD
@@ -68,8 +68,8 @@ flowchart TD
   S --> C{Daily evaluation and page render}
   C -->|"within 30 days / 500 miles"| D[Due soon - amber on dashboard]
   C -->|"past date or mileage threshold"| E[Overdue - red on dashboard]
-  E -.->|stretch| F{Email sent in last 30 days?}
-  F -.->|no| G[Send email, log notification]
+  E --> F{Email sent in last 30 days?}
+  F -->|no| G[Send email, log notification]
   F -.->|yes| H[Wait]
   D --> I[User logs matching record]
   E --> I
@@ -194,7 +194,8 @@ directly into the form.
 └──────────────────────────────────────────────────────┘
 ```
 
-(Stretch adds an "Extra email recipients" field per row.)
+(Recipients come from the normalized Carma user list; reminders do not have a
+per-row recipient field.)
 
 ### 6. Login (`/login`)
 
