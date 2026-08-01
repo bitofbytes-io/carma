@@ -38,6 +38,9 @@ and every 24 hours, sends only overdue reminders through certificate-verified im
 TLS, and coordinates replicas with a PostgreSQL advisory lock. Successful deliveries
 are audited and suppress repeats for the exact rolling prior 30 days. The image also
 provides `/app/carma-reminders` with `--dry-run` and `--reminder-id <uuid>`.
+For production proofs, add `--require-recipient-count <n>` to a targeted run; it
+compares only the normalized recipient count and refuses to send or audit on a
+mismatch. Recipient addresses cannot be supplied or overridden through the CLI.
 
 Validation commands are `make test`, `make lint`, and `make build`. Run
 `make test-integration` to start the local Compose Postgres and execute the real

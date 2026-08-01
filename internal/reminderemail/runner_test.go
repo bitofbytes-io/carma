@@ -129,7 +129,7 @@ func TestRunnerSuppressionBoundaryAndRetryAfterFailure(t *testing.T) {
 		})
 	}
 	store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}}
-	sender := &fakeSender{err: errors.New("relay unavailable")}
+	sender := &fakeSender{err: &mailer.SMTPStatusError{Operation: "SMTP recipient rejected", Code: 550, Class: 5}}
 	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runner.now = func() time.Time { return now }
 	report, err := runner.Run(context.Background(), Options{})
@@ -165,4 +165,50 @@ func TestRunnerDryRunAndTargeting(t *testing.T) {
 	if _, err = runner.Run(context.Background(), Options{DryRun: true, ReminderID: &missing}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("missing target error = %v", err)
 	}
+}
+
+func TestRunnerRequiredRecipientCountMatchAndMismatch(t *testing.T) {
+	now := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
+	month, targetID := 1, uuid.New()
+	reminder := model.Reminder{ID: targetID, VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true, CreatedAt: now.AddDate(0, -2, 0)}
+	newRunner := func() (*Runner, *fakeStore, *fakeSender) {
+		store := &fakeStore{lockAvailable: true, emails: []string{"first@example.com", " FIRST@example.com ", "second@example.com"}, reminders: []model.Reminder{reminder}}
+		sender := &fakeSender{}
+		runner := NewRunner(store, sender, "https://carma.bitofbytes.io", slog.New(slog.NewTextHandler(io.Discard, nil)))
+		runner.now = func() time.Time { return now }
+		return runner, store, sender
+	}
+
+	t.Run("matching live targeted run sends and audits", func(t *testing.T) {
+		runner, store, sender := newRunner()
+		required := 2
+		report, err := runner.Run(context.Background(), Options{ReminderID: &targetID, RequireRecipientCount: &required})
+		if err != nil || report.RecipientCount != 2 || report.Sent != 1 || len(sender.messages) != 1 || len(store.notifications) != 1 {
+			t.Fatalf("report=%+v sends=%d audits=%d err=%v", report, len(sender.messages), len(store.notifications), err)
+		}
+	})
+
+	t.Run("mismatching live targeted run sends nothing", func(t *testing.T) {
+		runner, store, sender := newRunner()
+		required := 1
+		report, err := runner.Run(context.Background(), Options{ReminderID: &targetID, RequireRecipientCount: &required})
+		if !errors.Is(err, ErrRecipientCountMismatch) || report.RecipientCount != 2 {
+			t.Fatalf("report=%+v err=%v", report, err)
+		}
+		if len(sender.messages) != 0 || len(store.notifications) != 0 {
+			t.Fatalf("mismatch mutated: sends=%d audits=%d", len(sender.messages), len(store.notifications))
+		}
+	})
+
+	t.Run("mismatching dry run does not lock or mutate", func(t *testing.T) {
+		runner, store, sender := newRunner()
+		required := 1
+		report, err := runner.Run(context.Background(), Options{DryRun: true, ReminderID: &targetID, RequireRecipientCount: &required})
+		if !errors.Is(err, ErrRecipientCountMismatch) || report.RecipientCount != 2 {
+			t.Fatalf("report=%+v err=%v", report, err)
+		}
+		if store.lockCalls != 0 || len(sender.messages) != 0 || len(store.notifications) != 0 {
+			t.Fatalf("dry mismatch mutated: locks=%d sends=%d audits=%d", store.lockCalls, len(sender.messages), len(store.notifications))
+		}
+	})
 }

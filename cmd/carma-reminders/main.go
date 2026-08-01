@@ -50,7 +50,7 @@ func run(args []string, output io.Writer) error {
 	}
 	runner := reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, slog.Default())
 	report, err := runner.Run(ctx, options)
-	if _, printErr := fmt.Fprintf(output, "evaluated=%d due=%d suppressed=%d sent=%d failed=%d lock_contended=%t dry_run=%t\n", report.Evaluated, report.Due, report.Suppressed, report.Sent, report.Failed, report.LockContended, options.DryRun); printErr != nil {
+	if _, printErr := fmt.Fprintf(output, "evaluated=%d due=%d recipients=%d suppressed=%d sent=%d failed=%d lock_contended=%t dry_run=%t\n", report.Evaluated, report.Due, report.RecipientCount, report.Suppressed, report.Sent, report.Failed, report.LockContended, options.DryRun); printErr != nil {
 		return errors.Join(err, printErr)
 	}
 	return err
@@ -63,6 +63,8 @@ func parseOptions(args []string) (reminderemail.Options, error) {
 	flags.BoolVar(&options.DryRun, "dry-run", false, "evaluate without locking, sending, or auditing")
 	var reminderID string
 	flags.StringVar(&reminderID, "reminder-id", "", "process one reminder UUID")
+	requiredRecipientCount := -1
+	flags.IntVar(&requiredRecipientCount, "require-recipient-count", -1, "refuse a targeted run unless the normalized recipient count exactly matches")
 	if err := flags.Parse(args); err != nil {
 		return options, err
 	}
@@ -75,6 +77,15 @@ func parseOptions(args []string) (reminderemail.Options, error) {
 			return options, fmt.Errorf("invalid --reminder-id: %w", err)
 		}
 		options.ReminderID = &id
+	}
+	if requiredRecipientCount != -1 {
+		if requiredRecipientCount < 1 {
+			return options, errors.New("--require-recipient-count must be a positive integer")
+		}
+		if options.ReminderID == nil {
+			return options, errors.New("--require-recipient-count requires --reminder-id")
+		}
+		options.RequireRecipientCount = &requiredRecipientCount
 	}
 	return options, nil
 }

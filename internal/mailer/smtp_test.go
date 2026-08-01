@@ -46,8 +46,15 @@ func TestWriteMessageRejectsHeaderInjection(t *testing.T) {
 }
 
 type smtpCapture struct {
-	recipients []string
-	data       string
+	recipients    []string
+	data          string
+	rcptAttempts  int
+	dataAttempted bool
+	resetSeen     bool
+}
+
+type smtpFixtureOptions struct {
+	rejectRecipientNumber int
 }
 
 func TestSMTPImplicitTLSAuthenticatedDelivery(t *testing.T) {
@@ -107,6 +114,28 @@ func TestSMTPAuthenticationFailure(t *testing.T) {
 	}
 	if err := <-done; err != nil && !errors.Is(err, io.EOF) {
 		t.Fatal(err)
+	}
+}
+
+func TestSMTPRecipientRejectionResetsWholeTransactionBeforeDATA(t *testing.T) {
+	serverTLS, roots := testTLSCertificate(t)
+	address, capture, done := startSMTPServer(t, serverTLS, "carma", "password", false, smtpFixtureOptions{rejectRecipientNumber: 2})
+	sender, _ := NewSMTP(address, "carma", "password", "carma@bitofbytes.io", "Carma")
+	sender.tlsConfig.RootCAs = roots
+	_, err := sender.Send(context.Background(), Message{Recipients: []string{"one@example.com", "two@example.com"}, Subject: "subject", Body: "must not deliver"})
+	var statusErr *SMTPStatusError
+	if !errors.As(err, &statusErr) || statusErr.Code != 550 || statusErr.Class != 5 {
+		t.Fatalf("status error = %#v, err=%v", statusErr, err)
+	}
+	if strings.Contains(err.Error(), "two@example.com") || strings.Contains(err.Error(), "private relay detail") {
+		t.Fatalf("recipient rejection leaked relay text: %v", err)
+	}
+	if serverErr := <-done; serverErr != nil && !errors.Is(serverErr, io.EOF) {
+		t.Fatal(serverErr)
+	}
+	got := <-capture
+	if got.rcptAttempts != 2 || !got.resetSeen || got.dataAttempted || got.data != "" {
+		t.Fatalf("transaction was not all-or-none: %+v", got)
 	}
 }
 
@@ -196,7 +225,7 @@ func testTLSCertificate(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	return certificate, roots
 }
 
-func startSMTPServer(t *testing.T, certificate tls.Certificate, username, password string, failQuit bool) (string, <-chan smtpCapture, <-chan error) {
+func startSMTPServer(t *testing.T, certificate tls.Certificate, username, password string, failQuit bool, fixtureOptions ...smtpFixtureOptions) (string, <-chan smtpCapture, <-chan error) {
 	t.Helper()
 	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
 	if err != nil {
@@ -224,6 +253,11 @@ func startSMTPServer(t *testing.T, certificate tls.Certificate, username, passwo
 			return
 		}
 		var got smtpCapture
+		defer func() { capture <- got }()
+		var options smtpFixtureOptions
+		if len(fixtureOptions) > 0 {
+			options = fixtureOptions[0]
+		}
 		for {
 			line, readErr := reader.ReadString('\n')
 			if readErr != nil {
@@ -244,9 +278,19 @@ func startSMTPServer(t *testing.T, certificate tls.Certificate, username, passwo
 			case strings.HasPrefix(command, "MAIL FROM:"):
 				err = writeReply("250 sender ok\r\n")
 			case strings.HasPrefix(command, "RCPT TO:"):
-				got.recipients = append(got.recipients, strings.Trim(strings.TrimPrefix(command, "RCPT TO:"), "<>"))
-				err = writeReply("250 recipient ok\r\n")
+				got.rcptAttempts++
+				if options.rejectRecipientNumber == got.rcptAttempts {
+					err = writeReply("550 two@example.com rejected: private relay detail\r\n")
+				} else {
+					got.recipients = append(got.recipients, strings.Trim(strings.TrimPrefix(command, "RCPT TO:"), "<>"))
+					err = writeReply("250 recipient ok\r\n")
+				}
+			case command == "RSET":
+				got.resetSeen = true
+				got.recipients = nil
+				err = writeReply("250 transaction reset\r\n")
 			case command == "DATA":
+				got.dataAttempted = true
 				if err = writeReply("354 send data\r\n"); err == nil {
 					var data strings.Builder
 					for {
@@ -261,7 +305,6 @@ func startSMTPServer(t *testing.T, certificate tls.Certificate, username, passwo
 						data.WriteString(dataLine)
 					}
 					got.data = data.String()
-					capture <- got
 					if err == nil {
 						err = writeReply("250 accepted\r\n")
 					}

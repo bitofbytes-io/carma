@@ -19,15 +19,19 @@ import (
 
 const SuppressionWindow = 30 * 24 * time.Hour
 
+var ErrRecipientCountMismatch = errors.New("reminder recipient count mismatch")
+
 type Options struct {
-	DryRun     bool
-	ReminderID *uuid.UUID
+	DryRun                bool
+	ReminderID            *uuid.UUID
+	RequireRecipientCount *int
 }
 
 type Report struct {
 	LockContended, TargetFound bool
 	Evaluated, Due             int
 	Suppressed, Sent, Failed   int
+	RecipientCount             int
 }
 
 type Runner struct {
@@ -87,6 +91,19 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 	var sendErrors []error
 	var recipients []string
 	recipientsLoaded := false
+	loadRecipients := func() error {
+		if recipientsLoaded {
+			return nil
+		}
+		rawRecipients, recipientErr := r.store.ListReminderRecipientEmails(ctx)
+		if recipientErr != nil {
+			return fmt.Errorf("list reminder recipients: %w", recipientErr)
+		}
+		recipients = NormalizeRecipients(rawRecipients)
+		recipientsLoaded = true
+		report.RecipientCount = len(recipients)
+		return nil
+	}
 	for _, candidate := range reminders {
 		if err := ctx.Err(); err != nil {
 			return report, errors.Join(err, errors.Join(sendErrors...))
@@ -97,6 +114,14 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 			continue
 		}
 		report.Due++
+		if options.RequireRecipientCount != nil {
+			if err := loadRecipients(); err != nil {
+				return report, errors.Join(err, errors.Join(sendErrors...))
+			}
+			if len(recipients) != *options.RequireRecipientCount {
+				return report, errors.Join(fmt.Errorf("%w: required %d, found %d", ErrRecipientCountMismatch, *options.RequireRecipientCount, len(recipients)), errors.Join(sendErrors...))
+			}
+		}
 		suppressed, err := r.store.ReminderNotificationSince(ctx, candidate.ID, runTime.Add(-SuppressionWindow))
 		if err != nil {
 			report.Failed++
@@ -108,15 +133,12 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 			continue
 		}
 		if !recipientsLoaded {
-			rawRecipients, recipientErr := r.store.ListReminderRecipientEmails(ctx)
-			if recipientErr != nil {
-				return report, errors.Join(fmt.Errorf("list reminder recipients: %w", recipientErr), errors.Join(sendErrors...))
+			if err := loadRecipients(); err != nil {
+				return report, errors.Join(err, errors.Join(sendErrors...))
 			}
-			recipients = NormalizeRecipients(rawRecipients)
-			recipientsLoaded = true
-			if len(recipients) == 0 {
-				return report, errors.Join(errors.New("no valid reminder email recipients"), errors.Join(sendErrors...))
-			}
+		}
+		if len(recipients) == 0 {
+			return report, errors.Join(errors.New("no valid reminder email recipients"), errors.Join(sendErrors...))
 		}
 		if options.DryRun {
 			continue

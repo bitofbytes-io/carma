@@ -104,7 +104,13 @@ func TestReminderNotificationsMigrationAuditShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.ToLower(string(down)), "drop table if exists reminder_notifications") {
-		t.Fatal("notification down migration does not remove table")
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '003_reminder_notifications'",
+		"drop table if exists reminder_notifications",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("notification down migration missing %q", declaration)
+		}
 	}
 }

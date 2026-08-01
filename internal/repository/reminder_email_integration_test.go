@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -28,7 +29,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err != nil {
 		t.Skipf("integration Postgres unavailable (%v); run `make test-integration`", err)
 	}
-	defer admin.Close(context.Background())
+	defer func() { _ = admin.Close(context.Background()) }()
 
 	schema := "carma_email_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if _, err = admin.Exec(context.Background(), `CREATE SCHEMA `+schema); err != nil {
@@ -45,6 +46,33 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	}
 	if err = database.Migrate(context.Background(), migrationConnection, migrations.FS); err != nil {
 		t.Fatal(err)
+	}
+	downMigration, err := migrations.FS.ReadFile("003_reminder_notifications.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = migrationConnection.Exec(context.Background(), string(downMigration)); err != nil {
+		t.Fatal(err)
+	}
+	var tableName *string
+	if err = migrationConnection.QueryRow(context.Background(), `SELECT to_regclass('reminder_notifications')::text`).Scan(&tableName); err != nil {
+		t.Fatal(err)
+	}
+	var versionPresent bool
+	if err = migrationConnection.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version='003_reminder_notifications')`).Scan(&versionPresent); err != nil {
+		t.Fatal(err)
+	}
+	if tableName != nil || versionPresent {
+		t.Fatalf("down migration left table=%v version=%t", tableName, versionPresent)
+	}
+	if err = database.Migrate(context.Background(), migrationConnection, migrations.FS); err != nil {
+		t.Fatalf("reapply after down migration: %v", err)
+	}
+	if err = migrationConnection.QueryRow(context.Background(), `SELECT to_regclass('reminder_notifications')::text`).Scan(&tableName); err != nil {
+		t.Fatal(err)
+	}
+	if tableName == nil {
+		t.Fatal("reapply did not recreate reminder_notifications")
 	}
 	if err = migrationConnection.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -65,7 +93,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer seed.Close(context.Background())
+	defer func() { _ = seed.Close(context.Background()) }()
 	userID, vehicleID, serviceTypeID, reminderID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	for _, statement := range []struct {
 		sql  string
@@ -112,15 +140,46 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err = unlockTwo(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+
+	limitedURL, err := withDatabaseParameter(scopedURL, "pool_max_conns", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedStore, err := repository.NewPostgres(context.Background(), limitedURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer limitedStore.Close()
+	unlockLimited, acquired, err := limitedStore.TryReminderEmailLock(context.Background())
+	if err != nil || !acquired {
+		t.Fatalf("limited-pool lock acquired=%t err=%v", acquired, err)
+	}
+	shortContext, cancelShort := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	started := time.Now()
+	_, _, err = limitedStore.TryReminderEmailLock(shortContext)
+	cancelShort()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("limited-pool acquire error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("caller acquire deadline took %v", elapsed)
+	}
+	if err = unlockLimited(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func withSearchPath(databaseURL, schema string) (string, error) {
+	return withDatabaseParameter(databaseURL, "search_path", schema)
+}
+
+func withDatabaseParameter(databaseURL, key, value string) (string, error) {
 	parsed, err := url.Parse(databaseURL)
 	if err != nil {
 		return "", fmt.Errorf("parse test database URL: %w", err)
 	}
 	query := parsed.Query()
-	query.Set("search_path", schema)
+	query.Set(key, value)
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
 }

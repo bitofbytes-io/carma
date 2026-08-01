@@ -11,6 +11,7 @@ import (
 )
 
 const reminderEmailAdvisoryLockID int64 = 0x4341524d41454d4c // "CARMAEML"
+const reminderLockAcquireTimeout = 2 * time.Second
 
 type ReminderEmailStore interface {
 	ListReminders(context.Context, *uuid.UUID, bool) ([]model.Reminder, error)
@@ -52,7 +53,9 @@ func (p *Postgres) CreateReminderNotification(ctx context.Context, notification 
 }
 
 func (p *Postgres) TryReminderEmailLock(ctx context.Context) (func(context.Context) error, bool, error) {
-	connection, err := p.pool.Acquire(ctx)
+	acquireContext, cancelAcquire := boundedReminderLockAcquireContext(ctx)
+	defer cancelAcquire()
+	connection, err := p.pool.Acquire(acquireContext)
 	if err != nil {
 		return nil, false, fmt.Errorf("acquire reminder lock connection: %w", err)
 	}
@@ -80,4 +83,12 @@ func (p *Postgres) TryReminderEmailLock(ctx context.Context) (func(context.Conte
 		return unlockErr
 	}
 	return unlock, true, nil
+}
+
+func boundedReminderLockAcquireContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	maximumDeadline := time.Now().Add(reminderLockAcquireTimeout)
+	if callerDeadline, ok := ctx.Deadline(); ok && !callerDeadline.After(maximumDeadline) {
+		return context.WithCancel(ctx)
+	}
+	return context.WithDeadline(ctx, maximumDeadline)
 }

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -26,6 +27,21 @@ type Message struct {
 
 type Sender interface {
 	Send(context.Context, Message) (string, error)
+}
+
+// SMTPStatusError preserves only protocol status metadata. Relay response text is
+// deliberately excluded because it can echo an envelope recipient address.
+type SMTPStatusError struct {
+	Operation string
+	Code      int
+	Class     int
+}
+
+func (e *SMTPStatusError) Error() string {
+	if e.Code == 0 {
+		return e.Operation + ": SMTP status unavailable"
+	}
+	return fmt.Sprintf("%s: SMTP status %d (class %dxx)", e.Operation, e.Code, e.Class)
 }
 
 type SMTP struct {
@@ -90,9 +106,11 @@ func (s *SMTP) Send(ctx context.Context, message Message) (messageID string, err
 	}
 	for _, recipient := range message.Recipients {
 		if err = client.Rcpt(recipient); err != nil {
-			// Relay responses can echo the envelope address, so do not expose
-			// the raw response to application logs.
-			return "", errors.New("SMTP recipient rejected")
+			statusErr := sanitizedSMTPStatusError("SMTP recipient rejected", err)
+			// Cancel the entire envelope transaction. Even recipients accepted
+			// before this rejection receive nothing because DATA is never sent.
+			_ = client.Reset()
+			return "", statusErr
 		}
 	}
 	messageID = fmt.Sprintf("<%s@%s>", s.newID(), messageIDDomain(s.fromAddress))
@@ -111,6 +129,14 @@ func (s *SMTP) Send(ctx context.Context, message Message) (messageID string, err
 	// must not turn an accepted message into an unaudited retry.
 	_ = client.Quit()
 	return messageID, nil
+}
+
+func sanitizedSMTPStatusError(operation string, err error) error {
+	var protocolError *textproto.Error
+	if errors.As(err, &protocolError) {
+		return &SMTPStatusError{Operation: operation, Code: protocolError.Code, Class: protocolError.Code / 100}
+	}
+	return &SMTPStatusError{Operation: operation}
 }
 
 func writeMessage(writer io.Writer, now time.Time, fromName, fromAddress, messageID string, message Message) error {
