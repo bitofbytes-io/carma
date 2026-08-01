@@ -68,6 +68,67 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 	}
 }
 
+func TestVehicleTemplateRendersReminderIntervals(t *testing.T) {
+	months6 := 6
+	months12 := 12
+	var miles10000 int64 = 10000
+	var miles30000 int64 = 30000
+	tests := []struct {
+		name   string
+		months *int
+		miles  *int64
+		want   string
+	}{
+		{name: "months and mileage", months: &months6, miles: &miles10000, want: "6 mo / 10000 mi"},
+		{name: "mileage only", miles: &miles30000, want: "30000 mi"},
+		{name: "months only", months: &months12, want: "12 mo"},
+		{name: "neither", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			type data struct {
+				Title         string
+				Error         string
+				Flash         string
+				Authenticated bool
+				User          *model.User
+				NavVehicles   []model.Vehicle
+				Vehicle       model.Vehicle
+				Params        url.Values
+				Types         []model.ServiceType
+				Records       []model.Record
+				Reminders     []reminder.Result
+			}
+			vehicle := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
+			row := reminder.Result{
+				Reminder: model.Reminder{
+					ID:              uuid.New(),
+					VehicleID:       vehicle.ID,
+					ServiceTypeID:   uuid.New(),
+					ServiceTypeName: "Oil change",
+					IntervalMonths:  tt.months,
+					IntervalMiles:   tt.miles,
+					Enabled:         true,
+				},
+				Status: reminder.OK,
+			}
+			var b bytes.Buffer
+			if err := r.Render(&b, "vehicle", data{Authenticated: true, User: &model.User{}, Vehicle: vehicle, Params: url.Values{}, Reminders: []reminder.Result{row}}); err != nil {
+				t.Fatal(err)
+			}
+			rendered := b.String()
+			if want := "<small>" + tt.want + "</small>"; !strings.Contains(rendered, want) {
+				t.Fatalf("missing reminder interval %q in %s", want, rendered)
+			}
+		})
+	}
+}
+
 func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 	r, err := New()
 	if err != nil {

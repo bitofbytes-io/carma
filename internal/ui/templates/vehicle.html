@@ -7,7 +7,7 @@
 {{if .Vehicle.ArchivedAt}}<div class="alert">This vehicle is archived. Its history remains available.</div>{{end}}
 <div class="detail-grid">
   {{template "records-section" .}}
-  <aside class="card reminder-panel"><div class="section-head"><h2>Reminders</h2></div>{{if .Reminders}}{{range .Reminders}}<div class="reminder-summary"><span class="dot {{.Status}}"></span><div><strong>{{.Reminder.ServiceTypeName}}</strong> <span class="status {{.Status}}">{{.Status}}</span><small>{{if .Reminder.IntervalMonths}}{{.Reminder.IntervalMonths}} mo{{end}}{{if .Reminder.IntervalMiles}} / {{.Reminder.IntervalMiles}} mi{{end}}</small></div></div>{{end}}{{else}}<p class="muted">No reminders configured.</p>{{end}}<a href="/vehicles/{{.Vehicle.ID}}/reminders">Manage reminders ›</a></aside>
+  <aside class="card reminder-panel"><div class="section-head"><h2>Reminders</h2></div>{{if .Reminders}}{{range .Reminders}}<div class="reminder-summary"><span class="dot {{.Status}}"></span><div><strong>{{.Reminder.ServiceTypeName}}</strong> <span class="status {{.Status}}">{{.Status}}</span><small>{{if .Reminder.IntervalMonths}}{{.Reminder.IntervalMonths}} mo{{end}}{{if and .Reminder.IntervalMonths .Reminder.IntervalMiles}} / {{end}}{{if .Reminder.IntervalMiles}}{{.Reminder.IntervalMiles}} mi{{end}}</small></div></div>{{end}}{{else}}<p class="muted">No reminders configured.</p>{{end}}<a href="/vehicles/{{.Vehicle.ID}}/reminders">Manage reminders ›</a></aside>
 </div>
 {{end}}
 {{define "records-section"}}<section class="card records-card" id="records-section">
