@@ -152,6 +152,10 @@ func TestLogoutRevokesSessionAndClearsCookie(t *testing.T) {
 }
 
 func formBody(t *testing.T, fields map[string]string, filename string, file []byte) (*bytes.Buffer, string) {
+	return multipartFormBody(t, fields, "receipts", filename, file)
+}
+
+func multipartFormBody(t *testing.T, fields map[string]string, fileField, filename string, file []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	var b bytes.Buffer
 	mw := multipart.NewWriter(&b)
@@ -159,7 +163,7 @@ func formBody(t *testing.T, fields map[string]string, filename string, file []by
 		_ = mw.WriteField(k, v)
 	}
 	if filename != "" {
-		p, e := mw.CreateFormFile("receipts", filename)
+		p, e := mw.CreateFormFile(fileField, filename)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -224,6 +228,63 @@ func TestVehicleEditShowsEffectiveRecordMileage(t *testing.T) {
 	body := response.Body.String()
 	if response.Code != http.StatusOK || !strings.Contains(body, `name="current_odometer"`) || !strings.Contains(body, `value="45123"`) {
 		t.Fatalf("edit form did not show effective mileage: %d %s", response.Code, body)
+	}
+}
+
+func TestVehiclePhotoIsPreservedWithoutUploadAndReplacedWithUpload(t *testing.T) {
+	f := setup(t)
+	originalPhoto := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10}
+	b, ct := multipartFormBody(t, map[string]string{"nickname": "Outback"}, "photo", "original.jpg", originalPhoto)
+	response := f.do(t, http.MethodPost, "/vehicles", b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	vehicles, err := f.store.ListVehicles(t.Context(), false)
+	if err != nil || len(vehicles) != 1 || vehicles[0].PhotoKey == "" {
+		t.Fatalf("created vehicle photo not persisted: vehicles=%+v err=%v", vehicles, err)
+	}
+	vehicle := vehicles[0]
+	originalKey := vehicle.PhotoKey
+
+	b, ct = multipartFormBody(t, map[string]string{"nickname": "Updated Outback", "notes": "No replacement"}, "photo", "", nil)
+	response = f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String(), b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("no-upload update status=%d body=%s", response.Code, response.Body.String())
+	}
+	updated, err := f.store.GetVehicle(t.Context(), vehicle.ID)
+	if err != nil || updated.PhotoKey != originalKey || updated.Nickname != "Updated Outback" {
+		t.Fatalf("no-upload update did not preserve photo: vehicle=%+v err=%v", updated, err)
+	}
+	object, err := f.s.assets.Open(t.Context(), originalKey)
+	if err != nil {
+		t.Fatalf("preserved photo cannot be opened: %v", err)
+	}
+	_ = object.Close()
+
+	replacementPhoto := append([]byte("\x89PNG\r\n\x1a\n"), []byte("replacement")...)
+	b, ct = multipartFormBody(t, map[string]string{"nickname": "Updated Outback", "notes": "Replacement"}, "photo", "replacement.png", replacementPhoto)
+	response = f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String(), b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("replacement update status=%d body=%s", response.Code, response.Body.String())
+	}
+	updated, err = f.store.GetVehicle(t.Context(), vehicle.ID)
+	if err != nil || updated.PhotoKey == "" || updated.PhotoKey == originalKey {
+		t.Fatalf("replacement photo not persisted: vehicle=%+v err=%v", updated, err)
+	}
+	if object, err = f.s.assets.Open(t.Context(), originalKey); err == nil {
+		_ = object.Close()
+		t.Fatalf("original photo remains after replacement at %q", originalKey)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checking removed original photo: %v", err)
+	}
+	object, err = f.s.assets.Open(t.Context(), updated.PhotoKey)
+	if err != nil {
+		t.Fatalf("replacement photo cannot be opened: %v", err)
+	}
+	_ = object.Close()
+	photoResponse := f.do(t, http.MethodGet, "/vehicles/"+vehicle.ID.String()+"/photo", nil, "")
+	if photoResponse.Code != http.StatusOK || photoResponse.Header().Get("Content-Type") != "image/png" || !bytes.Equal(photoResponse.Body.Bytes(), replacementPhoto) {
+		t.Fatalf("replacement photo response status=%d content-type=%q body=%q", photoResponse.Code, photoResponse.Header().Get("Content-Type"), photoResponse.Body.Bytes())
 	}
 }
 
