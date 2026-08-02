@@ -17,6 +17,10 @@
 }
 .reminder-field { display: flex; min-width: 0; }
 .reminder-field .field-label { display: none; }
+.reminder-service select,
+.reminder-update input[type="number"],
+.add-reminder-form select,
+.add-reminder-form input[type="number"] { height: 46px; }
 .reminder-status { align-items: center; }
 .reminder-enabled { align-items: center; justify-content: center; }
 .reminder-enabled input[type="checkbox"] {
@@ -42,6 +46,10 @@
 .add-reminder-form button { white-space: nowrap; }
 .reminder-help { margin: 22px 0 0; }
 
+@media (min-width: 961px) {
+  .reminder-status { justify-content: center; }
+}
+
 @media (max-width: 960px) {
   .reminder-row.header { display: none; }
   .reminder-entry {
@@ -61,7 +69,7 @@
   .reminder-status { align-items: flex-start; justify-content: center; }
   .reminder-enabled { align-items: flex-start; justify-content: center; }
   .reminder-enabled input[type="checkbox"] { margin-top: 2px; }
-  .reminder-actions { justify-content: flex-end; padding-top: 2px; border-top: 1px solid var(--line); }
+  .reminder-actions { justify-content: flex-end; margin-top: 12px; padding-top: 18px; border-top: 1px solid var(--line); }
   .add-reminder-form { grid-template-columns: 1fr; }
   .add-reminder-form button { width: 100%; }
 }
