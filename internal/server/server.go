@@ -341,6 +341,9 @@ func (s *Server) saveVehicle(w http.ResponseWriter, r *http.Request, editing boo
 		if newKey != "" {
 			_ = s.assets.Delete(r.Context(), newKey)
 		}
+		if editing {
+			v.PhotoKey = old.PhotoKey
+		}
 		d, _ := s.base(r, "Vehicle")
 		d.Editing = editing
 		d.Vehicle = v
