@@ -59,6 +59,24 @@ func (s recordingAssetStore) Delete(ctx context.Context, key string) error {
 	return s.Store.Delete(ctx, key)
 }
 
+type trackingAssetStore struct {
+	assets.Store
+	savedKey, deletedKey string
+}
+
+func (s *trackingAssetStore) Save(ctx context.Context, source io.Reader, max int64) (assets.Object, error) {
+	object, err := s.Store.Save(ctx, source, max)
+	if err == nil {
+		s.savedKey = object.Key
+	}
+	return object, err
+}
+
+func (s *trackingAssetStore) Delete(ctx context.Context, key string) error {
+	s.deletedKey = key
+	return s.Store.Delete(ctx, key)
+}
+
 type recordingAttachmentStore struct {
 	repository.Store
 	events *[]string
@@ -259,7 +277,17 @@ func TestVehiclePhotoIsPreservedWithoutUploadAndReplacedWithUpload(t *testing.T)
 	if err != nil {
 		t.Fatalf("preserved photo cannot be opened: %v", err)
 	}
-	_ = object.Close()
+	preservedPhoto, readErr := io.ReadAll(object)
+	closeErr := object.Close()
+	if readErr != nil {
+		t.Fatalf("preserved photo cannot be read: %v", readErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("closing preserved photo: %v", closeErr)
+	}
+	if !bytes.Equal(preservedPhoto, originalPhoto) {
+		t.Fatalf("preserved photo content=%q, want %q", preservedPhoto, originalPhoto)
+	}
 
 	replacementPhoto := append([]byte("\x89PNG\r\n\x1a\n"), []byte("replacement")...)
 	b, ct = multipartFormBody(t, map[string]string{"nickname": "Updated Outback", "notes": "Replacement"}, "photo", "replacement.png", replacementPhoto)
@@ -286,6 +314,86 @@ func TestVehiclePhotoIsPreservedWithoutUploadAndReplacedWithUpload(t *testing.T)
 	if photoResponse.Code != http.StatusOK || photoResponse.Header().Get("Content-Type") != "image/png" || !bytes.Equal(photoResponse.Body.Bytes(), replacementPhoto) {
 		t.Fatalf("replacement photo response status=%d content-type=%q body=%q", photoResponse.Code, photoResponse.Header().Get("Content-Type"), photoResponse.Body.Bytes())
 	}
+}
+
+func TestVehiclePhotoValidationRerenderUsesPersistedPhoto(t *testing.T) {
+	upload := append([]byte("\x89PNG\r\n\x1a\n"), []byte("transient")...)
+
+	t.Run("vehicle without existing photo", func(t *testing.T) {
+		f := setup(t)
+		vehicle := createVehicle(t, f)
+		tracker := &trackingAssetStore{Store: f.s.assets}
+		f.s.assets = tracker
+
+		b, ct := multipartFormBody(t, map[string]string{"nickname": "Outback", "year": "invalid"}, "photo", "transient.png", upload)
+		response := f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String(), b, ct)
+		body := response.Body.String()
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", response.Code, body)
+		}
+		for _, stale := range []string{`class="existing-photo"`, "This photo is already saved.", `/vehicles/` + vehicle.ID.String() + `/photo`} {
+			if strings.Contains(body, stale) {
+				t.Fatalf("validation rerender contains stale photo marker %q: %s", stale, body)
+			}
+		}
+		if !strings.Contains(body, "Optional. Add a photo of your vehicle.") {
+			t.Fatalf("validation rerender is missing no-photo guidance: %s", body)
+		}
+		persisted, err := f.store.GetVehicle(t.Context(), vehicle.ID)
+		if err != nil || persisted.PhotoKey != "" {
+			t.Fatalf("validation changed persisted photo: vehicle=%+v err=%v", persisted, err)
+		}
+		if tracker.savedKey == "" || tracker.deletedKey != tracker.savedKey {
+			t.Fatalf("transient upload cleanup saved=%q deleted=%q", tracker.savedKey, tracker.deletedKey)
+		}
+		if object, err := tracker.Open(t.Context(), tracker.savedKey); err == nil {
+			_ = object.Close()
+			t.Fatalf("transient upload remains at %q", tracker.savedKey)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("checking transient upload cleanup: %v", err)
+		}
+	})
+
+	t.Run("vehicle with existing photo", func(t *testing.T) {
+		f := setup(t)
+		originalPhoto := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10}
+		b, ct := multipartFormBody(t, map[string]string{"nickname": "Outback"}, "photo", "original.jpg", originalPhoto)
+		response := f.do(t, http.MethodPost, "/vehicles", b, ct)
+		if response.Code != http.StatusSeeOther {
+			t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+		}
+		vehicles, err := f.store.ListVehicles(t.Context(), false)
+		if err != nil || len(vehicles) != 1 || vehicles[0].PhotoKey == "" {
+			t.Fatalf("created vehicle photo not persisted: vehicles=%+v err=%v", vehicles, err)
+		}
+		vehicle := vehicles[0]
+		tracker := &trackingAssetStore{Store: f.s.assets}
+		f.s.assets = tracker
+
+		b, ct = multipartFormBody(t, map[string]string{"nickname": "Outback", "year": "invalid"}, "photo", "transient.png", upload)
+		response = f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String(), b, ct)
+		body := response.Body.String()
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", response.Code, body)
+		}
+		for _, current := range []string{`class="existing-photo"`, "This photo is already saved.", `/vehicles/` + vehicle.ID.String() + `/photo`} {
+			if !strings.Contains(body, current) {
+				t.Fatalf("validation rerender is missing persisted photo marker %q: %s", current, body)
+			}
+		}
+		persisted, err := f.store.GetVehicle(t.Context(), vehicle.ID)
+		if err != nil || persisted.PhotoKey != vehicle.PhotoKey {
+			t.Fatalf("validation changed persisted photo: vehicle=%+v err=%v", persisted, err)
+		}
+		if tracker.savedKey == "" || tracker.savedKey == vehicle.PhotoKey || tracker.deletedKey != tracker.savedKey {
+			t.Fatalf("transient upload cleanup saved=%q deleted=%q original=%q", tracker.savedKey, tracker.deletedKey, vehicle.PhotoKey)
+		}
+		object, err := tracker.Open(t.Context(), vehicle.PhotoKey)
+		if err != nil {
+			t.Fatalf("persisted photo cannot be opened: %v", err)
+		}
+		_ = object.Close()
+	})
 }
 
 func TestNewReminderSnapshotsVehicleMileageAndIsNotImmediatelyOverdue(t *testing.T) {
