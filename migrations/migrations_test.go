@@ -80,3 +80,37 @@ func TestReminderBaselineMigrationColumnsConstraintsAndBackfill(t *testing.T) {
 		}
 	}
 }
+
+func TestReminderNotificationsMigrationAuditShape(t *testing.T) {
+	up, err := fs.ReadFile(FS, "003_reminder_notifications.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"create table reminder_notifications",
+		"references reminders(id) on delete cascade",
+		"sent_at timestamptz not null",
+		"recipients text[] not null",
+		"message_id text not null unique",
+		"reminder_notifications_reminder_sent_idx",
+		"(reminder_id, sent_at desc)",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("notification migration missing %q", declaration)
+		}
+	}
+	down, err := fs.ReadFile(FS, "003_reminder_notifications.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '003_reminder_notifications'",
+		"drop table if exists reminder_notifications",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("notification down migration missing %q", declaration)
+		}
+	}
+}

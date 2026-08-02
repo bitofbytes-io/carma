@@ -20,7 +20,31 @@ For PostgreSQL, run `make db-up`, `make migrate`, then `make run-postgres`.
 Production configuration uses Google OIDC and requires a verified email to match
 `AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`.
 
-Validation commands are `make test`, `make lint`, and `make build`.
+Email reminders are disabled by default. Production enables them with
+`REMINDER_EMAIL_ENABLED=true`, a Postgres store, and:
+
+```text
+SMTP_HOST=mail.bitofbytes.io:465
+SMTP_USERNAME=carma
+SMTP_PASSWORD_FILE=/run/secrets/carma_smtp_password
+SMTP_FROM_ADDRESS=carma@bitofbytes.io
+SMTP_FROM_NAME=Carma
+SMTP_TLS_MODE=implicit
+PUBLIC_URL=https://carma.bitofbytes.io
+```
+
+When enabled, incomplete configuration fails startup. The scheduler runs at startup
+and every 24 hours, sends only overdue reminders through certificate-verified implicit
+TLS, and coordinates replicas with a PostgreSQL advisory lock. Successful deliveries
+are audited and suppress repeats for the exact rolling prior 30 days. The image also
+provides `/app/carma-reminders` with `--dry-run` and `--reminder-id <uuid>`.
+For production proofs, add `--require-recipient-count <n>` to a targeted run; it
+compares only the normalized recipient count and refuses to send or audit on a
+mismatch. Recipient addresses cannot be supplied or overridden through the CLI.
+
+Validation commands are `make test`, `make lint`, and `make build`. Run
+`make test-integration` to start the local Compose Postgres and execute the real
+migration, notification-query, and advisory-lock integration test.
 
 ## What it will do
 
@@ -31,8 +55,7 @@ Validation commands are `make test`, `make lint`, and `make build`.
 - **Receipts** - attach PDF/photo receipts to any record; stored on the NAS, no
   more glove-box paper.
 - **Reminders** - time- and/or mileage-based intervals per vehicle and service
-  type; overdue and due-soon surfaced on the dashboard. Email reminders are a
-  stretch goal.
+  type; overdue and due-soon surfaced on the dashboard, with overdue email delivery.
 - **Export** - filtered CSV (XLSX later) of any records view.
 
 ## How it will be built

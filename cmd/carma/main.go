@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/assets"
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
+	"github.com/bitofbytes-io/carma/internal/mailer"
+	"github.com/bitofbytes-io/carma/internal/reminderemail"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/bitofbytes-io/carma/internal/server"
 )
@@ -66,21 +69,41 @@ func run() error {
 	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
+	var scheduler sync.WaitGroup
+	if cfg.ReminderEmail.Enabled {
+		postgresStore, ok := store.(*repository.Postgres)
+		if !ok {
+			return errors.New("reminder email requires postgres")
+		}
+		sender, err := mailer.NewSMTP(cfg.ReminderEmail.SMTPHost, cfg.ReminderEmail.SMTPUsername, cfg.ReminderEmail.SMTPPassword, cfg.ReminderEmail.FromAddress, cfg.ReminderEmail.FromName)
+		if err != nil {
+			return err
+		}
+		runner := reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, slog.Default())
+		scheduler.Add(1)
+		go func() {
+			defer scheduler.Done()
+			reminderemail.Schedule(ctx, reminderemail.DefaultInterval, runner.Run, slog.Default())
+		}()
+	}
 	go func() {
 		slog.Info("carma listening", "port", cfg.Port, "store", cfg.DataStore, "auth", cfg.AuthMode)
 		errs <- httpServer.ListenAndServe()
 	}()
+	var result error
 	select {
 	case e := <-errs:
 		if !errors.Is(e, http.ErrServerClosed) {
-			return e
+			result = e
 		}
 	case <-ctx.Done():
 		shutdown, c := context.WithTimeout(context.Background(), 15*time.Second)
 		defer c()
-		return httpServer.Shutdown(shutdown)
+		result = httpServer.Shutdown(shutdown)
 	}
-	return nil
+	cancel()
+	scheduler.Wait()
+	return result
 }
 
 func newHTTPServer(port string, handler http.Handler) *http.Server {

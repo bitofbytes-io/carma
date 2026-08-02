@@ -112,7 +112,7 @@ filters, inspections) doesn't get forgotten.
   logged by.
 - **XLSX** export (via `excelize`) as a nice-to-have follow-up; CSV ships first.
 
-### Stretch: email reminders
+### Email reminders
 
 - A daily scheduler (goroutine with a ticker, guarded so only one replica sends -
   e.g. a Postgres advisory lock) evaluates all enabled reminders.
@@ -120,11 +120,10 @@ filters, inspections) doesn't get forgotten.
   matching record is logged.
 - `reminder_notifications` table logs each send (reminder id, sent_at, recipient) to
   enforce the 30-day cadence and provide an audit trail.
-- Recipients: all allowlisted users by default, plus optional extra addresses stored
-  per reminder (e.g. a family member who doesn't use the app).
-- SMTP configuration via Docker secret `carma_smtp_url`
-  (`smtp://user:pass@host:port`). If unset, the scheduler is disabled and the app
-  runs exactly as the MVP - email is strictly additive.
+- Recipients are every distinct valid normalized email in `users`; there are no
+  per-reminder recipient settings.
+- SMTP uses separate settings and the password-only Docker secret
+  `carma_smtp_password`. When explicitly disabled, the scheduler does not start.
 
 ## Data model
 
@@ -138,8 +137,8 @@ All timestamps `timestamptz`, money in integer cents, soft deletes via `archived
 | `service_types` | id, name (unique), is_seeded, created_at |
 | `records` | id, vehicle_id FK, service_type_id FK, occurred_on (date), odometer_miles, cost_cents, vendor, notes, created_by FK users, created_at, updated_at |
 | `attachments` | id, record_id FK, original_filename, content_type, byte_size, storage_key (unique), created_at |
-| `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, starting_odometer_pending (migration repair marker), enabled, extra_emails (stretch), created_at; unique (vehicle_id, service_type_id) |
-| `reminder_notifications` (stretch) | id, reminder_id FK, sent_at, recipients |
+| `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, starting_odometer_pending (migration repair marker), enabled, created_at; unique (vehicle_id, service_type_id) |
+| `reminder_notifications` | id, reminder_id FK, sent_at, recipients, message_id |
 
 Notes:
 
