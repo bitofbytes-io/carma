@@ -1,10 +1,18 @@
-.reminders-card { max-width: 1180px; margin-inline: auto; }
+.reminders-card { --reminder-actions-width: 8.5rem; max-width: 1180px; margin-inline: auto; }
 .reminder-row.header {
-  grid-template-columns: minmax(180px, 1.5fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(90px, .8fr) minmax(76px, .55fr) minmax(120px, auto);
+  grid-template-columns: minmax(0, 1fr) var(--reminder-actions-width);
+  gap: 16px;
+}
+.reminder-header-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) minmax(120px, 1fr) minmax(120px, 1fr) minmax(90px, .8fr) minmax(76px, .55fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
 }
 .reminder-entry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) var(--reminder-actions-width);
   gap: 16px;
   padding: 12px 14px;
 }
@@ -48,6 +56,8 @@
 
 @media (min-width: 961px) {
   .reminder-status { justify-content: center; }
+  .reminder-header-status,
+  .reminder-header-enabled { text-align: center; }
 }
 
 @media (max-width: 960px) {

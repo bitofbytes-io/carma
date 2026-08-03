@@ -10,7 +10,10 @@
 {{define "reminder-list"}}
 <div id="reminder-list">
   <div class="reminder-table">
-    <div class="reminder-row header" aria-hidden="true"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span><span>Status</span><span>Enabled</span><span>Actions</span></div>
+    <div class="reminder-row header" aria-hidden="true">
+      <div class="reminder-header-fields"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span><span class="reminder-header-status">Status</span><span class="reminder-header-enabled">Enabled</span></div>
+      <span>Actions</span>
+    </div>
     {{range .Reminders}}
     <div class="reminder-row reminder-entry">
       <form id="reminder-{{.Reminder.ID}}" class="reminder-update" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders" hx-target="#reminder-list" hx-swap="outerHTML">
