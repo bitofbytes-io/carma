@@ -244,9 +244,10 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 	body := b.String()
 	for _, want := range []string{
 		`class="reminder-row reminder-entry"`,
-		`class="reminder-header-fields"`,
-		`class="reminder-header-status">Status</span>`,
-		`class="reminder-header-enabled">Enabled</span>`,
+		`<div class="reminder-row header" aria-hidden="true">
+      <div class="reminder-header-fields"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span><span class="reminder-header-status">Status</span><span class="reminder-header-enabled">Enabled</span></div>
+      <span>Actions</span>
+    </div>`,
 		`class="reminder-field reminder-enabled"`,
 		`class="reminder-actions"`,
 		`form="reminder-` + reminderID.String() + `"`,
