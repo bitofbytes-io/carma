@@ -34,6 +34,74 @@ func TestBaseTemplateDeclaresSupportedColorSchemes(t *testing.T) {
 	}
 }
 
+func TestLoginTemplateRendersAuthenticationVariantsWithoutInviteOnlyFooter(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type data struct {
+		Title         string
+		Authenticated bool
+		Development   bool
+		Error         string
+		Flash         string
+		Redirect      string
+	}
+	tests := []struct {
+		name      string
+		data      data
+		want      []string
+		doNotWant []string
+	}{
+		{
+			name: "Google sign-in",
+			data: data{
+				Error:    "This Google account is not authorized for Carma.",
+				Redirect: "/vehicles/123?sort=cost&direction=desc",
+			},
+			want: []string{
+				`<div class="error" role="alert">This Google account is not authorized for Carma.</div>`,
+				`<a class="primary wide center" href="/api/auth/google?redirect=%2Fvehicles%2F123%3Fsort%3Dcost%26direction%3Ddesc">Sign in with Google</a>`,
+			},
+			doNotWant: []string{
+				`<form method="post" action="/login">`,
+				"Continue as local developer",
+			},
+		},
+		{
+			name: "development login",
+			data: data{Development: true},
+			want: []string{
+				`<form method="post" action="/login"><button class="primary wide">Continue as local developer</button></form>`,
+			},
+			doNotWant: []string{
+				"Sign in with Google",
+				`/api/auth/google`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var b bytes.Buffer
+			if err := r.Render(&b, "login", tt.data); err != nil {
+				t.Fatal(err)
+			}
+			body := b.String()
+			for _, want := range tt.want {
+				if !strings.Contains(body, want) {
+					t.Errorf("missing login markup %q in %s", want, body)
+				}
+			}
+			for _, unwanted := range append(tt.doNotWant, "Access is invite-only.", "<small>") {
+				if strings.Contains(body, unwanted) {
+					t.Errorf("unexpected login markup %q in %s", unwanted, body)
+				}
+			}
+		})
+	}
+}
+
 func TestVehicleFormShowsExistingPhotoOnlyWhenEditingSavedPhoto(t *testing.T) {
 	r, err := New()
 	if err != nil {

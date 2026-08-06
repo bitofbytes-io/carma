@@ -207,8 +207,6 @@ per-row recipient field.)
 │   maintenance.               │
 │                              │
 │   [ G  Sign in with Google ] │
-│                              │
-│   Access is invite-only.     │
 └──────────────────────────────┘
 ```
 
