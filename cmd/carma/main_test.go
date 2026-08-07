@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -35,4 +37,37 @@ func TestHTTPServerTimeoutsAllowLargeMobileUploads(t *testing.T) {
 	if server.IdleTimeout != 2*time.Minute {
 		t.Fatalf("idle timeout = %v", server.IdleTimeout)
 	}
+}
+
+func TestCloseStoreAfterSchedulersWaitsThenCloses(t *testing.T) {
+	var schedulers sync.WaitGroup
+	schedulers.Add(1)
+	workerDone := make(chan struct{})
+	go func() {
+		defer schedulers.Done()
+		close(workerDone)
+	}()
+	<-workerDone
+	closed := false
+
+	err := closeStoreAfterSchedulers(&schedulers, time.Second, func() { closed = true })
+	if err != nil || !closed {
+		t.Fatalf("close error=%v store closed=%t", err, closed)
+	}
+}
+
+func TestCloseStoreAfterSchedulersTimeoutSkipsClose(t *testing.T) {
+	var schedulers sync.WaitGroup
+	schedulers.Add(1)
+	closed := false
+
+	err := closeStoreAfterSchedulers(&schedulers, 10*time.Millisecond, func() { closed = true })
+	if !errors.Is(err, errSchedulerShutdownTimeout) {
+		t.Fatalf("close error=%v", err)
+	}
+	if closed {
+		t.Fatal("store closed while scheduler may still be using it")
+	}
+	// Release the helper's waiter goroutine after proving the timeout decision.
+	schedulers.Done()
 }

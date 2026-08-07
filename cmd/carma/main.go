@@ -25,9 +25,12 @@ const (
 	serverReadHeaderTimeout = 10 * time.Second
 	// serverUploadTimeout allows the configured 128 MiB multipart request budget
 	// to arrive over a slow mobile connection without leaving requests unbounded.
-	serverUploadTimeout = 5 * time.Minute
-	serverIdleTimeout   = 2 * time.Minute
+	serverUploadTimeout      = 5 * time.Minute
+	serverIdleTimeout        = 2 * time.Minute
+	schedulerShutdownTimeout = 15 * time.Second
 )
+
+var errSchedulerShutdownTimeout = errors.New("background scheduler shutdown timed out")
 
 func main() {
 	if e := run(); e != nil {
@@ -51,7 +54,12 @@ func run() error {
 			return e
 		}
 	}
-	defer store.Close()
+	closeStoreOnReturn := true
+	defer func() {
+		if closeStoreOnReturn {
+			store.Close()
+		}
+	}()
 	assetStore, e := assets.NewLocalStore(cfg.AssetRoot)
 	if e != nil {
 		return e
@@ -114,8 +122,29 @@ func run() error {
 		result = httpServer.Shutdown(shutdown)
 	}
 	cancel()
-	scheduler.Wait()
+	closeStoreOnReturn = false
+	if e := closeStoreAfterSchedulers(&scheduler, schedulerShutdownTimeout, store.Close); e != nil {
+		slog.Error("background scheduler shutdown timed out", "timeout", schedulerShutdownTimeout, "error", e)
+		return errors.Join(result, e)
+	}
 	return result
+}
+
+func closeStoreAfterSchedulers(schedulers *sync.WaitGroup, timeout time.Duration, closeStore func()) error {
+	done := make(chan struct{})
+	go func() {
+		schedulers.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		closeStore()
+		return nil
+	case <-timer.C:
+		return errSchedulerShutdownTimeout
+	}
 }
 
 func newHTTPServer(port string, handler http.Handler) *http.Server {
