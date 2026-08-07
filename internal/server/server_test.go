@@ -79,11 +79,22 @@ func (s *trackingAssetStore) Delete(ctx context.Context, key string) error {
 
 type recordingAttachmentStore struct {
 	repository.Store
-	events *[]string
+	events    *[]string
+	deleteErr error
+	key       string
 }
 
 func (s recordingAttachmentStore) DeleteAttachment(ctx context.Context, id uuid.UUID) (string, error) {
 	*s.events = append(*s.events, "metadata")
+	if s.deleteErr != nil {
+		return "", s.deleteErr
+	}
+	if s.key != "" {
+		if _, err := s.Store.DeleteAttachment(ctx, id); err != nil {
+			return "", err
+		}
+		return s.key, nil
+	}
 	return s.Store.DeleteAttachment(ctx, id)
 }
 
@@ -450,7 +461,7 @@ func createAttachment(t *testing.T, f fixture) (model.Record, model.Attachment) 
 	return record, attachments[0]
 }
 
-func TestDeleteAttachmentRetainsMetadataWhenAssetDeleteFails(t *testing.T) {
+func TestDeleteAttachmentDefersAssetCleanupAfterMetadataDelete(t *testing.T) {
 	f := setup(t)
 	_, attachment := createAttachment(t, f)
 	events := []string{}
@@ -460,18 +471,14 @@ func TestDeleteAttachmentRetainsMetadataWhenAssetDeleteFails(t *testing.T) {
 
 	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
 
-	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") == "" {
 		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 	}
-	if !strings.Contains(response.Body.String(), "Something went wrong") {
-		t.Fatalf("asset deletion failure presented as success: %q", response.Body.String())
+	if len(events) != 2 || events[0] != "metadata" || events[1] != "asset" {
+		t.Fatalf("delete events=%v, want [metadata asset]", events)
 	}
-	if len(events) != 1 || events[0] != "asset" {
-		t.Fatalf("delete events=%v, want asset only", events)
-	}
-	_, stored, err := f.store.GetAttachment(t.Context(), attachment.ID)
-	if err != nil || stored.StorageKey != attachment.StorageKey {
-		t.Fatalf("attachment metadata was not retained: attachment=%+v err=%v", stored, err)
+	if _, _, err := f.store.GetAttachment(t.Context(), attachment.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("attachment metadata remains: %v", err)
 	}
 	object, err := f.s.assets.Open(t.Context(), attachment.StorageKey)
 	if err != nil {
@@ -480,12 +487,12 @@ func TestDeleteAttachmentRetainsMetadataWhenAssetDeleteFails(t *testing.T) {
 	_ = object.Close()
 }
 
-func TestDeleteAttachmentRemovesAssetBeforeMetadata(t *testing.T) {
+func TestDeleteAttachmentRemovesMetadataBeforeAuthoritativeAssetKey(t *testing.T) {
 	f := setup(t)
 	record, attachment := createAttachment(t, f)
 	events := []string{}
 	f.s.assets = recordingAssetStore{Store: f.s.assets, events: &events}
-	f.s.store = recordingAttachmentStore{Store: f.store, events: &events}
+	f.s.store = recordingAttachmentStore{Store: f.store, events: &events, key: attachment.StorageKey}
 	f.router = f.s.Router()
 
 	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
@@ -493,8 +500,8 @@ func TestDeleteAttachmentRemovesAssetBeforeMetadata(t *testing.T) {
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/records/"+record.ID.String() {
 		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 	}
-	if len(events) != 2 || events[0] != "asset" || events[1] != "metadata" {
-		t.Fatalf("delete events=%v, want [asset metadata]", events)
+	if len(events) != 2 || events[0] != "metadata" || events[1] != "asset" {
+		t.Fatalf("delete events=%v, want [metadata asset]", events)
 	}
 	if _, _, err := f.store.GetAttachment(t.Context(), attachment.ID); err != repository.ErrNotFound {
 		t.Fatalf("attachment metadata remains: %v", err)
@@ -507,6 +514,49 @@ func TestDeleteAttachmentRemovesAssetBeforeMetadata(t *testing.T) {
 	}
 	if err := f.s.assets.Delete(t.Context(), attachment.StorageKey); err != nil {
 		t.Fatalf("retrying asset deletion: %v", err)
+	}
+}
+
+func TestDeleteAttachmentDatabaseFailureLeavesAssetIntact(t *testing.T) {
+	f := setup(t)
+	_, attachment := createAttachment(t, f)
+	events := []string{}
+	f.s.assets = recordingAssetStore{Store: f.s.assets, events: &events}
+	f.s.store = recordingAttachmentStore{Store: f.store, events: &events, deleteErr: errors.New("database unavailable")}
+	f.router = f.s.Router()
+
+	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
+
+	if response.Code != http.StatusInternalServerError || response.Header().Get("Location") != "" {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	if len(events) != 1 || events[0] != "metadata" {
+		t.Fatalf("delete events=%v, want metadata only", events)
+	}
+	if _, stored, err := f.store.GetAttachment(t.Context(), attachment.ID); err != nil || stored.StorageKey != attachment.StorageKey {
+		t.Fatalf("metadata changed: attachment=%+v err=%v", stored, err)
+	}
+	object, err := f.s.assets.Open(t.Context(), attachment.StorageKey)
+	if err != nil {
+		t.Fatalf("asset missing: %v", err)
+	}
+	_ = object.Close()
+}
+
+func TestDeleteAttachmentMissingObjectCleanupIsIdempotent(t *testing.T) {
+	f := setup(t)
+	record, attachment := createAttachment(t, f)
+	if err := f.s.assets.Delete(t.Context(), attachment.StorageKey); err != nil {
+		t.Fatal(err)
+	}
+
+	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
+
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/records/"+record.ID.String() {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	if _, _, err := f.store.GetAttachment(t.Context(), attachment.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("metadata remains: %v", err)
 	}
 }
 

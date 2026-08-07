@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/google/uuid"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 )
+
+const googleOIDCHTTPTimeout = 15 * time.Second
 
 type Claims struct {
 	Subject, Email, Name, Picture string
@@ -30,15 +32,31 @@ type Google interface {
 type GoogleOIDC struct {
 	oauth           *oauth2.Config
 	verifier        *oidc.IDTokenVerifier
+	client          *http.Client
 	emails, domains map[string]struct{}
 }
 
 func NewGoogleOIDC(ctx context.Context, id, secret, redirect string, emails, domains []string) (*GoogleOIDC, error) {
-	p, e := oidc.NewProvider(ctx, "https://accounts.google.com")
+	return newGoogleOIDC(ctx, "https://accounts.google.com", &http.Client{Timeout: googleOIDCHTTPTimeout}, id, secret, redirect, emails, domains)
+}
+
+func newGoogleOIDC(ctx context.Context, issuer string, client *http.Client, id, secret, redirect string, emails, domains []string) (*GoogleOIDC, error) {
+	if client == nil {
+		return nil, fmt.Errorf("OIDC HTTP client is required")
+	}
+	providerContext := oidc.ClientContext(ctx, client)
+	p, e := oidc.NewProvider(providerContext, issuer)
 	if e != nil {
 		return nil, e
 	}
-	g := &GoogleOIDC{oauth: &oauth2.Config{ClientID: id, ClientSecret: secret, RedirectURL: redirect, Endpoint: google.Endpoint, Scopes: []string{oidc.ScopeOpenID, "email", "profile"}}, verifier: p.Verifier(&oidc.Config{ClientID: id}), emails: map[string]struct{}{}, domains: map[string]struct{}{}}
+	g := &GoogleOIDC{
+		oauth: &oauth2.Config{
+			ClientID: id, ClientSecret: secret, RedirectURL: redirect,
+			Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
+		},
+		verifier: p.Verifier(&oidc.Config{ClientID: id}), client: client,
+		emails: map[string]struct{}{}, domains: map[string]struct{}{},
+	}
 	for _, v := range emails {
 		g.emails[strings.ToLower(strings.TrimSpace(v))] = struct{}{}
 	}
@@ -51,7 +69,8 @@ func (g *GoogleOIDC) AuthURL(state string) string {
 	return g.oauth.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
 }
 func (g *GoogleOIDC) Exchange(ctx context.Context, code string) (Claims, error) {
-	t, e := g.oauth.Exchange(ctx, code)
+	requestContext := oidc.ClientContext(ctx, g.client)
+	t, e := g.oauth.Exchange(requestContext, code)
 	if e != nil {
 		return Claims{}, fmt.Errorf("token exchange: %w", e)
 	}
@@ -59,7 +78,7 @@ func (g *GoogleOIDC) Exchange(ctx context.Context, code string) (Claims, error) 
 	if !ok {
 		return Claims{}, fmt.Errorf("missing id_token")
 	}
-	id, e := g.verifier.Verify(ctx, raw)
+	id, e := g.verifier.Verify(requestContext, raw)
 	if e != nil {
 		return Claims{}, fmt.Errorf("verify id_token: %w", e)
 	}

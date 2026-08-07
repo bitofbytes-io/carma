@@ -42,9 +42,28 @@ For production proofs, add `--require-recipient-count <n>` to a targeted run; it
 compares only the normalized recipient count and refuses to send or audit on a
 mismatch. Recipient addresses cannot be supplied or overridden through the CLI.
 
-Validation commands are `make test`, `make lint`, and `make build`. Run
+Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
+The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
+declared by this project. Run
 `make test-integration` to start the local Compose Postgres and execute the real
 migration, notification-query, and advisory-lock integration test.
+
+PostgreSQL deployments also run asset cleanup at startup and every seven days.
+Only generated, unreferenced objects and `temporary/upload-*` files older than 48
+hours are eligible. Replicas coordinate with a dedicated PostgreSQL advisory lock.
+Every attempt emits `asset cleanup started` followed by exactly one of `asset cleanup
+completed`, `asset cleanup skipped`, or `asset cleanup failed`. Completion/failure
+events include scan, retention, pruning, failure, and reclaimed-byte counters;
+partial deletion failures are reported as failed runs while preserving successful
+deletion totals. For example, this LogQL query shows the latest terminal runs and
+the number of files and bytes pruned (adjust the service label to match the Loki
+deployment):
+
+```logql
+{service_name="proxy_carma"} | json | msg=~"asset cleanup (completed|failed|skipped)" | line_format "{{.time}} run={{.run_id}} status={{.msg}} objects={{.orphan_objects_pruned}} temporary={{.stale_temporary_files_pruned}} bytes={{.bytes_reclaimed}}"
+```
+
+In Grafana, run it newest-first with a line limit of one to confirm the latest run.
 
 ## What it will do
 

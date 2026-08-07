@@ -49,10 +49,11 @@ verification must remain enabled.
 
 ## Validation boundary
 
-Application changes run `make test`, `make lint`, and `make build`. Run
+Application changes run `make test`, `make lint`, `make build`, and `make vuln`. Run
 `make test-integration` with Docker available to apply migrations in an isolated
 PostgreSQL schema, exercise notification suppression, roll migration 003 down and
-back up, and verify advisory-lock contention and reacquisition.
+back up, verify referenced attachment/photo asset queries, and verify advisory-lock
+contention and reacquisition.
 
 Infrastructure changes render and validate the authoritative stack in
 `home_swarm`; production deployment and live email proof are separate operator

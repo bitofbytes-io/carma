@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/assetcleanup"
 	"github.com/bitofbytes-io/carma/internal/assets"
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
@@ -70,6 +71,14 @@ func run() error {
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
 	var scheduler sync.WaitGroup
+	if postgresStore, ok := store.(*repository.Postgres); ok {
+		runner := assetcleanup.NewRunner(postgresStore, assetStore, slog.Default())
+		scheduler.Add(1)
+		go func() {
+			defer scheduler.Done()
+			assetcleanup.Schedule(ctx, assetcleanup.DefaultInterval, runner.Run)
+		}()
+	}
 	if cfg.ReminderEmail.Enabled {
 		postgresStore, ok := store.(*repository.Postgres)
 		if !ok {

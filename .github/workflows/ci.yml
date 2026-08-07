@@ -3,6 +3,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * 1'
 jobs:
   test:
     runs-on: ubuntu-24.04-arm
@@ -15,7 +18,10 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
-      - run: make test lint build
+      - name: Validate
+        run: make test lint build
+      - name: Scan Go vulnerabilities
+        run: make vuln
   build-and-trigger:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
