@@ -63,7 +63,7 @@ func TestLocalStorePruneClassifiesAndRemovesOnlyEligibleFiles(t *testing.T) {
 	orphanKey := "cc/cccccccc-cccc-4ccc-8ccc-cccccccccccc.png"
 	writeCleanupFile(t, filepath.Join(s.root, "objects", filepath.FromSlash(referencedKey)), "reference", cutoff.Add(-time.Hour))
 	writeCleanupFile(t, filepath.Join(s.root, "objects", filepath.FromSlash(freshKey)), "fresh", cutoff)
-	writeCleanupFile(t, filepath.Join(s.root, "objects", filepath.FromSlash(orphanKey)), "orphan-bytes", cutoff.Add(-time.Nanosecond))
+	writeCleanupFile(t, filepath.Join(s.root, "objects", filepath.FromSlash(orphanKey)), "orphan-bytes", cutoff.Add(-time.Second))
 	unknownPath := filepath.Join(s.root, "objects", "do-not-delete.txt")
 	writeCleanupFile(t, unknownPath, "unknown", cutoff.Add(-time.Hour))
 	temporaryPath := filepath.Join(s.root, "temporary", "upload-stale")

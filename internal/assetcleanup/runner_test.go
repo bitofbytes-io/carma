@@ -214,7 +214,10 @@ func TestScheduleRunsAtStartupRepeatsAndStopsOnCancellation(t *testing.T) {
 		mu.Lock()
 		triggers = append(triggers, stringTrigger)
 		mu.Unlock()
-		called <- struct{}{}
+		select {
+		case called <- struct{}{}:
+		default:
+		}
 		return assets.CleanupReport{}, nil
 	}
 	done := make(chan struct{})

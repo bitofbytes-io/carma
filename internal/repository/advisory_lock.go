@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const advisoryLockAcquireTimeout = 2 * time.Second
@@ -16,8 +18,8 @@ func (p *Postgres) tryAdvisoryLock(ctx context.Context, lockID int64, purpose st
 	if err != nil {
 		return nil, false, fmt.Errorf("acquire %s lock connection: %w", purpose, err)
 	}
-	var acquired bool
-	if err = connection.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, lockID).Scan(&acquired); err != nil {
+	acquired, err := queryTryAdvisoryLock(acquireContext, connection, lockID)
+	if err != nil {
 		connection.Release()
 		return nil, false, fmt.Errorf("acquire %s advisory lock: %w", purpose, err)
 	}
@@ -40,6 +42,16 @@ func (p *Postgres) tryAdvisoryLock(ctx context.Context, lockID int64, purpose st
 		return unlockErr
 	}
 	return unlock, true, nil
+}
+
+type advisoryLockQueryRower interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func queryTryAdvisoryLock(ctx context.Context, queryRower advisoryLockQueryRower, lockID int64) (bool, error) {
+	var acquired bool
+	err := queryRower.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, lockID).Scan(&acquired)
+	return acquired, err
 }
 
 func boundedAdvisoryLockAcquireContext(ctx context.Context) (context.Context, context.CancelFunc) {

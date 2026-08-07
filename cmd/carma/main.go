@@ -68,10 +68,22 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	postgresStore, postgresBacked := store.(*repository.Postgres)
+	var reminderRunner *reminderemail.Runner
+	if cfg.ReminderEmail.Enabled {
+		if !postgresBacked {
+			return errors.New("reminder email requires postgres")
+		}
+		sender, err := mailer.NewSMTP(cfg.ReminderEmail.SMTPHost, cfg.ReminderEmail.SMTPUsername, cfg.ReminderEmail.SMTPPassword, cfg.ReminderEmail.FromAddress, cfg.ReminderEmail.FromName)
+		if err != nil {
+			return err
+		}
+		reminderRunner = reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, slog.Default())
+	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
 	var scheduler sync.WaitGroup
-	if postgresStore, ok := store.(*repository.Postgres); ok {
+	if postgresBacked {
 		runner := assetcleanup.NewRunner(postgresStore, assetStore, slog.Default())
 		scheduler.Add(1)
 		go func() {
@@ -79,20 +91,11 @@ func run() error {
 			assetcleanup.Schedule(ctx, assetcleanup.DefaultInterval, runner.Run)
 		}()
 	}
-	if cfg.ReminderEmail.Enabled {
-		postgresStore, ok := store.(*repository.Postgres)
-		if !ok {
-			return errors.New("reminder email requires postgres")
-		}
-		sender, err := mailer.NewSMTP(cfg.ReminderEmail.SMTPHost, cfg.ReminderEmail.SMTPUsername, cfg.ReminderEmail.SMTPPassword, cfg.ReminderEmail.FromAddress, cfg.ReminderEmail.FromName)
-		if err != nil {
-			return err
-		}
-		runner := reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, slog.Default())
+	if reminderRunner != nil {
 		scheduler.Add(1)
 		go func() {
 			defer scheduler.Done()
-			reminderemail.Schedule(ctx, reminderemail.DefaultInterval, runner.Run, slog.Default())
+			reminderemail.Schedule(ctx, reminderemail.DefaultInterval, reminderRunner.Run, slog.Default())
 		}()
 	}
 	go func() {

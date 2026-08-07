@@ -47,12 +47,16 @@ func (s deleteSessionErrorStore) DeleteSession(context.Context, uuid.UUID) error
 
 type recordingAssetStore struct {
 	assets.Store
-	events    *[]string
-	deleteErr error
+	events     *[]string
+	deletedKey *string
+	deleteErr  error
 }
 
 func (s recordingAssetStore) Delete(ctx context.Context, key string) error {
 	*s.events = append(*s.events, "asset")
+	if s.deletedKey != nil {
+		*s.deletedKey = key
+	}
 	if s.deleteErr != nil {
 		return s.deleteErr
 	}
@@ -490,9 +494,17 @@ func TestDeleteAttachmentDefersAssetCleanupAfterMetadataDelete(t *testing.T) {
 func TestDeleteAttachmentRemovesMetadataBeforeAuthoritativeAssetKey(t *testing.T) {
 	f := setup(t)
 	record, attachment := createAttachment(t, f)
+	authoritativeObject, err := f.s.assets.Save(t.Context(), strings.NewReader("%PDF-1.7\nauthoritative"), 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authoritativeObject.Key == attachment.StorageKey {
+		t.Fatal("authoritative key unexpectedly matched stale attachment key")
+	}
 	events := []string{}
-	f.s.assets = recordingAssetStore{Store: f.s.assets, events: &events}
-	f.s.store = recordingAttachmentStore{Store: f.store, events: &events, key: attachment.StorageKey}
+	deletedKey := ""
+	f.s.assets = recordingAssetStore{Store: f.s.assets, events: &events, deletedKey: &deletedKey}
+	f.s.store = recordingAttachmentStore{Store: f.store, events: &events, key: authoritativeObject.Key}
 	f.router = f.s.Router()
 
 	response := f.do(t, http.MethodPost, "/attachments/"+attachment.ID.String()+"/delete", strings.NewReader(""), "application/x-www-form-urlencoded")
@@ -503,18 +515,23 @@ func TestDeleteAttachmentRemovesMetadataBeforeAuthoritativeAssetKey(t *testing.T
 	if len(events) != 2 || events[0] != "metadata" || events[1] != "asset" {
 		t.Fatalf("delete events=%v, want [metadata asset]", events)
 	}
+	if deletedKey != authoritativeObject.Key {
+		t.Fatalf("deleted key=%q, want authoritative key %q", deletedKey, authoritativeObject.Key)
+	}
 	if _, _, err := f.store.GetAttachment(t.Context(), attachment.ID); err != repository.ErrNotFound {
 		t.Fatalf("attachment metadata remains: %v", err)
 	}
-	if object, err := f.s.assets.Open(t.Context(), attachment.StorageKey); err == nil {
+	if object, err := f.s.assets.Open(t.Context(), authoritativeObject.Key); err == nil {
 		_ = object.Close()
-		t.Fatalf("attachment asset remains at %q", attachment.StorageKey)
+		t.Fatalf("authoritative asset remains at %q", authoritativeObject.Key)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("checking removed attachment asset: %v", err)
+		t.Fatalf("checking removed authoritative asset: %v", err)
 	}
-	if err := f.s.assets.Delete(t.Context(), attachment.StorageKey); err != nil {
-		t.Fatalf("retrying asset deletion: %v", err)
+	staleObject, err := f.s.assets.Open(t.Context(), attachment.StorageKey)
+	if err != nil {
+		t.Fatalf("stale attachment key was deleted instead of authoritative key: %v", err)
 	}
+	_ = staleObject.Close()
 }
 
 func TestDeleteAttachmentDatabaseFailureLeavesAssetIntact(t *testing.T) {
