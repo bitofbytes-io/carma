@@ -758,14 +758,13 @@ func (s *Server) deleteAttachment(w http.ResponseWriter, r *http.Request) {
 		s.notFound(w, e)
 		return
 	}
-	if e = s.assets.Delete(r.Context(), a.StorageKey); e != nil {
-		s.fail(w, e)
-		return
-	}
-	_, e = s.store.DeleteAttachment(r.Context(), a.ID)
+	key, e := s.store.DeleteAttachment(r.Context(), a.ID)
 	if e != nil {
 		s.notFound(w, e)
 		return
+	}
+	if e = s.assets.Delete(r.Context(), key); e != nil {
+		slog.Warn("attachment asset cleanup deferred", "storage_key", key, "error", e)
 	}
 	http.Redirect(w, r, "/records/"+rec.ID.String(), 303)
 }

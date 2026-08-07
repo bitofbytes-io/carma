@@ -177,7 +177,7 @@ sequenceDiagram
   participant CR as crystal1 post-receive hook
   participant SW as Swarm proxy_carma
 
-  GH->>GH: test, vet, build (on push to main)
+  GH->>GH: test, vet, build, govulncheck
   GH->>TS: join tailnet, ping manager
   GH->>REG: buildx push carma:<shortsha> (linux/arm64/v8)
   GH->>CR: ssh git push -> /srv/git/carma-ci.git
@@ -186,6 +186,10 @@ sequenceDiagram
   CR->>SW: docker service update --with-registry-auth proxy_carma
   CR->>SW: verify health, rollback on failure
 ```
+
+Validation also runs for pull requests, manual dispatches, and at 09:17 UTC every
+Monday. Image publication and deployment remain restricted to pushes on `main`, so
+manual and scheduled validation runs cannot deploy.
 
 The post-receive hook is noted's variant (migration job + rollback) adapted to a
 single service. Stack file, Traefik routes, and the hook live in `home_swarm`, not

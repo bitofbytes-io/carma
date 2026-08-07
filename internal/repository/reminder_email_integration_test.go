@@ -109,6 +109,43 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	photoKey := "aa/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.jpg"
+	attachmentKey := "bb/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.pdf"
+	recordID := uuid.New()
+	attachmentID := uuid.New()
+	for _, statement := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE vehicles SET photo_key=$2 WHERE id=$1`, []any{vehicleID, photoKey}},
+		{`INSERT INTO records(id,vehicle_id,service_type_id,occurred_on,created_by) VALUES($1,$2,$3,current_date,$4)`, []any{recordID, vehicleID, serviceTypeID, userID}},
+		{`INSERT INTO attachments(id,record_id,original_filename,content_type,byte_size,storage_key) VALUES($1,$2,'private-receipt.pdf','application/pdf',10,$3)`, []any{attachmentID, recordID, attachmentKey}},
+	} {
+		if _, err = seed.Exec(context.Background(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	referencedKeys, err := storeOne.ListReferencedAssetKeys(context.Background())
+	if err != nil || len(referencedKeys) != 2 || referencedKeys[0] != photoKey || referencedKeys[1] != attachmentKey {
+		t.Fatalf("referenced asset keys=%v err=%v", referencedKeys, err)
+	}
+	assetUnlockOne, acquired, err := storeOne.TryAssetCleanupLock(context.Background())
+	if err != nil || !acquired {
+		t.Fatalf("first asset lock acquired=%t err=%v", acquired, err)
+	}
+	if _, acquired, err = storeTwo.TryAssetCleanupLock(context.Background()); err != nil || acquired {
+		t.Fatalf("contending asset lock acquired=%t err=%v", acquired, err)
+	}
+	if err = assetUnlockOne(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assetUnlockTwo, acquired, err := storeTwo.TryAssetCleanupLock(context.Background())
+	if err != nil || !acquired {
+		t.Fatalf("reacquired asset lock acquired=%t err=%v", acquired, err)
+	}
+	if err = assetUnlockTwo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	sentAt := time.Date(2026, time.April, 1, 12, 0, 0, 123, time.UTC)
 	notification := model.ReminderNotification{ID: uuid.New(), ReminderID: reminderID, SentAt: sentAt, Recipients: []string{"user@example.com"}, MessageID: "<integration@bitofbytes.io>"}

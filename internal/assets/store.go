@@ -31,7 +31,10 @@ type Store interface {
 	Open(context.Context, string) (ReadSeekCloser, error)
 	Delete(context.Context, string) error
 }
-type LocalStore struct{ root string }
+type LocalStore struct {
+	root   string
+	remove func(string) error
+}
 
 var keyPattern = regexp.MustCompile(`^[0-9a-f]{2}/[0-9a-f-]{36}\.(pdf|jpg|png|webp|heic)$`)
 var ErrTooLarge = errors.New("file exceeds upload limit")
@@ -50,7 +53,7 @@ func NewLocalStore(root string) (*LocalStore, error) {
 			return nil, fmt.Errorf("create asset directory: %w", err)
 		}
 	}
-	return &LocalStore{root: absolute}, nil
+	return &LocalStore{root: absolute, remove: os.Remove}, nil
 }
 
 func (s *LocalStore) Save(_ context.Context, source io.Reader, max int64) (Object, error) {
@@ -131,7 +134,7 @@ func (s *LocalStore) Delete(_ context.Context, key string) error {
 	if e != nil {
 		return e
 	}
-	e = os.Remove(p)
+	e = s.remove(p)
 	if os.IsNotExist(e) {
 		return nil
 	}

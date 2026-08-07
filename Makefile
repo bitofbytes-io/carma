@@ -9,7 +9,7 @@ TAG ?= dev
 PLATFORMS ?= linux/arm64/v8
 GOCACHE ?= /tmp/carma-go-cache
 
-.PHONY: run run-postgres test test-integration check-entrypoints lint build migrate db-up db-down docker-build docker-buildx
+.PHONY: run run-postgres test test-integration check-entrypoints lint vuln build migrate db-up db-down docker-build docker-buildx
 run:
 	APP_ENV=development AUTH_MODE=development DATA_STORE=memory PORT=$(PORT) ASSET_ROOT=.local/carma-assets $(GO) run ./cmd/carma
 
@@ -31,6 +31,10 @@ test-integration:
 
 lint:
 	GOCACHE=$(GOCACHE) $(GO) vet ./...
+
+vuln:
+	@toolchain="$$($(GO) env GOVERSION)"; \
+	GOTOOLCHAIN="$$toolchain" GOCACHE=$(GOCACHE) $(GO) run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
 
 build:
 	GOCACHE=$(GOCACHE) $(GO) build ./cmd/carma ./cmd/carma-migrate ./cmd/carma-reminders
