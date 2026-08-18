@@ -1,6 +1,6 @@
 module github.com/bitofbytes-io/carma
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/coreos/go-oidc/v3 v3.18.0
