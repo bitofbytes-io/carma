@@ -185,10 +185,14 @@ func (p *Postgres) UpdateVehicle(c context.Context, v model.Vehicle) (model.Vehi
 			return v, e
 		}
 	}
+	updated, e := scanVehicle(tx.QueryRow(c, `SELECT `+vehicleCols+`,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id)) FROM vehicles v WHERE v.id=$1`, v.ID))
+	if e != nil {
+		return v, e
+	}
 	if e = tx.Commit(c); e != nil {
 		return v, e
 	}
-	return p.GetVehicle(c, v.ID)
+	return updated, nil
 }
 func (p *Postgres) ArchiveVehicle(c context.Context, id uuid.UUID) error {
 	tag, e := p.pool.Exec(c, `UPDATE vehicles SET archived_at=now(),updated_at=now() WHERE id=$1`, id)

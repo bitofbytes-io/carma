@@ -358,7 +358,9 @@ func (s *Server) saveVehicle(w http.ResponseWriter, r *http.Request, editing boo
 	}
 	if e != nil {
 		if newKey != "" {
-			_ = s.assets.Delete(r.Context(), newKey)
+			// The write may have committed even when its result was not received.
+			// Orphan cleanup checks references before pruning retained uploads.
+			slog.Warn("vehicle photo cleanup deferred", "vehicle_id", v.ID, "storage_key", newKey, "error", e)
 		}
 		s.fail(w, e)
 		return
