@@ -82,15 +82,19 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 			FOR EACH ROW EXECUTE FUNCTION reject_reminder_update()`); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := connection.Exec(cleanupCtx, `DROP TRIGGER reject_reminder_update ON reminders; DROP FUNCTION reject_reminder_update()`); err != nil {
+				t.Errorf("remove reminder failure trigger: %v", err)
+			}
+		})
 		if _, err := store.UpdateVehicle(ctx, vehicle); err == nil {
 			t.Fatal("expected reminder initialization failure")
 		}
 		persisted, err := store.GetVehicle(ctx, vehicleID)
 		if err != nil || persisted.PhotoKey != "old.jpg" || persisted.CurrentOdometer != nil || persisted.Nickname != "Original" {
 			t.Fatalf("failed transaction changed vehicle: %+v err=%v", persisted, err)
-		}
-		if _, err := connection.Exec(ctx, `DROP TRIGGER reject_reminder_update ON reminders`); err != nil {
-			t.Fatal(err)
 		}
 	})
 
@@ -102,6 +106,13 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 			DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION reject_vehicle_commit()`); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := connection.Exec(cleanupCtx, `DROP TRIGGER reject_vehicle_commit ON vehicles; DROP FUNCTION reject_vehicle_commit()`); err != nil {
+				t.Errorf("remove vehicle commit failure trigger: %v", err)
+			}
+		})
 		if _, err := store.UpdateVehicle(ctx, vehicle); err == nil {
 			t.Fatal("expected commit failure")
 		}
@@ -116,9 +127,6 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 		}
 		if !pending || baseline != nil {
 			t.Fatalf("failed commit changed reminder: pending=%t baseline=%v", pending, baseline)
-		}
-		if _, err := connection.Exec(ctx, `DROP TRIGGER reject_vehicle_commit ON vehicles`); err != nil {
-			t.Fatal(err)
 		}
 	})
 
