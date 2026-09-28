@@ -49,7 +49,7 @@ func run(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	runner := reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, auth.AccessPolicy(cfg), slog.Default())
+	runner := reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, auth.AccessPolicy(cfg), cfg.Location, slog.Default())
 	report, err := runner.Run(ctx, options)
 	if _, printErr := fmt.Fprintf(output, "evaluated=%d due=%d recipients=%d suppressed=%d sent=%d failed=%d lock_contended=%t dry_run=%t\n", report.Evaluated, report.Due, report.RecipientCount, report.Suppressed, report.Sent, report.Failed, report.LockContended, options.DryRun); printErr != nil {
 		return errors.Join(err, printErr)

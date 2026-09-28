@@ -23,6 +23,10 @@ rechecked on every request, so removing an address revokes its existing sessions
 and reminder emails go only to allowlisted users. Expired sessions are purged at
 startup and daily.
 
+Due dates, reminder emails, and new-record date defaults use the household
+calendar date in `APP_TIMEZONE` (an IANA zone name, default `America/New_York`);
+an invalid zone fails startup.
+
 Email reminders are disabled by default. Production enables them with
 `REMINDER_EMAIL_ENABLED=true`, a Postgres store, and:
 

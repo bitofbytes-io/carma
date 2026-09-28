@@ -116,3 +116,24 @@ func setReminderEmailEnvironment(t *testing.T) {
 		t.Setenv(key, value)
 	}
 }
+
+func TestAppTimezoneDefaultsToNewYorkAndIsValidated(t *testing.T) {
+	t.Setenv("DATA_STORE", "memory")
+	t.Setenv("AUTH_MODE", "development")
+	t.Setenv("APP_TIMEZONE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Location == nil || cfg.Location.String() != "America/New_York" {
+		t.Fatalf("default location = %v", cfg.Location)
+	}
+	t.Setenv("APP_TIMEZONE", "Europe/Berlin")
+	if cfg, err = Load(); err != nil || cfg.Location.String() != "Europe/Berlin" {
+		t.Fatalf("location=%v err=%v", cfg, err)
+	}
+	t.Setenv("APP_TIMEZONE", "Mars/Olympus_Mons")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "APP_TIMEZONE") {
+		t.Fatalf("invalid time zone accepted: %v", err)
+	}
+}

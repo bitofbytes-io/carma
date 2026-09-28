@@ -76,7 +76,7 @@ func (s *Server) newRecord(response http.ResponseWriter, request *http.Request) 
 		s.notFound(response, err)
 		return
 	}
-	data, err := s.recordFormData(request, vehicle, model.Record{OccurredOn: day(s.now())}, false)
+	data, err := s.recordFormData(request, vehicle, model.Record{OccurredOn: s.today()}, false)
 	if err != nil {
 		s.fail(response, err)
 		return

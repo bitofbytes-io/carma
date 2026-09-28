@@ -87,7 +87,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		reminderRunner = reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, allowed, slog.Default())
+		reminderRunner = reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
 	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)

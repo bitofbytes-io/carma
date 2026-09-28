@@ -85,7 +85,7 @@ func TestRunnerSendsOnlyDueAndAuditsAfterSuccess(t *testing.T) {
 		{ID: soonID, VehicleID: uuid.New(), VehicleName: "Truck", ServiceTypeName: "Tires", IntervalMonths: &month, Enabled: true, CreatedAt: time.Date(2026, time.February, 20, 0, 0, 0, 0, time.UTC)},
 	}}
 	sender := &fakeSender{}
-	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runner.now = func() time.Time { return now }
 	report, err := runner.Run(context.Background(), Options{})
 	if err != nil {
@@ -112,7 +112,7 @@ func TestRunnerEmailsOnlyAllowlistedRecipients(t *testing.T) {
 		{ID: uuid.New(), VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true, CreatedAt: now.AddDate(0, -2, 0)},
 	}}
 	sender := &fakeSender{}
-	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", func(email string) bool { return email == "current@example.com" }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", func(email string) bool { return email == "current@example.com" }, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runner.now = func() time.Time { return now }
 	report, err := runner.Run(context.Background(), Options{})
 	if err != nil || report.Sent != 1 || report.RecipientCount != 1 {
@@ -123,6 +123,38 @@ func TestRunnerEmailsOnlyAllowlistedRecipients(t *testing.T) {
 	}
 	if !slices.Equal(store.notifications[0].Recipients, []string{"current@example.com"}) {
 		t.Fatalf("audited recipients = %#v", store.notifications[0].Recipients)
+	}
+}
+
+func TestRunnerEvaluatesDueDatesInConfiguredTimeZone(t *testing.T) {
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	month := 6
+	reminder := model.Reminder{ID: uuid.New(), VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true,
+		Baseline: &model.Record{OccurredOn: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)}}
+	for _, test := range []struct {
+		name     string
+		now      time.Time
+		wantSent int
+	}{
+		{name: "23:30 local on the day before", now: time.Date(2026, 7, 30, 23, 30, 0, 0, newYork)},
+		{name: "00:30 local on the due date", now: time.Date(2026, 7, 31, 0, 30, 0, 0, newYork), wantSent: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}}
+			sender := &fakeSender{}
+			runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, newYork, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			runner.now = func() time.Time { return test.now.UTC() }
+			report, err := runner.Run(context.Background(), Options{})
+			if err != nil || report.Sent != test.wantSent {
+				t.Fatalf("report=%+v err=%v", report, err)
+			}
+			if test.wantSent == 1 && !strings.Contains(sender.messages[0].Body, "Due date: July 31, 2026") {
+				t.Fatalf("body = %s", sender.messages[0].Body)
+			}
+		})
 	}
 }
 
@@ -142,7 +174,7 @@ func TestRunnerSuppressionBoundaryAndRetryAfterFailure(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}, notifications: []model.ReminderNotification{{ReminderID: id, SentAt: test.sentAt}}}
 			sender := &fakeSender{}
-			runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil)
+			runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, nil)
 			runner.now = func() time.Time { return now }
 			report, err := runner.Run(context.Background(), Options{})
 			if err != nil || report.Sent != test.wantSent || report.Suppressed != test.wantSuppress {
@@ -152,7 +184,7 @@ func TestRunnerSuppressionBoundaryAndRetryAfterFailure(t *testing.T) {
 	}
 	store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}}
 	sender := &fakeSender{err: &mailer.SMTPStatusError{Operation: "SMTP recipient rejected", Code: 550, Class: 5}}
-	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runner.now = func() time.Time { return now }
 	report, err := runner.Run(context.Background(), Options{})
 	if err == nil || report.Failed != 1 || len(store.notifications) != 0 {
@@ -186,7 +218,7 @@ func TestRunnerNewBaselineStartsNewSuppressionCycle(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}, notifications: []model.ReminderNotification{{ReminderID: reminderID, SentAt: test.notifiedAt}}}
 			sender := &fakeSender{}
-			runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			runner.now = func() time.Time { return now }
 			report, err := runner.Run(context.Background(), Options{})
 			if err != nil || report.Due != 1 || report.Sent != test.wantSent || report.Suppressed != test.wantSuppress {
@@ -206,7 +238,7 @@ func TestRunnerAuditFailureRemainsEligibleForAtLeastOnceRetry(t *testing.T) {
 		auditErr:      errors.New("audit unavailable"),
 	}
 	sender := &fakeSender{}
-	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runner.now = func() time.Time { return now }
 
 	report, err := runner.Run(context.Background(), Options{})
@@ -236,7 +268,7 @@ func TestRunnerDryRunAndTargeting(t *testing.T) {
 		{ID: otherID, VehicleID: uuid.New(), IntervalMonths: &month, Enabled: true, CreatedAt: now.AddDate(0, -2, 0)},
 	}}
 	sender := &fakeSender{}
-	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil)
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, nil)
 	runner.now = func() time.Time { return now }
 	report, err := runner.Run(context.Background(), Options{DryRun: true, ReminderID: &targetID})
 	if err != nil || report.Evaluated != 1 || report.Due != 1 || report.Sent != 0 {
@@ -258,7 +290,7 @@ func TestRunnerRequiredRecipientCountMatchAndMismatch(t *testing.T) {
 	newRunner := func() (*Runner, *fakeStore, *fakeSender) {
 		store := &fakeStore{lockAvailable: true, emails: []string{"first@example.com", " FIRST@example.com ", "second@example.com"}, reminders: []model.Reminder{reminder}}
 		sender := &fakeSender{}
-		runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		runner.now = func() time.Time { return now }
 		return runner, store, sender
 	}
@@ -304,7 +336,7 @@ func TestRunnerRequiredRecipientCountGuardsNonDueTarget(t *testing.T) {
 	newRunner := func() (*Runner, *fakeStore, *fakeSender) {
 		store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{reminder}}
 		sender := &fakeSender{}
-		runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		runner.now = func() time.Time { return now }
 		return runner, store, sender
 	}

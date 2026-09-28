@@ -159,6 +159,7 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `AUTH_GOOGLE_REDIRECT_URL` | stack env | `https://carma.bitofbytes.io/api/auth/google/callback` |
 | `AUTH_GOOGLE_ALLOWED_EMAILS` | stack env | comma-separated allowlist |
 | `SESSION_TTL` | default `2160h` | session lifetime |
+| `APP_TIMEZONE` | default `America/New_York` | IANA zone that decides "today" for due dates, reminder emails, and new-record defaults; tzdata is embedded in the binary |
 | `ASSET_ROOT` | stack env (`/data/assets`) | receipt/photo storage root |
 | `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
 | `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/middleware"
+	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
 )
 
@@ -82,7 +83,7 @@ func (s *Server) notFound(response http.ResponseWriter, err error) {
 	}
 }
 
-func day(date time.Time) time.Time {
-	year, month, day := date.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, date.Location())
+// today returns the current calendar date in the configured time zone.
+func (s *Server) today() time.Time {
+	return reminder.Today(s.now(), s.cfg.Location)
 }

@@ -1088,3 +1088,36 @@ func TestLoginPageAllowsOnlyKnownErrorCodes(t *testing.T) {
 		t.Fatalf("unknown error rendered attacker text: status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestTodayFollowsConfiguredTimeZone(t *testing.T) {
+	f := setup(t)
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.cfg.Location = newYork
+	// 23:30 on July 30 in New York is 03:30 on July 31 in UTC.
+	now := time.Date(2026, 7, 30, 23, 30, 0, 0, newYork)
+	f.s.now = func() time.Time { return now.UTC() }
+	v := createVehicle(t, f)
+	form := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/records/new", nil, "")
+	if !strings.Contains(form.Body.String(), `value="2026-07-30"`) {
+		t.Fatalf("new record did not default to the local date: %s", form.Body.String())
+	}
+	types, _ := f.store.ListServiceTypes(t.Context())
+	months := 6
+	baseline := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), CreatedAt: now}
+	if _, err = f.store.CreateRecord(t.Context(), baseline, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMonths: &months, Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.do(t, http.MethodGet, "/", nil, "").Body.String(); strings.Contains(body, "OVERDUE") || !strings.Contains(body, "DUE SOON") {
+		t.Fatalf("reminder due July 31 local was not due soon at 23:30 July 30 local: %s", body)
+	}
+	f.s.now = func() time.Time { return now.Add(time.Hour).UTC() }
+	if body := f.do(t, http.MethodGet, "/", nil, "").Body.String(); !strings.Contains(body, "OVERDUE") {
+		t.Fatalf("reminder due July 31 local was not overdue at 00:30 July 31 local: %s", body)
+	}
+}
