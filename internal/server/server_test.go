@@ -950,6 +950,42 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 	}
 }
 
+func TestGoogleCallbackReportsIdentityConflict(t *testing.T) {
+	store := repository.NewMemory()
+	now := time.Now()
+	for _, existing := range []model.User{
+		{ID: uuid.New(), OAuthProvider: "google", OAuthSubject: "sub-a", Email: "a@example.com", CreatedAt: now},
+		{ID: uuid.New(), OAuthProvider: "google", OAuthSubject: "sub-b", Email: "b@example.com", CreatedAt: now},
+	} {
+		if _, err := store.UpsertUser(t.Context(), existing); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, _ := assets.NewLocalStore(t.TempDir())
+	cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, SessionTTL: time.Hour, MaxUploadBytes: 25 << 20}
+	g := fakeGoogle{claims: auth.Claims{Subject: "sub-a", Email: "b@example.com", EmailVerified: true}, allowed: true}
+	srv, err := New(cfg, store, a, auth.NewService(store, cfg.SessionTTL, nil), g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := srv.Router()
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, httptest.NewRequest("GET", "https://carma.example/api/auth/google", nil))
+	state := start.Result().Cookies()[0]
+	callback := httptest.NewRequest("GET", "https://carma.example/api/auth/google/callback?state="+url.QueryEscape(state.Value)+"&code=ok", nil)
+	callback.AddCookie(state)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, callback)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login?error="+loginErrorConflict {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == middleware.CookieName && cookie.Value != "" {
+			t.Fatal("conflicting sign-in created a session")
+		}
+	}
+}
+
 func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
 	store := repository.NewMemory()
 	a, err := assets.NewLocalStore(t.TempDir())
@@ -1071,6 +1107,7 @@ func TestLoginPageAllowsOnlyKnownErrorCodes(t *testing.T) {
 		{loginErrorExpired, "Sign-in expired. Please try again."},
 		{loginErrorOAuth, "Google sign-in could not be completed. Please try again."},
 		{loginErrorNotInvited, "This verified Google account is not invited to Carma."},
+		{loginErrorConflict, "This Google account&#39;s email already belongs to another Carma user."},
 	} {
 		response := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, "http://example.com/login?error="+url.QueryEscape(tc.code), nil)

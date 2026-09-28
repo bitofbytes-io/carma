@@ -48,17 +48,46 @@ func (p *Postgres) UpsertUser(ctx context.Context, user model.User) (model.User,
 		return user, err
 	}
 
-	var persistedID uuid.UUID
-	err = tx.QueryRow(
-		ctx, `SELECT id
+	rows, err := tx.Query(
+		ctx, `SELECT id, oauth_provider=$1 AND oauth_subject=$2, lower(email)=lower($3)
 		FROM users
 		WHERE (oauth_provider=$1 AND oauth_subject=$2) OR lower(email)=lower($3)
-		ORDER BY (oauth_provider=$1 AND oauth_subject=$2) DESC
-		LIMIT 1 FOR UPDATE`, user.OAuthProvider,
+		FOR UPDATE`, user.OAuthProvider,
 		user.OAuthSubject, user.Email,
-	).Scan(&persistedID)
+	)
+	if err != nil {
+		return user, err
+	}
+	var identityID, emailID uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		var identityMatch, emailMatch bool
+		if err = rows.Scan(&id, &identityMatch, &emailMatch); err != nil {
+			rows.Close()
+			return user, err
+		}
+		if identityMatch {
+			identityID = id
+		}
+		if emailMatch {
+			emailID = id
+		}
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return user, err
+	}
+	// Like the memory store, refuse to move an identity onto an email address
+	// that already belongs to a different user.
+	if identityID != uuid.Nil && emailID != uuid.Nil && identityID != emailID {
+		return user, ErrConflict
+	}
+	persistedID := identityID
+	if persistedID == uuid.Nil {
+		persistedID = emailID
+	}
 	switch {
-	case err == nil:
+	case persistedID != uuid.Nil:
 		err = tx.QueryRow(
 			ctx, `UPDATE users SET
 			oauth_provider=$2,
@@ -79,7 +108,7 @@ func (p *Postgres) UpsertUser(ctx context.Context, user model.User) (model.User,
 			&user.Email, &user.DisplayName, &user.AvatarURL,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 		)
-	case errors.Is(err, pgx.ErrNoRows):
+	default:
 		err = tx.QueryRow(
 			ctx, `INSERT INTO users(id,oauth_provider,oauth_subject,email,display_name,avatar_url,created_at,updated_at,
 			last_login_at)
@@ -94,8 +123,6 @@ func (p *Postgres) UpsertUser(ctx context.Context, user model.User) (model.User,
 			&user.Email, &user.DisplayName, &user.AvatarURL,
 			&user.CreatedAt, &user.UpdatedAt, &user.LastLoginAt,
 		)
-	default:
-		return user, err
 	}
 	if err != nil {
 		return user, err

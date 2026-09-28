@@ -53,7 +53,8 @@ Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
 declared by this project. Run
 `make test-integration` to start the local Compose Postgres and execute the real
-migration, notification-query, and advisory-lock integration test.
+migration, notification-query, advisory-lock, record/attachment query, and
+user/session integration tests.
 
 PostgreSQL deployments also run asset cleanup at startup and every seven days.
 Only generated, unreferenced objects and `temporary/upload-*` files older than 48

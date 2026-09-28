@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
 	"github.com/bitofbytes-io/carma/internal/middleware"
+	"github.com/bitofbytes-io/carma/internal/repository"
 )
 
 const (
@@ -19,6 +22,7 @@ const (
 	loginErrorExpired    = "expired"
 	loginErrorOAuth      = "oauth"
 	loginErrorNotInvited = "not-invited"
+	loginErrorConflict   = "account-conflict"
 )
 
 func (s *Server) loginPage(response http.ResponseWriter, request *http.Request) {
@@ -100,6 +104,11 @@ func (s *Server) oauthCallback(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	_, token, err := s.auth.Login(request.Context(), claims)
+	if errors.Is(err, repository.ErrConflict) {
+		slog.Warn("google sign-in conflicts with another user", "error", err)
+		http.Redirect(response, request, loginErrorLocation(loginErrorConflict), http.StatusSeeOther)
+		return
+	}
 	if err != nil {
 		s.fail(response, err)
 		return
@@ -120,6 +129,8 @@ func loginErrorMessage(code string) string {
 		return "Google sign-in could not be completed. Please try again."
 	case loginErrorNotInvited:
 		return "This verified Google account is not invited to Carma."
+	case loginErrorConflict:
+		return "This Google account's email already belongs to another Carma user. Ask the Carma administrator for help."
 	default:
 		return ""
 	}
