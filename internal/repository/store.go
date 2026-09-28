@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
+
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/google/uuid"
 )
@@ -17,6 +19,8 @@ type Store interface {
 	CreateSession(context.Context, model.Session, string) error
 	FindSession(context.Context, string) (*model.Session, *model.User, error)
 	DeleteSession(context.Context, uuid.UUID) error
+	// DeleteExpiredSessions removes sessions whose expiry is at or before now.
+	DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error)
 
 	ListVehicles(context.Context, bool) ([]model.Vehicle, error)
 	GetVehicle(context.Context, uuid.UUID) (model.Vehicle, error)

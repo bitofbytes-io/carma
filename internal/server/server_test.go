@@ -116,7 +116,7 @@ func setup(t *testing.T) fixture {
 		t.Fatal(e)
 	}
 	cfg := &config.Config{AppEnv: "development", AuthMode: config.AuthDevelopment, SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
-	svc := auth.NewService(store, cfg.SessionTTL)
+	svc := auth.NewService(store, cfg.SessionTTL, nil)
 	u, token, e := svc.DevLogin(t.Context())
 	if e != nil {
 		t.Fatal(e)
@@ -146,7 +146,7 @@ func (f fixture) do(t *testing.T, method, path string, body io.Reader, contentTy
 func TestLogoutRetainsCookieWhenSessionRevocationFails(t *testing.T) {
 	f := setup(t)
 	revocationErr := errors.New("session revocation failed")
-	f.s.auth = auth.NewService(deleteSessionErrorStore{Store: f.store, err: revocationErr}, f.s.cfg.SessionTTL)
+	f.s.auth = auth.NewService(deleteSessionErrorStore{Store: f.store, err: revocationErr}, f.s.cfg.SessionTTL, nil)
 	f.router = f.s.Router()
 
 	response := f.do(t, http.MethodPost, "/logout", nil, "")
@@ -869,7 +869,7 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 			store := repository.NewMemory()
 			a, _ := assets.NewLocalStore(t.TempDir())
 			cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
-			svc := auth.NewService(store, cfg.SessionTTL)
+			svc := auth.NewService(store, cfg.SessionTTL, nil)
 			g := fakeGoogle{claims: auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: tc.verified}, allowed: tc.allowed}
 			srv, e := New(cfg, store, a, svc, g)
 			if e != nil {
@@ -923,7 +923,7 @@ func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
 		SessionTTL:         90 * 24 * time.Hour,
 		MaxUploadBytes:     25 << 20,
 	}
-	svc := auth.NewService(store, cfg.SessionTTL)
+	svc := auth.NewService(store, cfg.SessionTTL, nil)
 	g := fakeGoogle{
 		claims:  auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: true},
 		allowed: true,
@@ -993,7 +993,7 @@ func TestGoogleOAuthRejectsTamperedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, GoogleClientSecret: "state-signing-secret", SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
-	svc := auth.NewService(store, cfg.SessionTTL)
+	svc := auth.NewService(store, cfg.SessionTTL, nil)
 	g := fakeGoogle{claims: auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: true}, allowed: true}
 	srv, err := New(cfg, store, a, svc, g)
 	if err != nil {

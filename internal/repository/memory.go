@@ -118,6 +118,18 @@ func (m *Memory) DeleteSession(_ context.Context, id uuid.UUID) error {
 	}
 	return nil
 }
+func (m *Memory) DeleteExpiredSessions(_ context.Context, now time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var deleted int64
+	for h, s := range m.sessions {
+		if !now.Before(s.ExpiresAt) {
+			delete(m.sessions, h)
+			deleted++
+		}
+	}
+	return deleted, nil
+}
 func (m *Memory) ListVehicles(_ context.Context, archived bool) ([]model.Vehicle, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

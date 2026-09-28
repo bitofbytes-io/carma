@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/mail"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,15 +39,18 @@ type Runner struct {
 	store     repository.ReminderEmailStore
 	sender    mailer.Sender
 	publicURL string
+	allowed   func(string) bool
 	logger    *slog.Logger
 	now       func() time.Time
 }
 
-func NewRunner(store repository.ReminderEmailStore, sender mailer.Sender, publicURL string, logger *slog.Logger) *Runner {
+// NewRunner sends reminders only to users whose email passes allowed, the same
+// allowlist that admits sign-ins. A nil allowed admits every user.
+func NewRunner(store repository.ReminderEmailStore, sender mailer.Sender, publicURL string, allowed func(string) bool, logger *slog.Logger) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Runner{store: store, sender: sender, publicURL: strings.TrimRight(publicURL, "/"), logger: logger, now: time.Now}
+	return &Runner{store: store, sender: sender, publicURL: strings.TrimRight(publicURL, "/"), allowed: allowed, logger: logger, now: time.Now}
 }
 
 func (r *Runner) Run(ctx context.Context, options Options) (report Report, runErr error) {
@@ -100,6 +104,9 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 			return fmt.Errorf("list reminder recipients: %w", recipientErr)
 		}
 		recipients = NormalizeRecipients(rawRecipients)
+		if r.allowed != nil {
+			recipients = slices.DeleteFunc(recipients, func(email string) bool { return !r.allowed(email) })
+		}
 		recipientsLoaded = true
 		report.RecipientCount = len(recipients)
 		return nil

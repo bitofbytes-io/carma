@@ -18,7 +18,10 @@ uploads below `.local/carma-assets`; configuration rejects development auth when
 
 For PostgreSQL, run `make db-up`, `make migrate`, then `make run-postgres`.
 Production configuration uses Google OIDC and requires a verified email to match
-`AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`.
+`AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`. The allowlist is
+rechecked on every request, so removing an address revokes its existing sessions,
+and reminder emails go only to allowlisted users. Expired sessions are purged at
+startup and daily.
 
 Email reminders are disabled by default. Production enables them with
 `REMINDER_EMAIL_ENABLED=true`, a Postgres store, and:

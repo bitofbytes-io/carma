@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/google/uuid"
@@ -137,4 +138,12 @@ func (p *Postgres) FindSession(ctx context.Context, tokenHash string) (*model.Se
 func (p *Postgres) DeleteSession(ctx context.Context, id uuid.UUID) error {
 	_, err := p.pool.Exec(ctx, `DELETE FROM user_sessions WHERE id=$1`, id)
 	return err
+}
+
+func (p *Postgres) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM user_sessions WHERE expires_at <= $1`, now)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }

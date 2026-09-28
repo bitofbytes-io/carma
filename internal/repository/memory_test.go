@@ -407,3 +407,20 @@ func TestUpsertUserRejectsIdentityEmailCollisionWithoutMutation(t *testing.T) {
 		t.Fatalf("case-insensitive email lookup changed: user=%+v err=%v", got, err)
 	}
 }
+
+func TestMemoryDeleteExpiredSessionsIncludesExactExpiry(t *testing.T) {
+	m := NewMemory()
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	for hash, expires := range map[string]time.Time{"past": now.Add(-time.Second), "exact": now, "future": now.Add(time.Second)} {
+		if err := m.CreateSession(t.Context(), model.Session{ID: uuid.New(), ExpiresAt: expires}, hash); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deleted, err := m.DeleteExpiredSessions(t.Context(), now)
+	if err != nil || deleted != 2 {
+		t.Fatalf("deleted=%d err=%v", deleted, err)
+	}
+	if _, ok := m.sessions["future"]; !ok || len(m.sessions) != 1 {
+		t.Fatalf("sessions=%v", m.sessions)
+	}
+}
