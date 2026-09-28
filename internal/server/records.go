@@ -277,7 +277,7 @@ func (s *Server) deleteRecord(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	s.cleanup(request, keys)
-	http.Redirect(response, request, "/vehicles/"+record.VehicleID.String(), 303)
+	redirectAfterPost(response, request, "/vehicles/"+record.VehicleID.String())
 }
 
 func (s *Server) createServiceType(response http.ResponseWriter, request *http.Request) {

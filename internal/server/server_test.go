@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -599,9 +600,8 @@ func TestRecordWithPDFRangeAndFilteredCSV(t *testing.T) {
 	}
 	_, as, _ := f.store.GetRecord(t.Context(), rows[0].ID)
 	detail := f.do(t, "GET", "/records/"+rows[0].ID.String(), nil, "")
-	if strings.Count(detail.Body.String(), "hx-confirm=") < 2 {
-		t.Fatal("record and receipt deletes must both confirm")
-	}
+	assertHTMXConfirmedForm(t, detail.Body.String(), "/records/"+rows[0].ID.String()+"/delete", "Delete this record and its receipts?")
+	assertHTMXConfirmedForm(t, detail.Body.String(), "/attachments/"+as[0].ID.String()+"/delete", "Delete this receipt?")
 	req := httptest.NewRequest("GET", "http://example.com/attachments/"+as[0].ID.String(), nil)
 	req.AddCookie(f.cookie)
 	req.Header.Set("Range", "bytes=0-4")
@@ -773,8 +773,48 @@ func TestReminderDeleteHTMXAndConfirmations(t *testing.T) {
 		t.Fatal("reminder not deleted")
 	}
 	edit := f.do(t, "GET", "/vehicles/"+v.ID.String()+"/edit", nil, "")
-	if !strings.Contains(edit.Body.String(), `hx-confirm="Archive this vehicle?"`) {
-		t.Fatal("archive confirmation missing")
+	assertHTMXConfirmedForm(t, edit.Body.String(), "/vehicles/"+v.ID.String()+"/archive", "Archive this vehicle?")
+}
+
+// assertHTMXConfirmedForm checks that the form posting to action is submitted by
+// htmx, because htmx only shows hx-confirm prompts for requests it issues.
+func assertHTMXConfirmedForm(t *testing.T, body, action, prompt string) {
+	t.Helper()
+	for _, tag := range regexp.MustCompile(`<form\b[^>]*>`).FindAllString(body, -1) {
+		if !strings.Contains(tag, `action="`+action+`"`) {
+			continue
+		}
+		if !strings.Contains(tag, `hx-post="`+action+`"`) || !strings.Contains(tag, `hx-confirm="`+prompt+`"`) {
+			t.Fatalf("form %s is not an htmx-confirmed post", tag)
+		}
+		return
+	}
+	t.Fatalf("no form posts to %s", action)
+}
+
+func TestConfirmedDestructivePostsRedirectHTMXRequests(t *testing.T) {
+	f := setup(t)
+	record, attachment := createAttachment(t, f)
+	for _, test := range []struct{ path, target string }{
+		{"/attachments/" + attachment.ID.String() + "/delete", "/records/" + record.ID.String()},
+		{"/records/" + record.ID.String() + "/delete", "/vehicles/" + record.VehicleID.String()},
+		{"/vehicles/" + record.VehicleID.String() + "/archive", "/"},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "http://example.com"+test.path, nil)
+		request.AddCookie(f.cookie)
+		request.Header.Set("Origin", "http://example.com")
+		request.Header.Set("HX-Request", "true")
+		response := httptest.NewRecorder()
+		f.router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || response.Header().Get("HX-Redirect") != test.target || response.Header().Get("Location") != "" {
+			t.Fatalf("%s: status=%d hx-redirect=%q location=%q", test.path, response.Code, response.Header().Get("HX-Redirect"), response.Header().Get("Location"))
+		}
+	}
+	if _, _, err := f.store.GetRecord(t.Context(), record.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("record not deleted: %v", err)
+	}
+	if archived, _ := f.store.ListVehicles(t.Context(), true); len(archived) != 1 {
+		t.Fatalf("vehicle not archived: %+v", archived)
 	}
 }
 func TestReminderOverdueThenMatchingRecordClears(t *testing.T) {

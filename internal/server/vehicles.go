@@ -203,7 +203,7 @@ func (s *Server) archiveVehicle(response http.ResponseWriter, request *http.Requ
 		s.notFound(response, err)
 		return
 	}
-	http.Redirect(response, request, "/", 303)
+	redirectAfterPost(response, request, "/")
 }
 
 func (s *Server) vehiclePhoto(response http.ResponseWriter, request *http.Request) {

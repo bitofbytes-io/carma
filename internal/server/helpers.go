@@ -45,6 +45,17 @@ func isHTMX(request *http.Request) bool {
 	return strings.EqualFold(request.Header.Get("HX-Request"), "true")
 }
 
+// redirectAfterPost answers a completed POST with a 303 redirect, or with an
+// HX-Redirect for htmx-issued requests so the browser navigates to target.
+func redirectAfterPost(response http.ResponseWriter, request *http.Request, target string) {
+	if isHTMX(request) {
+		response.Header().Set("HX-Redirect", target)
+		response.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(response, request, target, http.StatusSeeOther)
+}
+
 func (s *Server) parseMultipart(response http.ResponseWriter, request *http.Request, memory int64) error {
 	limit := s.cfg.MaxMultipartBytes
 	if limit <= 0 {

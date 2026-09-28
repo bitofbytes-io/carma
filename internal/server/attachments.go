@@ -97,7 +97,7 @@ func (s *Server) deleteAttachment(response http.ResponseWriter, request *http.Re
 	if err = s.assets.Delete(request.Context(), key); err != nil {
 		slog.Warn("attachment asset cleanup deferred", "storage_key", key, "error", err)
 	}
-	http.Redirect(response, request, "/records/"+record.ID.String(), 303)
+	redirectAfterPost(response, request, "/records/"+record.ID.String())
 }
 
 func (s *Server) findAttachment(request *http.Request) (model.Record, model.Attachment, error) {
