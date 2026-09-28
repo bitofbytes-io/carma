@@ -132,8 +132,10 @@ func TestAppTimezoneDefaultsToNewYorkAndIsValidated(t *testing.T) {
 	if cfg, err = Load(); err != nil || cfg.Location.String() != "Europe/Berlin" {
 		t.Fatalf("location=%v err=%v", cfg, err)
 	}
-	t.Setenv("APP_TIMEZONE", "Mars/Olympus_Mons")
-	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "APP_TIMEZONE") {
-		t.Fatalf("invalid time zone accepted: %v", err)
+	for _, invalid := range []string{"Mars/Olympus_Mons", "Local", "local"} {
+		t.Setenv("APP_TIMEZONE", invalid)
+		if _, err = Load(); err == nil || !strings.Contains(err.Error(), "APP_TIMEZONE") {
+			t.Fatalf("invalid time zone %q accepted: %v", invalid, err)
+		}
 	}
 }
