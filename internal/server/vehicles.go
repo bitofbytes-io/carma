@@ -30,7 +30,7 @@ func (s *Server) dashboard(response http.ResponseWriter, request *http.Request) 
 		s.fail(response, err)
 		return
 	}
-	today := day(s.now())
+	today := s.today()
 	for _, schedule := range reminders {
 		result := reminder.Evaluate(schedule, today)
 		if result.Status == reminder.Due || result.Status == reminder.Soon {
@@ -203,7 +203,7 @@ func (s *Server) archiveVehicle(response http.ResponseWriter, request *http.Requ
 		s.notFound(response, err)
 		return
 	}
-	http.Redirect(response, request, "/", 303)
+	redirectAfterPost(response, request, "/")
 }
 
 func (s *Server) vehiclePhoto(response http.ResponseWriter, request *http.Request) {
@@ -245,7 +245,7 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	for _, schedule := range reminders {
-		data.Reminders = append(data.Reminders, reminder.Evaluate(schedule, day(s.now())))
+		data.Reminders = append(data.Reminders, reminder.Evaluate(schedule, s.today()))
 	}
 	if isHTMX(request) {
 		s.renderNamed(response, "vehicle", "records-section", data)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/middleware"
+	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
 )
 
@@ -45,6 +46,17 @@ func isHTMX(request *http.Request) bool {
 	return strings.EqualFold(request.Header.Get("HX-Request"), "true")
 }
 
+// redirectAfterPost answers a completed POST with a 303 redirect, or with an
+// HX-Redirect for htmx-issued requests so the browser navigates to target.
+func redirectAfterPost(response http.ResponseWriter, request *http.Request, target string) {
+	if isHTMX(request) {
+		response.Header().Set("HX-Redirect", target)
+		response.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(response, request, target, http.StatusSeeOther)
+}
+
 func (s *Server) parseMultipart(response http.ResponseWriter, request *http.Request, memory int64) error {
 	limit := s.cfg.MaxMultipartBytes
 	if limit <= 0 {
@@ -71,7 +83,7 @@ func (s *Server) notFound(response http.ResponseWriter, err error) {
 	}
 }
 
-func day(date time.Time) time.Time {
-	year, month, day := date.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, date.Location())
+// today returns the current calendar date in the configured time zone.
+func (s *Server) today() time.Time {
+	return reminder.Today(s.now(), s.cfg.Location)
 }

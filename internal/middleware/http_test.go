@@ -25,7 +25,7 @@ func (s sessionErrorStore) FindSession(context.Context, string) (*model.Session,
 
 func TestRequireAuthReturnsUnavailableWithoutClearingCookieOnStoreError(t *testing.T) {
 	storeErr := errors.New("session store unavailable")
-	service := auth.NewService(sessionErrorStore{Store: repository.NewMemory(), err: storeErr}, time.Hour)
+	service := auth.NewService(sessionErrorStore{Store: repository.NewMemory(), err: storeErr}, time.Hour, nil)
 	called := false
 	handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called = true
@@ -49,7 +49,7 @@ func TestRequireAuthReturnsUnavailableWithoutClearingCookieOnStoreError(t *testi
 }
 
 func TestRequireAuthClearsInvalidSessionAndRedirects(t *testing.T) {
-	service := auth.NewService(repository.NewMemory(), time.Hour)
+	service := auth.NewService(repository.NewMemory(), time.Hour, nil)
 	handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("invalid session reached protected handler")
 	}))
@@ -79,7 +79,7 @@ func TestRequireAuthUsesHXRedirectForMissingAndInvalidSessions(t *testing.T) {
 		{name: "invalid", cookie: &http.Cookie{Name: CookieName, Value: "invalid-token"}, wantCleared: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service := auth.NewService(repository.NewMemory(), time.Hour)
+			service := auth.NewService(repository.NewMemory(), time.Hour, nil)
 			handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				t.Fatal("unauthenticated HTMX request reached protected handler")
 			}))
@@ -121,7 +121,7 @@ func TestRequireAuthUsesSafeFallbackForNonGETRequests(t *testing.T) {
 		{name: "HTMX PATCH", method: http.MethodPatch, htmx: true, wantStatus: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service := auth.NewService(repository.NewMemory(), time.Hour)
+			service := auth.NewService(repository.NewMemory(), time.Hour, nil)
 			handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				t.Fatal("unauthenticated non-GET request reached protected handler")
 			}))

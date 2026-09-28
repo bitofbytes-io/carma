@@ -88,3 +88,37 @@ func TestCalendarMonthBehavior(t *testing.T) {
 		t.Fatalf("status=%s due date=%v", got.Status, got.DueDate)
 	}
 }
+
+func TestTodayUsesConfiguredTimeZone(t *testing.T) {
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 23:30 on July 30 in New York is already July 31 in UTC.
+	now := time.Date(2026, 7, 30, 23, 30, 0, 0, newYork).UTC()
+	today := Today(now, newYork)
+	if y, m, d := today.Date(); y != 2026 || m != 7 || d != 30 || today.Location() != newYork {
+		t.Fatalf("today = %v", today)
+	}
+	if got := Today(now, nil); !got.Equal(time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("nil location today = %v", got)
+	}
+
+	baseline := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC) // stored DATE
+	r := model.Reminder{Enabled: true, IntervalMonths: ip(6), Baseline: &model.Record{OccurredOn: baseline}}
+	if got := Evaluate(r, today); got.Status != Soon {
+		t.Fatalf("due July 31 was %s at 23:30 on July 30 local", got.Status)
+	}
+	if got := Evaluate(r, Today(now.Add(time.Hour), newYork)); got.Status != Due {
+		t.Fatalf("due July 31 was %s at 00:30 on July 31 local", got.Status)
+	}
+	if y, m, d := Evaluate(r, today).DueDate.Date(); y != 2026 || m != 7 || d != 31 {
+		t.Fatalf("due date moved across time zones: %v", Evaluate(r, today).DueDate)
+	}
+
+	// A reminder created late in the local evening starts its cycle that day.
+	created := model.Reminder{Enabled: true, IntervalMonths: ip(1), CreatedAt: now}
+	if y, m, d := Evaluate(created, today).DueDate.Date(); y != 2026 || m != 8 || d != 30 {
+		t.Fatalf("created-date due = %v", Evaluate(created, today).DueDate)
+	}
+}

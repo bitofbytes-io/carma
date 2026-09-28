@@ -64,7 +64,8 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	authService := auth.NewService(store, cfg.SessionTTL)
+	allowed := auth.AccessPolicy(cfg)
+	authService := auth.NewService(store, cfg.SessionTTL, allowed)
 	var google auth.Google
 	if cfg.AuthMode == config.AuthGoogle {
 		google, e = auth.NewGoogleOIDC(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL, cfg.AllowedEmails, cfg.AllowedDomains)
@@ -86,11 +87,16 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		reminderRunner = reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, slog.Default())
+		reminderRunner = reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
 	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
 	var scheduler sync.WaitGroup
+	scheduler.Add(1)
+	go func() {
+		defer scheduler.Done()
+		authService.ScheduleSessionCleanup(ctx, auth.SessionCleanupInterval, slog.Default())
+	}()
 	if postgresBacked {
 		runner := assetcleanup.NewRunner(postgresStore, assetStore, slog.Default())
 		scheduler.Add(1)

@@ -37,7 +37,7 @@ func (s *Server) addAttachments(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	if err = s.store.AddAttachments(request.Context(), record.ID, attachments); err != nil {
-		s.cleanup(request, keys)
+		deferUploadCleanup(record.ID, keys, err)
 		s.fail(response, err)
 		return
 	}
@@ -97,7 +97,7 @@ func (s *Server) deleteAttachment(response http.ResponseWriter, request *http.Re
 	if err = s.assets.Delete(request.Context(), key); err != nil {
 		slog.Warn("attachment asset cleanup deferred", "storage_key", key, "error", err)
 	}
-	http.Redirect(response, request, "/records/"+record.ID.String(), 303)
+	redirectAfterPost(response, request, "/records/"+record.ID.String())
 }
 
 func (s *Server) findAttachment(request *http.Request) (model.Record, model.Attachment, error) {
@@ -132,6 +132,15 @@ func (s *Server) cleanup(request *http.Request, keys []string) {
 		if err := s.assets.Delete(request.Context(), key); err != nil {
 			slog.Warn("asset cleanup failed", "key", key, "error", err)
 		}
+	}
+}
+
+// deferUploadCleanup keeps receipts saved for a failed write. The write may
+// have committed even when its result was not received, so orphan cleanup
+// checks references before pruning retained uploads.
+func deferUploadCleanup(recordID uuid.UUID, keys []string, err error) {
+	for _, key := range keys {
+		slog.Warn("receipt cleanup deferred", "record_id", recordID, "storage_key", key, "error", err)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // APP_TIMEZONE must resolve even in images without zoneinfo.
 )
 
 const (
@@ -28,6 +29,9 @@ type Config struct {
 	MaxUploadBytes                                        int64
 	MaxMultipartBytes                                     int64
 	ReminderEmail                                         ReminderEmail
+	// Location is the household time zone (APP_TIMEZONE) that decides "today"
+	// for due dates and new-record defaults.
+	Location *time.Location
 }
 
 type ReminderEmail struct {
@@ -55,6 +59,15 @@ func Load() (*Config, error) {
 	}
 	c.AllowedEmails = csv(os.Getenv("AUTH_GOOGLE_ALLOWED_EMAILS"))
 	c.AllowedDomains = csv(os.Getenv("AUTH_GOOGLE_ALLOWED_DOMAINS"))
+	timezone := env("APP_TIMEZONE", "America/New_York")
+	if strings.EqualFold(timezone, "Local") {
+		// LoadLocation accepts "Local" as the host's zone, which can differ
+		// between the server and reminder hosts.
+		return nil, fmt.Errorf("APP_TIMEZONE must be an IANA time zone name, not Local")
+	}
+	if c.Location, err = time.LoadLocation(timezone); err != nil {
+		return nil, fmt.Errorf("APP_TIMEZONE must be an IANA time zone name: %w", err)
+	}
 	if c.SessionTTL, err = time.ParseDuration(env("SESSION_TTL", "2160h")); err != nil || c.SessionTTL <= 0 {
 		return nil, fmt.Errorf("SESSION_TTL must be a positive Go duration")
 	}

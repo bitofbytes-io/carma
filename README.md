@@ -18,7 +18,14 @@ uploads below `.local/carma-assets`; configuration rejects development auth when
 
 For PostgreSQL, run `make db-up`, `make migrate`, then `make run-postgres`.
 Production configuration uses Google OIDC and requires a verified email to match
-`AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`.
+`AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`. The allowlist is
+rechecked on every request, so removing an address revokes its existing sessions,
+and reminder emails go only to allowlisted users. Expired sessions are purged at
+startup and daily.
+
+Due dates, reminder emails, and new-record date defaults use the household
+calendar date in `APP_TIMEZONE` (an IANA zone name, default `America/New_York`);
+an invalid zone fails startup.
 
 Email reminders are disabled by default. Production enables them with
 `REMINDER_EMAIL_ENABLED=true`, a Postgres store, and:
@@ -46,7 +53,8 @@ Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
 declared by this project. Run
 `make test-integration` to start the local Compose Postgres and execute the real
-migration, notification-query, and advisory-lock integration test.
+migration, notification-query, advisory-lock, record/attachment query, and
+user/session integration tests.
 
 PostgreSQL deployments also run asset cleanup at startup and every seven days.
 Only generated, unreferenced objects and `temporary/upload-*` files older than 48

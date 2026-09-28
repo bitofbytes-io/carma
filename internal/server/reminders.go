@@ -35,7 +35,7 @@ func (s *Server) remindersPage(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	for _, schedule := range reminders {
-		data.Reminders = append(data.Reminders, reminder.Evaluate(schedule, day(s.now())))
+		data.Reminders = append(data.Reminders, reminder.Evaluate(schedule, s.today()))
 	}
 	s.render(response, 200, "reminders", data)
 }
@@ -140,7 +140,7 @@ func (s *Server) renderReminderList(response http.ResponseWriter, request *http.
 		return
 	}
 	for _, row := range rows {
-		data.Reminders = append(data.Reminders, reminder.Evaluate(row, day(s.now())))
+		data.Reminders = append(data.Reminders, reminder.Evaluate(row, s.today()))
 	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err = s.ui.RenderNamed(response, "reminders", "reminder-list", data); err != nil {

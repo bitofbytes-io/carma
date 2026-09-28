@@ -7,10 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/config"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -18,7 +20,11 @@ import (
 	"golang.org/x/oauth2"
 )
 
-const googleOIDCHTTPTimeout = 15 * time.Second
+const (
+	googleOIDCHTTPTimeout = 15 * time.Second
+	// SessionCleanupInterval is how often expired sessions are purged.
+	SessionCleanupInterval = 24 * time.Hour
+)
 
 type Claims struct {
 	Subject, Email, Name, Picture string
@@ -30,10 +36,48 @@ type Google interface {
 	Allowed(string) bool
 }
 type GoogleOIDC struct {
-	oauth           *oauth2.Config
-	verifier        *oidc.IDTokenVerifier
-	client          *http.Client
+	oauth     *oauth2.Config
+	verifier  *oidc.IDTokenVerifier
+	client    *http.Client
+	allowlist Allowlist
+}
+
+// Allowlist admits accounts by exact email address or by email domain.
+type Allowlist struct {
 	emails, domains map[string]struct{}
+}
+
+func NewAllowlist(emails, domains []string) Allowlist {
+	a := Allowlist{emails: map[string]struct{}{}, domains: map[string]struct{}{}}
+	for _, v := range emails {
+		a.emails[strings.ToLower(strings.TrimSpace(v))] = struct{}{}
+	}
+	for _, v := range domains {
+		a.domains[strings.ToLower(strings.TrimPrefix(strings.TrimSpace(v), "@"))] = struct{}{}
+	}
+	return a
+}
+
+func (a Allowlist) Allowed(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if _, ok := a.emails[email]; ok {
+		return true
+	}
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
+	}
+	_, ok := a.domains[parts[1]]
+	return ok
+}
+
+// AccessPolicy returns the email check applied to sessions and reminder
+// recipients. Development auth has no allowlist, so it returns nil (allow all).
+func AccessPolicy(cfg *config.Config) func(string) bool {
+	if cfg.AuthMode != config.AuthGoogle {
+		return nil
+	}
+	return NewAllowlist(cfg.AllowedEmails, cfg.AllowedDomains).Allowed
 }
 
 func NewGoogleOIDC(ctx context.Context, id, secret, redirect string, emails, domains []string) (*GoogleOIDC, error) {
@@ -55,13 +99,7 @@ func newGoogleOIDC(ctx context.Context, issuer string, client *http.Client, id, 
 			Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile"},
 		},
 		verifier: p.Verifier(&oidc.Config{ClientID: id}), client: client,
-		emails: map[string]struct{}{}, domains: map[string]struct{}{},
-	}
-	for _, v := range emails {
-		g.emails[strings.ToLower(strings.TrimSpace(v))] = struct{}{}
-	}
-	for _, v := range domains {
-		g.domains[strings.ToLower(strings.TrimPrefix(strings.TrimSpace(v), "@"))] = struct{}{}
+		allowlist: NewAllowlist(emails, domains),
 	}
 	return g, nil
 }
@@ -91,26 +129,19 @@ func (g *GoogleOIDC) Exchange(ctx context.Context, code string) (Claims, error) 
 	}
 	return Claims{Subject: c.Sub, Email: c.Email, Name: c.Name, Picture: c.Picture, EmailVerified: c.EmailVerified}, nil
 }
-func (g *GoogleOIDC) Allowed(email string) bool {
-	email = strings.ToLower(strings.TrimSpace(email))
-	if _, ok := g.emails[email]; ok {
-		return true
-	}
-	parts := strings.Split(email, "@")
-	if len(parts) != 2 {
-		return false
-	}
-	_, ok := g.domains[parts[1]]
-	return ok
-}
+func (g *GoogleOIDC) Allowed(email string) bool { return g.allowlist.Allowed(email) }
 
 type Service struct {
-	store repository.Store
-	ttl   time.Duration
+	store   repository.Store
+	ttl     time.Duration
+	allowed func(string) bool
 }
 
-func NewService(store repository.Store, ttl time.Duration) *Service {
-	return &Service{store: store, ttl: ttl}
+// NewService validates sessions against allowed on every request, so removing
+// an account from the allowlist revokes its existing sessions. A nil allowed
+// admits every user (development auth).
+func NewService(store repository.Store, ttl time.Duration, allowed func(string) bool) *Service {
+	return &Service{store: store, ttl: ttl, allowed: allowed}
 }
 func (s *Service) Login(ctx context.Context, c Claims) (model.User, string, error) {
 	if strings.TrimSpace(c.Subject) == "" || strings.TrimSpace(c.Email) == "" {
@@ -155,11 +186,43 @@ func (s *Service) Validate(ctx context.Context, token string) (*model.User, erro
 	if sess == nil || u == nil {
 		return nil, nil
 	}
-	if !time.Now().Before(sess.ExpiresAt) {
+	if !time.Now().Before(sess.ExpiresAt) || (s.allowed != nil && !s.allowed(u.Email)) {
 		_ = s.store.DeleteSession(ctx, sess.ID)
 		return nil, nil
 	}
 	return u, nil
+}
+
+// DeleteExpiredSessions removes every session that has expired.
+func (s *Service) DeleteExpiredSessions(ctx context.Context) (int64, error) {
+	return s.store.DeleteExpiredSessions(ctx, time.Now())
+}
+
+// ScheduleSessionCleanup deletes expired sessions at startup and then every
+// interval until ctx is canceled.
+func (s *Service) ScheduleSessionCleanup(ctx context.Context, interval time.Duration, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if interval <= 0 {
+		interval = SessionCleanupInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if deleted, err := s.DeleteExpiredSessions(ctx); err != nil {
+			if ctx.Err() == nil {
+				logger.Error("expired session cleanup failed", "error", err)
+			}
+		} else if deleted > 0 {
+			logger.Info("expired sessions deleted", "count", deleted)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 func (s *Service) Logout(ctx context.Context, token string) error {
 	if token == "" {

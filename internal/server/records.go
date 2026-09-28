@@ -76,7 +76,7 @@ func (s *Server) newRecord(response http.ResponseWriter, request *http.Request) 
 		s.notFound(response, err)
 		return
 	}
-	data, err := s.recordFormData(request, vehicle, model.Record{OccurredOn: day(s.now())}, false)
+	data, err := s.recordFormData(request, vehicle, model.Record{OccurredOn: s.today()}, false)
 	if err != nil {
 		s.fail(response, err)
 		return
@@ -142,7 +142,7 @@ func (s *Server) createRecord(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	if _, err = s.store.CreateRecord(request.Context(), record, attachments); err != nil {
-		s.cleanup(request, keys)
+		deferUploadCleanup(record.ID, keys, err)
 		s.fail(response, err)
 		return
 	}
@@ -277,7 +277,7 @@ func (s *Server) deleteRecord(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	s.cleanup(request, keys)
-	http.Redirect(response, request, "/vehicles/"+record.VehicleID.String(), 303)
+	redirectAfterPost(response, request, "/vehicles/"+record.VehicleID.String())
 }
 
 func (s *Server) createServiceType(response http.ResponseWriter, request *http.Request) {

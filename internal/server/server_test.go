@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -116,7 +117,7 @@ func setup(t *testing.T) fixture {
 		t.Fatal(e)
 	}
 	cfg := &config.Config{AppEnv: "development", AuthMode: config.AuthDevelopment, SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
-	svc := auth.NewService(store, cfg.SessionTTL)
+	svc := auth.NewService(store, cfg.SessionTTL, nil)
 	u, token, e := svc.DevLogin(t.Context())
 	if e != nil {
 		t.Fatal(e)
@@ -146,7 +147,7 @@ func (f fixture) do(t *testing.T, method, path string, body io.Reader, contentTy
 func TestLogoutRetainsCookieWhenSessionRevocationFails(t *testing.T) {
 	f := setup(t)
 	revocationErr := errors.New("session revocation failed")
-	f.s.auth = auth.NewService(deleteSessionErrorStore{Store: f.store, err: revocationErr}, f.s.cfg.SessionTTL)
+	f.s.auth = auth.NewService(deleteSessionErrorStore{Store: f.store, err: revocationErr}, f.s.cfg.SessionTTL, nil)
 	f.router = f.s.Router()
 
 	response := f.do(t, http.MethodPost, "/logout", nil, "")
@@ -599,9 +600,8 @@ func TestRecordWithPDFRangeAndFilteredCSV(t *testing.T) {
 	}
 	_, as, _ := f.store.GetRecord(t.Context(), rows[0].ID)
 	detail := f.do(t, "GET", "/records/"+rows[0].ID.String(), nil, "")
-	if strings.Count(detail.Body.String(), "hx-confirm=") < 2 {
-		t.Fatal("record and receipt deletes must both confirm")
-	}
+	assertHTMXConfirmedForm(t, detail.Body.String(), "/records/"+rows[0].ID.String()+"/delete", "Delete this record and its receipts?")
+	assertHTMXConfirmedForm(t, detail.Body.String(), "/attachments/"+as[0].ID.String()+"/delete", "Delete this receipt?")
 	req := httptest.NewRequest("GET", "http://example.com/attachments/"+as[0].ID.String(), nil)
 	req.AddCookie(f.cookie)
 	req.Header.Set("Range", "bytes=0-4")
@@ -773,8 +773,48 @@ func TestReminderDeleteHTMXAndConfirmations(t *testing.T) {
 		t.Fatal("reminder not deleted")
 	}
 	edit := f.do(t, "GET", "/vehicles/"+v.ID.String()+"/edit", nil, "")
-	if !strings.Contains(edit.Body.String(), `hx-confirm="Archive this vehicle?"`) {
-		t.Fatal("archive confirmation missing")
+	assertHTMXConfirmedForm(t, edit.Body.String(), "/vehicles/"+v.ID.String()+"/archive", "Archive this vehicle?")
+}
+
+// assertHTMXConfirmedForm checks that the form posting to action is submitted by
+// htmx, because htmx only shows hx-confirm prompts for requests it issues.
+func assertHTMXConfirmedForm(t *testing.T, body, action, prompt string) {
+	t.Helper()
+	for _, tag := range regexp.MustCompile(`<form\b[^>]*>`).FindAllString(body, -1) {
+		if !strings.Contains(tag, `action="`+action+`"`) {
+			continue
+		}
+		if !strings.Contains(tag, `hx-post="`+action+`"`) || !strings.Contains(tag, `hx-confirm="`+prompt+`"`) {
+			t.Fatalf("form %s is not an htmx-confirmed post", tag)
+		}
+		return
+	}
+	t.Fatalf("no form posts to %s", action)
+}
+
+func TestConfirmedDestructivePostsRedirectHTMXRequests(t *testing.T) {
+	f := setup(t)
+	record, attachment := createAttachment(t, f)
+	for _, test := range []struct{ path, target string }{
+		{"/attachments/" + attachment.ID.String() + "/delete", "/records/" + record.ID.String()},
+		{"/records/" + record.ID.String() + "/delete", "/vehicles/" + record.VehicleID.String()},
+		{"/vehicles/" + record.VehicleID.String() + "/archive", "/"},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "http://example.com"+test.path, nil)
+		request.AddCookie(f.cookie)
+		request.Header.Set("Origin", "http://example.com")
+		request.Header.Set("HX-Request", "true")
+		response := httptest.NewRecorder()
+		f.router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || response.Header().Get("HX-Redirect") != test.target || response.Header().Get("Location") != "" {
+			t.Fatalf("%s: status=%d hx-redirect=%q location=%q", test.path, response.Code, response.Header().Get("HX-Redirect"), response.Header().Get("Location"))
+		}
+	}
+	if _, _, err := f.store.GetRecord(t.Context(), record.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("record not deleted: %v", err)
+	}
+	if archived, _ := f.store.ListVehicles(t.Context(), true); len(archived) != 1 {
+		t.Fatalf("vehicle not archived: %+v", archived)
 	}
 }
 func TestReminderOverdueThenMatchingRecordClears(t *testing.T) {
@@ -869,7 +909,7 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 			store := repository.NewMemory()
 			a, _ := assets.NewLocalStore(t.TempDir())
 			cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
-			svc := auth.NewService(store, cfg.SessionTTL)
+			svc := auth.NewService(store, cfg.SessionTTL, nil)
 			g := fakeGoogle{claims: auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: tc.verified}, allowed: tc.allowed}
 			srv, e := New(cfg, store, a, svc, g)
 			if e != nil {
@@ -910,6 +950,42 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 	}
 }
 
+func TestGoogleCallbackReportsIdentityConflict(t *testing.T) {
+	store := repository.NewMemory()
+	now := time.Now()
+	for _, existing := range []model.User{
+		{ID: uuid.New(), OAuthProvider: "google", OAuthSubject: "sub-a", Email: "a@example.com", CreatedAt: now},
+		{ID: uuid.New(), OAuthProvider: "google", OAuthSubject: "sub-b", Email: "b@example.com", CreatedAt: now},
+	} {
+		if _, err := store.UpsertUser(t.Context(), existing); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, _ := assets.NewLocalStore(t.TempDir())
+	cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, SessionTTL: time.Hour, MaxUploadBytes: 25 << 20}
+	g := fakeGoogle{claims: auth.Claims{Subject: "sub-a", Email: "b@example.com", EmailVerified: true}, allowed: true}
+	srv, err := New(cfg, store, a, auth.NewService(store, cfg.SessionTTL, nil), g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := srv.Router()
+	start := httptest.NewRecorder()
+	router.ServeHTTP(start, httptest.NewRequest("GET", "https://carma.example/api/auth/google", nil))
+	state := start.Result().Cookies()[0]
+	callback := httptest.NewRequest("GET", "https://carma.example/api/auth/google/callback?state="+url.QueryEscape(state.Value)+"&code=ok", nil)
+	callback.AddCookie(state)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, callback)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login?error="+loginErrorConflict {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
+	}
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == middleware.CookieName && cookie.Value != "" {
+			t.Fatal("conflicting sign-in created a session")
+		}
+	}
+}
+
 func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
 	store := repository.NewMemory()
 	a, err := assets.NewLocalStore(t.TempDir())
@@ -923,7 +999,7 @@ func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
 		SessionTTL:         90 * 24 * time.Hour,
 		MaxUploadBytes:     25 << 20,
 	}
-	svc := auth.NewService(store, cfg.SessionTTL)
+	svc := auth.NewService(store, cfg.SessionTTL, nil)
 	g := fakeGoogle{
 		claims:  auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: true},
 		allowed: true,
@@ -993,7 +1069,7 @@ func TestGoogleOAuthRejectsTamperedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, GoogleClientSecret: "state-signing-secret", SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
-	svc := auth.NewService(store, cfg.SessionTTL)
+	svc := auth.NewService(store, cfg.SessionTTL, nil)
 	g := fakeGoogle{claims: auth.Claims{Subject: "sub", Email: "person@example.com", Name: "Person", EmailVerified: true}, allowed: true}
 	srv, err := New(cfg, store, a, svc, g)
 	if err != nil {
@@ -1031,6 +1107,7 @@ func TestLoginPageAllowsOnlyKnownErrorCodes(t *testing.T) {
 		{loginErrorExpired, "Sign-in expired. Please try again."},
 		{loginErrorOAuth, "Google sign-in could not be completed. Please try again."},
 		{loginErrorNotInvited, "This verified Google account is not invited to Carma."},
+		{loginErrorConflict, "This Google account&#39;s email already belongs to another Carma user."},
 	} {
 		response := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, "http://example.com/login?error="+url.QueryEscape(tc.code), nil)
@@ -1046,5 +1123,38 @@ func TestLoginPageAllowsOnlyKnownErrorCodes(t *testing.T) {
 	f.router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "ATTACKER-CONTROLLED") {
 		t.Fatalf("unknown error rendered attacker text: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestTodayFollowsConfiguredTimeZone(t *testing.T) {
+	f := setup(t)
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.s.cfg.Location = newYork
+	// 23:30 on July 30 in New York is 03:30 on July 31 in UTC.
+	now := time.Date(2026, 7, 30, 23, 30, 0, 0, newYork)
+	f.s.now = func() time.Time { return now.UTC() }
+	v := createVehicle(t, f)
+	form := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/records/new", nil, "")
+	if !strings.Contains(form.Body.String(), `value="2026-07-30"`) {
+		t.Fatalf("new record did not default to the local date: %s", form.Body.String())
+	}
+	types, _ := f.store.ListServiceTypes(t.Context())
+	months := 6
+	baseline := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), CreatedAt: now}
+	if _, err = f.store.CreateRecord(t.Context(), baseline, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMonths: &months, Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if body := f.do(t, http.MethodGet, "/", nil, "").Body.String(); strings.Contains(body, "OVERDUE") || !strings.Contains(body, "DUE SOON") {
+		t.Fatalf("reminder due July 31 local was not due soon at 23:30 July 30 local: %s", body)
+	}
+	f.s.now = func() time.Time { return now.Add(time.Hour).UTC() }
+	if body := f.do(t, http.MethodGet, "/", nil, "").Body.String(); !strings.Contains(body, "OVERDUE") {
+		t.Fatalf("reminder due July 31 local was not overdue at 00:30 July 31 local: %s", body)
 	}
 }

@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/config"
+	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
+	"github.com/google/uuid"
 )
 
 func newOIDCTestServer(t *testing.T, tokenHandler http.HandlerFunc) *httptest.Server {
@@ -114,7 +117,7 @@ func TestGoogleOIDCExchangePreservesEarlierCallerDeadline(t *testing.T) {
 
 func TestSessionsAreOpaqueAndStoredHashed(t *testing.T) {
 	m := repository.NewMemory()
-	s := NewService(m, 90*24*time.Hour)
+	s := NewService(m, 90*24*time.Hour, nil)
 	u, token, e := s.DevLogin(t.Context())
 	if e != nil {
 		t.Fatal(e)
@@ -131,7 +134,7 @@ func TestSessionsAreOpaqueAndStoredHashed(t *testing.T) {
 }
 
 func TestEmailAndDomainAllowlistIsCaseInsensitive(t *testing.T) {
-	g := &GoogleOIDC{emails: map[string]struct{}{"person@example.com": {}}, domains: map[string]struct{}{"family.test": {}}}
+	g := &GoogleOIDC{allowlist: NewAllowlist([]string{" Person@Example.com "}, []string{"@family.test"})}
 	for _, email := range []string{"Person@Example.com", "anyone@FAMILY.TEST"} {
 		if !g.Allowed(email) {
 			t.Fatalf("expected %s allowed", email)
@@ -139,5 +142,98 @@ func TestEmailAndDomainAllowlistIsCaseInsensitive(t *testing.T) {
 	}
 	if g.Allowed("stranger@elsewhere.test") {
 		t.Fatal("non-allowlisted email accepted")
+	}
+}
+
+func TestAccessPolicyAppliesOnlyToGoogleAuth(t *testing.T) {
+	if AccessPolicy(&config.Config{AuthMode: config.AuthDevelopment, AllowedEmails: []string{"person@example.com"}}) != nil {
+		t.Fatal("development auth must not restrict local users")
+	}
+	allowed := AccessPolicy(&config.Config{AuthMode: config.AuthGoogle, AllowedEmails: []string{"person@example.com"}, AllowedDomains: []string{"family.test"}})
+	if allowed == nil || !allowed("PERSON@example.com") || !allowed("kid@family.test") || allowed("stranger@example.com") {
+		t.Fatal("google access policy does not match the configured allowlist")
+	}
+}
+
+func TestValidateRevokesSessionsRemovedFromAllowlist(t *testing.T) {
+	m := repository.NewMemory()
+	permitted := true
+	s := NewService(m, time.Hour, func(email string) bool { return permitted && email == "person@example.com" })
+	u, token, err := s.Login(t.Context(), Claims{Subject: "subject", Email: "Person@Example.com", EmailVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found, err := s.Validate(t.Context(), token); err != nil || found == nil || found.ID != u.ID {
+		t.Fatalf("allowlisted session rejected: user=%v err=%v", found, err)
+	}
+	permitted = false
+	if found, err := s.Validate(t.Context(), token); err != nil || found != nil {
+		t.Fatalf("session survived allowlist removal: user=%v err=%v", found, err)
+	}
+	if session, _, _ := m.FindSession(t.Context(), HashToken(token)); session != nil {
+		t.Fatal("revoked session was not deleted")
+	}
+	permitted = true
+	if found, _ := s.Validate(t.Context(), token); found != nil {
+		t.Fatal("deleted session became valid again")
+	}
+}
+
+func TestDeleteExpiredSessionsKeepsActiveSessions(t *testing.T) {
+	m := repository.NewMemory()
+	s := NewService(m, time.Hour, nil)
+	u, active, err := s.DevLogin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := model.Session{ID: uuid.New(), UserID: u.ID, CreatedAt: time.Now().Add(-2 * time.Hour), ExpiresAt: time.Now().Add(-time.Hour)}
+	if err = m.CreateSession(t.Context(), expired, HashToken("expired")); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := s.DeleteExpiredSessions(t.Context()); err != nil || deleted != 1 {
+		t.Fatalf("deleted=%d err=%v", deleted, err)
+	}
+	if session, _, _ := m.FindSession(t.Context(), HashToken("expired")); session != nil {
+		t.Fatal("expired session remains")
+	}
+	if found, err := s.Validate(t.Context(), active); err != nil || found == nil {
+		t.Fatalf("active session removed: user=%v err=%v", found, err)
+	}
+}
+
+type countingSessionStore struct {
+	repository.Store
+	calls chan struct{}
+}
+
+func (s countingSessionStore) DeleteExpiredSessions(context.Context, time.Time) (int64, error) {
+	select {
+	case s.calls <- struct{}{}:
+	default:
+	}
+	return 0, nil
+}
+
+func TestScheduleSessionCleanupRunsAtStartupAndOnTicker(t *testing.T) {
+	store := countingSessionStore{Store: repository.NewMemory(), calls: make(chan struct{}, 4)}
+	s := NewService(store, time.Hour, nil)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		s.ScheduleSessionCleanup(ctx, 10*time.Millisecond, nil)
+		close(done)
+	}()
+	for range 2 {
+		select {
+		case <-store.calls:
+		case <-time.After(time.Second):
+			t.Fatal("session cleanup did not run")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("session cleanup did not stop after cancellation")
 	}
 }

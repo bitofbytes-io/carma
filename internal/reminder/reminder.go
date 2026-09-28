@@ -22,7 +22,20 @@ type Result struct {
 	DueMileage *int64
 }
 
+// Today returns the current calendar date at midnight in loc, the time zone that
+// due dates are evaluated in. A nil loc means UTC.
+func Today(now time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	year, month, date := now.In(loc).Date()
+	return time.Date(year, month, date, 0, 0, 0, 0, loc)
+}
+
+// Evaluate classifies r on the calendar date today (see Today). Baseline dates
+// are interpreted as calendar dates in today's time zone.
 func Evaluate(r model.Reminder, today time.Time) Result {
+	loc := today.Location()
 	res := Result{Reminder: r, Status: OK}
 	if !r.Enabled {
 		res.Status = Disabled
@@ -30,11 +43,11 @@ func Evaluate(r model.Reminder, today time.Time) Result {
 	}
 	due, soon := false, false
 	if r.IntervalMonths != nil {
-		year, month, date := r.CreatedAt.Date()
-		baselineDate := time.Date(year, month, date, 0, 0, 0, 0, r.CreatedAt.Location())
+		year, month, date := r.CreatedAt.In(loc).Date()
 		if r.Baseline != nil {
-			baselineDate = r.Baseline.OccurredOn
+			year, month, date = r.Baseline.OccurredOn.Date()
 		}
+		baselineDate := time.Date(year, month, date, 0, 0, 0, 0, loc)
 		d := baselineDate.AddDate(0, *r.IntervalMonths, 0)
 		res.DueDate = &d
 		if !today.Before(d) {
