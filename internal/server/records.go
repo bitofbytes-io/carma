@@ -142,7 +142,7 @@ func (s *Server) createRecord(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	if _, err = s.store.CreateRecord(request.Context(), record, attachments); err != nil {
-		s.cleanup(request, keys)
+		deferUploadCleanup(record.ID, keys, err)
 		s.fail(response, err)
 		return
 	}
