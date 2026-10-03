@@ -10,16 +10,16 @@ import (
 func TestDevelopmentAuthForbiddenInProduction(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("AUTH_MODE", "development")
-	t.Setenv("DATA_STORE", "memory")
+	t.Setenv("DATABASE_URL", "postgres://example")
 	if _, e := Load(); e == nil {
 		t.Fatal("development auth accepted in production")
 	}
 }
 func TestGoogleRequiresAllowlist(t *testing.T) {
-	for _, k := range []string{"APP_ENV", "AUTH_MODE", "DATA_STORE", "AUTH_GOOGLE_CLIENT_ID", "AUTH_GOOGLE_CLIENT_SECRET", "AUTH_GOOGLE_ALLOWED_EMAILS", "AUTH_GOOGLE_ALLOWED_DOMAINS"} {
+	for _, k := range []string{"APP_ENV", "AUTH_MODE", "AUTH_GOOGLE_CLIENT_ID", "AUTH_GOOGLE_CLIENT_SECRET", "AUTH_GOOGLE_ALLOWED_EMAILS", "AUTH_GOOGLE_ALLOWED_DOMAINS"} {
 		t.Setenv(k, "")
 	}
-	t.Setenv("DATA_STORE", "memory")
+	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("AUTH_MODE", "google")
 	t.Setenv("AUTH_GOOGLE_CLIENT_ID", "id")
 	t.Setenv("AUTH_GOOGLE_CLIENT_SECRET", "secret")
@@ -48,7 +48,7 @@ func TestReminderEmailLoadsPasswordFileAndValidates(t *testing.T) {
 	}
 }
 
-func TestReminderEmailRejectsIncompleteInvalidAndMemoryConfig(t *testing.T) {
+func TestReminderEmailRejectsIncompleteAndInvalidConfig(t *testing.T) {
 	setReminderEmailEnvironment(t)
 	t.Setenv("SMTP_TLS_MODE", "starttls")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SMTP_TLS_MODE") {
@@ -58,11 +58,6 @@ func TestReminderEmailRejectsIncompleteInvalidAndMemoryConfig(t *testing.T) {
 	t.Setenv("PUBLIC_URL", "http://carma.bitofbytes.io")
 	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "PUBLIC_URL") {
 		t.Fatalf("invalid public URL error = %v", err)
-	}
-	setReminderEmailEnvironment(t)
-	t.Setenv("DATA_STORE", "memory")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DATA_STORE=postgres") {
-		t.Fatalf("memory email error = %v", err)
 	}
 }
 
@@ -108,7 +103,7 @@ func setReminderEmailEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	for key, value := range map[string]string{
-		"APP_ENV": "development", "AUTH_MODE": "development", "DATA_STORE": "postgres", "DATABASE_URL": "postgres://example",
+		"APP_ENV": "development", "AUTH_MODE": "development", "DATABASE_URL": "postgres://example",
 		"REMINDER_EMAIL_ENABLED": "true", "SMTP_HOST": "mail.bitofbytes.io:465", "SMTP_USERNAME": "carma",
 		"SMTP_PASSWORD": "", "SMTP_PASSWORD_FILE": passwordFile, "SMTP_FROM_ADDRESS": "carma@bitofbytes.io", "SMTP_FROM_NAME": "Carma",
 		"SMTP_TLS_MODE": "implicit", "PUBLIC_URL": "https://carma.bitofbytes.io",
@@ -118,7 +113,7 @@ func setReminderEmailEnvironment(t *testing.T) {
 }
 
 func TestAppTimezoneDefaultsToNewYorkAndIsValidated(t *testing.T) {
-	t.Setenv("DATA_STORE", "memory")
+	t.Setenv("DATABASE_URL", "postgres://example")
 	t.Setenv("AUTH_MODE", "development")
 	t.Setenv("APP_TIMEZONE", "")
 	cfg, err := Load()
@@ -156,5 +151,14 @@ func TestSecureCookiesFollowRedirectSchemeOrProduction(t *testing.T) {
 		if got := c.SecureCookies(); got != tc.want {
 			t.Errorf("APP_ENV=%q redirect=%q: SecureCookies()=%t, want %t", tc.appEnv, tc.redirect, got, tc.want)
 		}
+	}
+}
+
+func TestDatabaseURLIsRequired(t *testing.T) {
+	t.Setenv("AUTH_MODE", "development")
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("DATABASE_URL_FILE", filepath.Join(t.TempDir(), "missing"))
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DATABASE_URL is required") {
+		t.Fatalf("missing database URL error = %v", err)
 	}
 }

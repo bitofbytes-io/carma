@@ -168,3 +168,18 @@ func (p *Postgres) ArchiveVehicle(ctx context.Context, id uuid.UUID) error {
 	}
 	return err
 }
+
+func replacedPhotoKey(newKey, previousKey string) string {
+	if newKey == "" || newKey == previousKey {
+		return ""
+	}
+	return previousKey
+}
+
+func cloneInt64(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	x := *v
+	return &x
+}

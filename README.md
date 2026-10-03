@@ -6,17 +6,17 @@ car in the garage, attach receipts, get reminded when routine service is due, an
 export the history when it's time to sell.
 
 **Status: MVP implemented.** The repository contains the Go/HTMX application,
-PostgreSQL migrations, local memory preview, filesystem-backed receipt storage,
+PostgreSQL migrations, filesystem-backed receipt storage,
 container build, and CI workflow described by the project plan.
 
 ## Local development
 
-Requirements: Go 1.26.x. Run `make run`, open `http://localhost:4700`, and use the
-clearly labeled local developer login. This mode uses an in-memory store and writes
-uploads below `.local/carma-assets`; configuration rejects development auth when
-`APP_ENV=production`.
+Requirements: Go 1.26.x and Docker. Carma always runs on PostgreSQL: start the
+local database with `make db-up` and apply migrations with `make migrate` before
+`make run`. Then open `http://localhost:4700` and use the clearly labeled local
+developer login. Uploads are written below `.local/carma-assets`; configuration
+rejects development auth when `APP_ENV=production`.
 
-For PostgreSQL, run `make db-up`, `make migrate`, then `make run-postgres`.
 Production configuration uses Google OIDC and requires a verified email to match
 `AUTH_GOOGLE_ALLOWED_EMAILS` or `AUTH_GOOGLE_ALLOWED_DOMAINS`. The allowlist is
 rechecked on every request, so removing an address revokes its existing sessions,
@@ -28,7 +28,7 @@ calendar date in `APP_TIMEZONE` (an IANA zone name, default `America/New_York`);
 an invalid zone fails startup.
 
 Email reminders are disabled by default. Production enables them with
-`REMINDER_EMAIL_ENABLED=true`, a Postgres store, and:
+`REMINDER_EMAIL_ENABLED=true` and:
 
 ```text
 SMTP_HOST=mail.bitofbytes.io:465
@@ -51,12 +51,13 @@ mismatch. Recipient addresses cannot be supplied or overridden through the CLI.
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
-declared by this project. Run
-`make test-integration` to start the local Compose Postgres and execute the real
-migration, notification-query, advisory-lock, record/attachment query, and
-user/session integration tests.
+declared by this project. The HTTP handler and repository tests need PostgreSQL:
+`make test` skips them unless `CARMA_TEST_DATABASE_URL` is set, so run
+`make test-integration` to start the local Compose Postgres and run the whole suite
+against it, each test in its own migrated schema. CI sets the variable, and those
+tests fail there if it is missing.
 
-PostgreSQL deployments also run asset cleanup at startup and every seven days.
+The server also runs asset cleanup at startup and every seven days.
 Only generated, unreferenced objects and `temporary/upload-*` files older than 48
 hours are eligible. Replicas coordinate with a dedicated PostgreSQL advisory lock.
 Every attempt emits `asset cleanup started` followed by exactly one of `asset cleanup

@@ -12,7 +12,6 @@ import (
 
 	"github.com/bitofbytes-io/carma/internal/config"
 	"github.com/bitofbytes-io/carma/internal/model"
-	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/google/uuid"
 )
 
@@ -116,7 +115,7 @@ func TestGoogleOIDCExchangePreservesEarlierCallerDeadline(t *testing.T) {
 }
 
 func TestSessionsAreOpaqueAndStoredHashed(t *testing.T) {
-	m := repository.NewMemory()
+	m := newFakeSessions()
 	s := NewService(m, 90*24*time.Hour, nil)
 	u, token, e := s.DevLogin(t.Context())
 	if e != nil {
@@ -156,7 +155,7 @@ func TestAccessPolicyAppliesOnlyToGoogleAuth(t *testing.T) {
 }
 
 func TestValidateRevokesSessionsRemovedFromAllowlist(t *testing.T) {
-	m := repository.NewMemory()
+	m := newFakeSessions()
 	permitted := true
 	s := NewService(m, time.Hour, func(email string) bool { return permitted && email == "person@example.com" })
 	u, token, err := s.Login(t.Context(), Claims{Subject: "subject", Email: "Person@Example.com", EmailVerified: true})
@@ -180,7 +179,7 @@ func TestValidateRevokesSessionsRemovedFromAllowlist(t *testing.T) {
 }
 
 func TestDeleteExpiredSessionsKeepsActiveSessions(t *testing.T) {
-	m := repository.NewMemory()
+	m := newFakeSessions()
 	s := NewService(m, time.Hour, nil)
 	u, active, err := s.DevLogin(t.Context())
 	if err != nil {

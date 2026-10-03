@@ -14,18 +14,20 @@ import (
 	"github.com/bitofbytes-io/carma/internal/repository"
 )
 
-type sessionErrorStore struct {
+// sessionStore answers session lookups with err, or with no session when err
+// is nil. RequireAuth uses no other Store method.
+type sessionStore struct {
 	repository.Store
 	err error
 }
 
-func (s sessionErrorStore) FindSession(context.Context, string) (*model.Session, *model.User, error) {
+func (s sessionStore) FindSession(context.Context, string) (*model.Session, *model.User, error) {
 	return nil, nil, s.err
 }
 
 func TestRequireAuthReturnsUnavailableWithoutClearingCookieOnStoreError(t *testing.T) {
 	storeErr := errors.New("session store unavailable")
-	service := auth.NewService(sessionErrorStore{Store: repository.NewMemory(), err: storeErr}, time.Hour, nil)
+	service := auth.NewService(sessionStore{err: storeErr}, time.Hour, nil)
 	called := false
 	handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called = true
@@ -49,7 +51,7 @@ func TestRequireAuthReturnsUnavailableWithoutClearingCookieOnStoreError(t *testi
 }
 
 func TestRequireAuthClearsInvalidSessionAndRedirects(t *testing.T) {
-	service := auth.NewService(repository.NewMemory(), time.Hour, nil)
+	service := auth.NewService(sessionStore{}, time.Hour, nil)
 	handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("invalid session reached protected handler")
 	}))
@@ -79,7 +81,7 @@ func TestRequireAuthUsesHXRedirectForMissingAndInvalidSessions(t *testing.T) {
 		{name: "invalid", cookie: &http.Cookie{Name: CookieName, Value: "invalid-token"}, wantCleared: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service := auth.NewService(repository.NewMemory(), time.Hour, nil)
+			service := auth.NewService(sessionStore{}, time.Hour, nil)
 			handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				t.Fatal("unauthenticated HTMX request reached protected handler")
 			}))
@@ -121,7 +123,7 @@ func TestRequireAuthUsesSafeFallbackForNonGETRequests(t *testing.T) {
 		{name: "HTMX PATCH", method: http.MethodPatch, htmx: true, wantStatus: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			service := auth.NewService(repository.NewMemory(), time.Hour, nil)
+			service := auth.NewService(sessionStore{}, time.Hour, nil)
 			handler := RequireAuth(service, true)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				t.Fatal("unauthenticated non-GET request reached protected handler")
 			}))

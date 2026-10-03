@@ -46,14 +46,9 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	var store repository.Store
-	if cfg.DataStore == config.StoreMemory {
-		store = repository.NewMemory()
-	} else {
-		store, e = repository.NewPostgres(ctx, cfg.DatabaseURL)
-		if e != nil {
-			return e
-		}
+	store, e := repository.NewPostgres(ctx, cfg.DatabaseURL)
+	if e != nil {
+		return e
 	}
 	closeStoreOnReturn := true
 	defer func() {
@@ -78,17 +73,13 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	postgresStore, postgresBacked := store.(*repository.Postgres)
 	var reminderRunner *reminderemail.Runner
 	if cfg.ReminderEmail.Enabled {
-		if !postgresBacked {
-			return errors.New("reminder email requires postgres")
-		}
 		sender, err := mailer.NewSMTP(cfg.ReminderEmail.SMTPHost, cfg.ReminderEmail.SMTPUsername, cfg.ReminderEmail.SMTPPassword, cfg.ReminderEmail.FromAddress, cfg.ReminderEmail.FromName)
 		if err != nil {
 			return err
 		}
-		reminderRunner = reminderemail.NewRunner(postgresStore, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
+		reminderRunner = reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
 	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
@@ -109,14 +100,12 @@ func run() error {
 			slog.Info("expired sessions deleted", "count", deleted)
 		}
 	})
-	if postgresBacked {
-		runner := assetcleanup.NewRunner(postgresStore, assetStore, slog.Default())
-		trigger := assetcleanup.TriggerStartup
-		every(assetcleanup.DefaultInterval, func(ctx context.Context) {
-			_, _ = runner.Run(ctx, trigger) // Run logs its own outcome.
-			trigger = assetcleanup.TriggerScheduled
-		})
-	}
+	assetCleanup := assetcleanup.NewRunner(store, assetStore, slog.Default())
+	trigger := assetcleanup.TriggerStartup
+	every(assetcleanup.DefaultInterval, func(ctx context.Context) {
+		_, _ = assetCleanup.Run(ctx, trigger) // Run logs its own outcome.
+		trigger = assetcleanup.TriggerScheduled
+	})
 	if reminderRunner != nil {
 		every(reminderemail.DefaultInterval, func(ctx context.Context) {
 			report, err := reminderRunner.Run(ctx, reminderemail.Options{})
@@ -126,7 +115,7 @@ func run() error {
 		})
 	}
 	go func() {
-		slog.Info("carma listening", "port", cfg.Port, "store", cfg.DataStore, "auth", cfg.AuthMode)
+		slog.Info("carma listening", "port", cfg.Port, "auth", cfg.AuthMode)
 		errs <- httpServer.ListenAndServe()
 	}()
 	var result error

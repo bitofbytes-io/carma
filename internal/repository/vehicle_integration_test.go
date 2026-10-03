@@ -3,47 +3,24 @@ package repository_test
 import (
 	"context"
 	"errors"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/bitofbytes-io/carma/internal/database"
 	"github.com/bitofbytes-io/carma/internal/repository"
-	"github.com/bitofbytes-io/carma/migrations"
+	"github.com/bitofbytes-io/carma/internal/testdb"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestVehicleUpdatePostgresIntegration(t *testing.T) {
-	baseURL := os.Getenv("CARMA_TEST_DATABASE_URL")
-	if baseURL == "" {
-		t.Skip("set CARMA_TEST_DATABASE_URL to run PostgreSQL vehicle tests")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	admin, err := pgx.Connect(ctx, baseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = admin.Close(context.Background()) }()
-	schema := "carma_vehicle_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if _, err = admin.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`) }()
-	scopedURL, err := withSearchPath(baseURL, schema)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scopedURL := testdb.URL(t)
 	connection, err := pgx.Connect(ctx, scopedURL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close(context.Background()) }()
-	if err = database.Migrate(ctx, connection, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
 	store, err := repository.NewPostgres(ctx, scopedURL)
 	if err != nil {
 		t.Fatal(err)

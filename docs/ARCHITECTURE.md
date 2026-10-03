@@ -154,7 +154,6 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `APP_ENV` | stack env (`production`) | prod behaviors (secure cookies, no development auth) |
 | `PORT` | stack env (`4700`) | listen port |
 | `DATABASE_URL` | secret `carma_database_url` | Postgres DSN |
-| `DATA_STORE` | stack env (`postgres`; `memory` for local preview) | repo selection |
 | `AUTH_GOOGLE_CLIENT_ID` / `_SECRET` | secrets `carma_google_client_id` / `_secret` | OIDC |
 | `AUTH_GOOGLE_REDIRECT_URL` | stack env | `https://carma.bitofbytes.io/api/auth/google/callback`; an `https` URL also makes cookies `Secure` |
 | `AUTH_GOOGLE_ALLOWED_EMAILS` | stack env | comma-separated allowlist |
@@ -198,11 +197,14 @@ this repo - see [INFRA.md](INFRA.md).
 
 ## Local development
 
-- `make run` - in-memory store (`DATA_STORE=memory`), no Postgres needed, dev auth
-  mode with a seeded local user (noted's `AUTH_MODE=development` idea) so Google
-  OAuth isn't required to hack on the UI.
-- `make db-up` / `make run-postgres` - local Postgres via a small
-  `compose.local.yml` (host port 5435 to avoid colliding with noted's 5434).
+- `make db-up` - local Postgres via a small `compose.local.yml` (host port 5435 to
+  avoid colliding with noted's 5434). `make run` needs it.
 - `make migrate` - apply migrations locally.
+- `make run` - the app against local Postgres, in dev auth mode with a seeded local
+  user (noted's `AUTH_MODE=development` idea) so Google OAuth isn't required to hack
+  on the UI.
+- `make test-integration` - start local Postgres and run every test against it.
+  `make test` skips the Postgres-backed tests unless `CARMA_TEST_DATABASE_URL` is
+  set; CI sets it and fails those tests if it is missing.
 - Assets land in `.local/carma-assets` (gitignored).
 - `local.mk` (gitignored) for developer-specific overrides, per dined convention.
