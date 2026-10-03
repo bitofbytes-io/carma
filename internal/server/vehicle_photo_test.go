@@ -37,17 +37,17 @@ func (s *vehicleWriteErrorStore) CreateVehicle(ctx context.Context, vehicle mode
 	return vehicle, s.err
 }
 
-func (s *vehicleWriteErrorStore) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, error) {
+func (s *vehicleWriteErrorStore) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, string, error) {
 	s.called = true
 	if s.persist {
-		if _, err := s.Store.UpdateVehicle(ctx, vehicle); err != nil {
-			return vehicle, err
+		if _, _, err := s.Store.UpdateVehicle(ctx, vehicle); err != nil {
+			return vehicle, "", err
 		}
 	}
 	if s.cancel != nil {
 		s.cancel()
 	}
-	return vehicle, s.err
+	return vehicle, "", s.err
 }
 
 func TestVehiclePhotoRetainedAfterPersistenceError(t *testing.T) {
@@ -78,7 +78,7 @@ func TestVehiclePhotoRetainedAfterPersistenceError(t *testing.T) {
 							t.Fatal(err)
 						}
 						old.PhotoKey = photo.Key
-						if _, err = f.store.UpdateVehicle(t.Context(), old); err != nil {
+						if _, _, err = f.store.UpdateVehicle(t.Context(), old); err != nil {
 							t.Fatal(err)
 						}
 						path += "/" + old.ID.String()
@@ -181,4 +181,54 @@ func TestInvalidNewVehicleCleansUploadWithoutWriting(t *testing.T) {
 		}
 		t.Fatalf("invalid upload was not deleted: %v", err)
 	}
+}
+
+// concurrentPhotoStore replaces the vehicle's photo after the handler has
+// loaded the vehicle and before its own update runs.
+type concurrentPhotoStore struct {
+	repository.Store
+	concurrentKey string
+}
+
+func (s *concurrentPhotoStore) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, string, error) {
+	concurrent := vehicle
+	concurrent.PhotoKey = s.concurrentKey
+	if _, _, err := s.Store.UpdateVehicle(ctx, concurrent); err != nil {
+		return vehicle, "", err
+	}
+	return s.Store.UpdateVehicle(ctx, vehicle)
+}
+
+func TestVehicleEditWithoutUploadKeepsConcurrentlyReplacedPhoto(t *testing.T) {
+	f := setup(t)
+	vehicle := createVehicle(t, f)
+	original, err := f.s.assets.Save(t.Context(), strings.NewReader("\x89PNG\r\n\x1a\noriginal"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehicle.PhotoKey = original.Key
+	if _, _, err = f.store.UpdateVehicle(t.Context(), vehicle); err != nil {
+		t.Fatal(err)
+	}
+	concurrent, err := f.s.assets.Save(t.Context(), strings.NewReader("\x89PNG\r\n\x1a\nconcurrent"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracker := &trackingAssetStore{Store: f.s.assets}
+	f.s.assets = tracker
+	f.s.store = &concurrentPhotoStore{Store: f.store, concurrentKey: concurrent.Key}
+
+	body, contentType := multipartFormBody(t, map[string]string{"nickname": "Renamed"}, "photo", "", nil)
+	response := f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String(), body, contentType)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	persisted, err := f.store.GetVehicle(t.Context(), vehicle.ID)
+	if err != nil || persisted.PhotoKey != concurrent.Key || persisted.Nickname != "Renamed" {
+		t.Fatalf("stale edit changed photo: vehicle=%+v err=%v", persisted, err)
+	}
+	if tracker.deletedKey != "" {
+		t.Fatalf("edit without upload deleted %q", tracker.deletedKey)
+	}
+	assertPhotoExists(t, tracker, concurrent.Key)
 }

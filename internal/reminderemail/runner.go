@@ -18,7 +18,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const SuppressionWindow = 30 * 24 * time.Hour
+const (
+	SuppressionWindow = 30 * 24 * time.Hour
+	// DefaultInterval is how often the server runs reminder email delivery.
+	DefaultInterval = 24 * time.Hour
+)
 
 var ErrRecipientCountMismatch = errors.New("reminder recipient count mismatch")
 

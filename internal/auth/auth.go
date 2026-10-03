@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -198,32 +197,6 @@ func (s *Service) DeleteExpiredSessions(ctx context.Context) (int64, error) {
 	return s.store.DeleteExpiredSessions(ctx, time.Now())
 }
 
-// ScheduleSessionCleanup deletes expired sessions at startup and then every
-// interval until ctx is canceled.
-func (s *Service) ScheduleSessionCleanup(ctx context.Context, interval time.Duration, logger *slog.Logger) {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	if interval <= 0 {
-		interval = SessionCleanupInterval
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		if deleted, err := s.DeleteExpiredSessions(ctx); err != nil {
-			if ctx.Err() == nil {
-				logger.Error("expired session cleanup failed", "error", err)
-			}
-		} else if deleted > 0 {
-			logger.Info("expired sessions deleted", "count", deleted)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-}
 func (s *Service) Logout(ctx context.Context, token string) error {
 	if token == "" {
 		return nil

@@ -86,13 +86,13 @@ func TestMemoryInitializesLegacyReminderOdometerOnce(t *testing.T) {
 	first := int64(42000)
 	v.CurrentOdometer = &first
 	v.UpdatedAt = now.Add(time.Hour)
-	if _, err := m.UpdateVehicle(ctx, v); err != nil {
+	if _, _, err := m.UpdateVehicle(ctx, v); err != nil {
 		t.Fatal(err)
 	}
 	second := int64(43000)
 	v.CurrentOdometer = &second
 	v.UpdatedAt = now.Add(2 * time.Hour)
-	if _, err := m.UpdateVehicle(ctx, v); err != nil {
+	if _, _, err := m.UpdateVehicle(ctx, v); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := m.ListReminders(ctx, &v.ID, true)

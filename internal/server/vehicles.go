@@ -83,84 +83,101 @@ func (s *Server) editVehicle(response http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) createVehicle(response http.ResponseWriter, request *http.Request) {
-	s.saveVehicle(response, request, false)
-}
-
-func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Request) {
-	s.saveVehicle(response, request, true)
-}
-
-func (s *Server) saveVehicle(response http.ResponseWriter, request *http.Request, editing bool) {
 	if err := s.parseMultipart(response, request, 8<<20); err != nil {
 		s.multipartError(response, err)
 		return
 	}
-	var old model.Vehicle
-	var err error
-	if editing {
-		old, err = s.getVehicle(request)
-		if err != nil {
-			s.notFound(response, err)
-			return
-		}
-	}
 	vehicle, validation := vehicleFromForm(request)
-	if editing {
-		vehicle.ID = old.ID
-		vehicle.PhotoKey = old.PhotoKey
-		vehicle.CreatedAt = old.CreatedAt
-	} else {
-		vehicle.ID = uuid.New()
-		vehicle.CreatedAt = s.now()
-	}
-	vehicle.UpdatedAt = s.now()
-	var newKey string
-	if file, header, err := request.FormFile("photo"); err == nil {
-		defer file.Close()
-		object, saveErr := s.assets.Save(request.Context(), file, s.cfg.MaxUploadBytes)
-		if saveErr != nil {
-			validation = "Photo must be JPEG, PNG, WebP, or HEIC and within the upload limit."
-		} else if !strings.HasPrefix(object.ContentType, "image/") {
-			_ = s.assets.Delete(request.Context(), object.Key)
-			validation = "Vehicle photo must be an image."
-		} else {
-			vehicle.PhotoKey = object.Key
-			newKey = object.Key
-			_ = header
-		}
-	}
+	vehicle.ID = uuid.New()
+	vehicle.CreatedAt = s.now()
+	vehicle.UpdatedAt = vehicle.CreatedAt
+	photoKey, validation := s.savePhoto(request, validation)
 	if validation != "" {
-		if newKey != "" {
-			_ = s.assets.Delete(request.Context(), newKey)
-		}
-		if editing {
-			vehicle.PhotoKey = old.PhotoKey
-		}
-		data, _ := s.base(request, "Vehicle")
-		data.Editing = editing
-		data.Vehicle = vehicle
-		data.Error = validation
-		s.render(response, 400, "vehicle-form", data)
+		s.vehicleFormError(response, request, vehicle, false, validation)
 		return
 	}
-	if editing {
-		_, err = s.store.UpdateVehicle(request.Context(), vehicle)
-	} else {
-		_, err = s.store.CreateVehicle(request.Context(), vehicle)
-	}
-	if err != nil {
-		if newKey != "" {
-			// The write may have committed even when its result was not received.
-			// Orphan cleanup checks references before pruning retained uploads.
-			slog.Warn("vehicle photo cleanup deferred", "vehicle_id", vehicle.ID, "storage_key", newKey, "error", err)
-		}
+	vehicle.PhotoKey = photoKey
+	if _, err := s.store.CreateVehicle(request.Context(), vehicle); err != nil {
+		deferPhotoCleanup(vehicle.ID, photoKey, err)
 		s.fail(response, err)
 		return
 	}
-	if editing && newKey != "" && old.PhotoKey != "" {
-		_ = s.assets.Delete(request.Context(), old.PhotoKey)
+	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), 303)
+}
+
+func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Request) {
+	if err := s.parseMultipart(response, request, 8<<20); err != nil {
+		s.multipartError(response, err)
+		return
+	}
+	old, err := s.getVehicle(request)
+	if err != nil {
+		s.notFound(response, err)
+		return
+	}
+	vehicle, validation := vehicleFromForm(request)
+	vehicle.ID = old.ID
+	vehicle.CreatedAt = old.CreatedAt
+	vehicle.UpdatedAt = s.now()
+	photoKey, validation := s.savePhoto(request, validation)
+	if validation != "" {
+		vehicle.PhotoKey = old.PhotoKey
+		s.vehicleFormError(response, request, vehicle, true, validation)
+		return
+	}
+	// An empty key keeps whatever photo is stored now, which may be newer than
+	// the one loaded above.
+	vehicle.PhotoKey = photoKey
+	_, replacedKey, err := s.store.UpdateVehicle(request.Context(), vehicle)
+	if err != nil {
+		deferPhotoCleanup(vehicle.ID, photoKey, err)
+		s.fail(response, err)
+		return
+	}
+	if replacedKey != "" {
+		_ = s.assets.Delete(request.Context(), replacedKey)
 	}
 	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), 303)
+}
+
+// savePhoto stores an uploaded vehicle photo and returns its key, or "" when
+// none was uploaded. If the form or the photo is invalid it stores nothing and
+// returns the validation message.
+func (s *Server) savePhoto(request *http.Request, validation string) (string, string) {
+	file, _, err := request.FormFile("photo")
+	if err != nil {
+		return "", validation
+	}
+	defer file.Close()
+	object, err := s.assets.Save(request.Context(), file, s.cfg.MaxUploadBytes)
+	if err != nil {
+		return "", "Photo must be JPEG, PNG, WebP, or HEIC and within the upload limit."
+	}
+	if !strings.HasPrefix(object.ContentType, "image/") {
+		validation = "Vehicle photo must be an image."
+	}
+	if validation != "" {
+		_ = s.assets.Delete(request.Context(), object.Key)
+		return "", validation
+	}
+	return object.Key, ""
+}
+
+func (s *Server) vehicleFormError(response http.ResponseWriter, request *http.Request, vehicle model.Vehicle, editing bool, validation string) {
+	data, _ := s.base(request, "Vehicle")
+	data.Editing = editing
+	data.Vehicle = vehicle
+	data.Error = validation
+	s.render(response, 400, "vehicle-form", data)
+}
+
+// deferPhotoCleanup keeps a new photo whose vehicle write failed: the write may
+// have committed even when its result was not received. Orphan cleanup checks
+// references before pruning retained uploads.
+func deferPhotoCleanup(vehicleID uuid.UUID, photoKey string, err error) {
+	if photoKey != "" {
+		slog.Warn("vehicle photo cleanup deferred", "vehicle_id", vehicleID, "storage_key", photoKey, "error", err)
+	}
 }
 
 func vehicleFromForm(request *http.Request) (model.Vehicle, string) {

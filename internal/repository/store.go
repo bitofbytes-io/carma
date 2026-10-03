@@ -25,7 +25,10 @@ type Store interface {
 	ListVehicles(context.Context, bool) ([]model.Vehicle, error)
 	GetVehicle(context.Context, uuid.UUID) (model.Vehicle, error)
 	CreateVehicle(context.Context, model.Vehicle) (model.Vehicle, error)
-	UpdateVehicle(context.Context, model.Vehicle) (model.Vehicle, error)
+	// UpdateVehicle saves the vehicle's fields. Its PhotoKey is a newly uploaded
+	// photo, or empty to keep the current one; when a new photo replaces an
+	// existing one, the replaced key is returned so its object can be deleted.
+	UpdateVehicle(context.Context, model.Vehicle) (updated model.Vehicle, replacedPhotoKey string, err error)
 	ArchiveVehicle(context.Context, uuid.UUID) error
 
 	ListServiceTypes(context.Context) ([]model.ServiceType, error)
@@ -44,6 +47,13 @@ type Store interface {
 	UpsertReminder(context.Context, model.Reminder) (model.Reminder, error)
 	DeleteReminder(context.Context, uuid.UUID) error
 	Close()
+}
+
+func replacedPhotoKey(newKey, previousKey string) string {
+	if newKey == "" || newKey == previousKey {
+		return ""
+	}
+	return previousKey
 }
 
 func normalizedRecordSort(field string, descending bool) (string, bool) {
