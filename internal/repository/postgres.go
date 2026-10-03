@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,11 +24,4 @@ func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 
 func (p *Postgres) Close() {
 	p.pool.Close()
-}
-
-func ptrString[T fmt.Stringer](value *T) string {
-	if value == nil {
-		return ""
-	}
-	return (*value).String()
 }

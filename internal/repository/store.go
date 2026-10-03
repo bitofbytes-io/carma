@@ -50,8 +50,6 @@ func normalizedRecordSort(field string, descending bool) (string, bool) {
 	switch field {
 	case "date", "mileage", "cost":
 		return field, descending
-	case "":
-		return "", true
 	default:
 		return "", true
 	}
