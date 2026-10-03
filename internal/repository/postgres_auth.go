@@ -77,7 +77,7 @@ func (p *Postgres) UpsertUser(ctx context.Context, user model.User) (model.User,
 	if err = rows.Err(); err != nil {
 		return user, err
 	}
-	// Like the memory store, refuse to move an identity onto an email address
+	// Refuse to move an identity onto an email address
 	// that already belongs to a different user.
 	if identityID != uuid.Nil && emailID != uuid.Nil && identityID != emailID {
 		return user, ErrConflict

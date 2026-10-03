@@ -3,10 +3,6 @@ package repository_test
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/url"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -14,33 +10,14 @@ import (
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
+	"github.com/bitofbytes-io/carma/internal/testdb"
 	"github.com/bitofbytes-io/carma/migrations"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestReminderEmailPostgresIntegration(t *testing.T) {
-	baseURL := os.Getenv("CARMA_TEST_DATABASE_URL")
-	if baseURL == "" {
-		baseURL = "postgres://carma:carma@localhost:5435/carma?sslmode=disable"
-	}
-	connectContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	admin, err := pgx.Connect(connectContext, baseURL)
-	if err != nil {
-		t.Skipf("integration Postgres unavailable (%v); run `make test-integration`", err)
-	}
-	defer func() { _ = admin.Close(context.Background()) }()
-
-	schema := "carma_email_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if _, err = admin.Exec(context.Background(), `CREATE SCHEMA `+schema); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`) }()
-	scopedURL, err := withSearchPath(baseURL, schema)
-	if err != nil {
-		t.Fatal(err)
-	}
+	scopedURL := testdb.URL(t)
 	migrationConnection, err := pgx.Connect(context.Background(), scopedURL)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +194,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	limitedURL, err := withDatabaseParameter(scopedURL, "pool_max_conns", "1")
+	limitedURL, err := testdb.WithParameter(scopedURL, "pool_max_conns", "1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,19 +249,4 @@ func eventuallyLock(try func(context.Context) (func(context.Context) error, bool
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func withSearchPath(databaseURL, schema string) (string, error) {
-	return withDatabaseParameter(databaseURL, "search_path", schema)
-}
-
-func withDatabaseParameter(databaseURL, key, value string) (string, error) {
-	parsed, err := url.Parse(databaseURL)
-	if err != nil {
-		return "", fmt.Errorf("parse test database URL: %w", err)
-	}
-	query := parsed.Query()
-	query.Set(key, value)
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), nil
 }

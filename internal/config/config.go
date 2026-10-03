@@ -14,14 +14,12 @@ import (
 )
 
 const (
-	StoreMemory     = "memory"
-	StorePostgres   = "postgres"
 	AuthDevelopment = "development"
 	AuthGoogle      = "google"
 )
 
 type Config struct {
-	AppEnv, Port, DataStore, DatabaseURL, AuthMode        string
+	AppEnv, Port, DatabaseURL, AuthMode                   string
 	GoogleClientID, GoogleClientSecret, GoogleRedirectURL string
 	AllowedEmails, AllowedDomains                         []string
 	SessionTTL                                            time.Duration
@@ -46,7 +44,7 @@ type ReminderEmail struct {
 }
 
 func Load() (*Config, error) {
-	c := &Config{AppEnv: env("APP_ENV", "development"), Port: env("PORT", "4700"), DataStore: env("DATA_STORE", StorePostgres), AuthMode: env("AUTH_MODE", AuthGoogle), GoogleRedirectURL: env("AUTH_GOOGLE_REDIRECT_URL", "http://localhost:4700/api/auth/google/callback"), AssetRoot: env("ASSET_ROOT", ".local/carma-assets")}
+	c := &Config{AppEnv: env("APP_ENV", "development"), Port: env("PORT", "4700"), AuthMode: env("AUTH_MODE", AuthGoogle), GoogleRedirectURL: env("AUTH_GOOGLE_REDIRECT_URL", "http://localhost:4700/api/auth/google/callback"), AssetRoot: env("ASSET_ROOT", ".local/carma-assets")}
 	var err error
 	if c.DatabaseURL, err = envOrFile("DATABASE_URL", "/run/secrets/carma_database_url"); err != nil {
 		return nil, err
@@ -97,20 +95,14 @@ func Load() (*Config, error) {
 			return nil, err
 		}
 	}
-	if c.DataStore != StoreMemory && c.DataStore != StorePostgres {
-		return nil, fmt.Errorf("DATA_STORE must be memory or postgres")
-	}
-	if c.ReminderEmail.Enabled && c.DataStore != StorePostgres {
-		return nil, fmt.Errorf("reminder email requires DATA_STORE=postgres")
-	}
 	if c.AuthMode != AuthDevelopment && c.AuthMode != AuthGoogle {
 		return nil, fmt.Errorf("AUTH_MODE must be development or google")
 	}
 	if strings.EqualFold(c.AppEnv, "production") && c.AuthMode == AuthDevelopment {
 		return nil, fmt.Errorf("development auth is forbidden in production")
 	}
-	if c.DataStore == StorePostgres && c.DatabaseURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required for postgres")
+	if c.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
 	if c.AuthMode == AuthGoogle && (c.GoogleClientID == "" || c.GoogleClientSecret == "" || (len(c.AllowedEmails) == 0 && len(c.AllowedDomains) == 0)) {
 		return nil, fmt.Errorf("Google credentials and an email/domain allowlist are required")

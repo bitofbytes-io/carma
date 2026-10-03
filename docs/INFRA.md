@@ -50,12 +50,13 @@ verification must remain enabled.
 ## Validation boundary
 
 Application changes run `make test`, `make lint`, `make build`, and `make vuln`. Run
-`make test-integration` with Docker available to apply migrations in an isolated
-PostgreSQL schema, exercise notification suppression, roll migration 003 down and
-back up, verify referenced attachment/photo asset queries, verify advisory-lock
-contention and reacquisition, check record filtering, sorting, and attachment
-writes against the memory store, and verify user identity merges, conflicts, and
-session lookup and expiry.
+`make test-integration` with Docker available to run the whole suite against
+PostgreSQL, each test in its own migrated schema: the HTTP handler tests, plus
+notification suppression, rolling migration 003 down and back up, referenced
+attachment/photo asset queries, advisory-lock contention and reacquisition, record
+filtering, sorting, and attachment writes, and user identity merges, conflicts, and
+session lookup and expiry. `make test` skips these tests unless
+`CARMA_TEST_DATABASE_URL` is set; CI sets it and fails them if it is missing.
 
 Infrastructure changes render and validate the authoritative stack in
 `home_swarm`; production deployment and live email proof are separate operator

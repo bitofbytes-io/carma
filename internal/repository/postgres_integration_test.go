@@ -3,58 +3,22 @@ package repository_test
 import (
 	"context"
 	"errors"
-	"os"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/bitofbytes-io/carma/internal/database"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
-	"github.com/bitofbytes-io/carma/migrations"
+	"github.com/bitofbytes-io/carma/internal/testdb"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
-// newPostgresIntegrationStore migrates an isolated schema and returns a store
-// scoped to it. It skips unless CARMA_TEST_DATABASE_URL is set.
+// newPostgresIntegrationStore returns a store on a fresh migrated schema.
 func newPostgresIntegrationStore(t *testing.T) (context.Context, *repository.Postgres) {
 	t.Helper()
-	baseURL := os.Getenv("CARMA_TEST_DATABASE_URL")
-	if baseURL == "" {
-		t.Skip("set CARMA_TEST_DATABASE_URL to run PostgreSQL integration tests")
-	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancel)
-	admin, err := pgx.Connect(ctx, baseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = admin.Close(context.Background()) })
-	schema := "carma_repo_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	if _, err = admin.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`) })
-	scopedURL, err := withSearchPath(baseURL, schema)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := pgx.Connect(ctx, scopedURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = connection.Close(context.Background()) }()
-	if err = database.Migrate(ctx, connection, migrations.FS); err != nil {
-		t.Fatal(err)
-	}
-	store, err := repository.NewPostgres(ctx, scopedURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(store.Close)
-	return ctx, store
+	return ctx, testdb.Store(t)
 }
 
 func int64Pointer(value int64) *int64 { return &value }
@@ -78,30 +42,26 @@ func TestRecordsPostgresIntegration(t *testing.T) {
 		{ID: uuid.New(), RecordID: percent.ID, OriginalFilename: "b.jpg", ContentType: "image/jpeg", ByteSize: 20, StorageKey: "bb/" + uuid.NewString() + ".jpg", CreatedAt: now.Add(time.Second)},
 	}
 
-	// Seed both stores identically so every query also checks memory parity.
-	memory := repository.NewMemory()
-	for _, store := range []repository.Store{postgres, memory} {
-		if _, err := store.UpsertUser(ctx, user); err != nil {
+	if _, err := postgres.UpsertUser(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	for _, vehicle := range []model.Vehicle{car, truck} {
+		if _, err := postgres.CreateVehicle(ctx, vehicle); err != nil {
 			t.Fatal(err)
 		}
-		for _, vehicle := range []model.Vehicle{car, truck} {
-			if _, err := store.CreateVehicle(ctx, vehicle); err != nil {
-				t.Fatal(err)
-			}
+	}
+	for _, serviceType := range []model.ServiceType{oil, tires} {
+		if _, err := postgres.CreateServiceType(ctx, serviceType); err != nil {
+			t.Fatal(err)
 		}
-		for _, serviceType := range []model.ServiceType{oil, tires} {
-			if _, err := store.CreateServiceType(ctx, serviceType); err != nil {
-				t.Fatal(err)
-			}
+	}
+	for _, r := range []model.Record{percent, underscore, plain, other} {
+		var attachments []model.Attachment
+		if r.ID == percent.ID {
+			attachments = receipts
 		}
-		for _, r := range []model.Record{percent, underscore, plain, other} {
-			var attachments []model.Attachment
-			if r.ID == percent.ID {
-				attachments = receipts
-			}
-			if _, err := store.CreateRecord(ctx, r, attachments); err != nil {
-				t.Fatal(err)
-			}
+		if _, err := postgres.CreateRecord(ctx, r, attachments); err != nil {
+			t.Fatal(err)
 		}
 	}
 
@@ -131,18 +91,16 @@ func TestRecordsPostgresIntegration(t *testing.T) {
 			for _, r := range test.want {
 				want = append(want, r.ID)
 			}
-			for name, store := range map[string]repository.Store{"postgres": postgres, "memory": memory} {
-				rows, err := store.ListRecords(ctx, test.query)
-				if err != nil {
-					t.Fatalf("%s: %v", name, err)
-				}
-				got := make([]uuid.UUID, 0, len(rows))
-				for _, row := range rows {
-					got = append(got, row.ID)
-				}
-				if !slices.Equal(got, want) {
-					t.Fatalf("%s: got %v, want %v", name, got, want)
-				}
+			rows, err := postgres.ListRecords(ctx, test.query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make([]uuid.UUID, 0, len(rows))
+			for _, row := range rows {
+				got = append(got, row.ID)
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("got %v, want %v", got, want)
 			}
 		})
 	}
@@ -194,6 +152,30 @@ func TestRecordsPostgresIntegration(t *testing.T) {
 		}
 		if _, err = postgres.DeleteAttachment(ctx, added.ID); !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("second delete error=%v", err)
+		}
+	})
+
+	t.Run("update keeps the record on its vehicle", func(t *testing.T) {
+		moved := plain
+		moved.VehicleID = truck.ID
+		moved.Notes = "updated"
+		if _, err := postgres.UpdateRecord(ctx, moved); err != nil {
+			t.Fatal(err)
+		}
+		stored, _, err := postgres.GetRecord(ctx, plain.ID)
+		if err != nil || stored.VehicleID != car.ID || stored.Notes != "updated" {
+			t.Fatalf("updated record=%+v err=%v", stored, err)
+		}
+		missing := plain
+		missing.ID = uuid.New()
+		if _, err = postgres.UpdateRecord(ctx, missing); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("missing record update error=%v", err)
+		}
+	})
+
+	t.Run("service type names are unique case-insensitively", func(t *testing.T) {
+		if _, err := postgres.CreateServiceType(ctx, model.ServiceType{ID: uuid.New(), Name: "TEST OIL", CreatedAt: now}); !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("duplicate service type error=%v, want ErrConflict", err)
 		}
 	})
 
@@ -259,10 +241,8 @@ func TestAuthPostgresIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for name, store := range map[string]repository.Store{"postgres": postgres, "memory": memoryWithUsers(t, first, second)} {
-			if _, err := store.UpsertUser(ctx, user(first.OAuthSubject, "B@example.com", "Takeover")); !errors.Is(err, repository.ErrConflict) {
-				t.Fatalf("%s: conflict error=%v, want ErrConflict", name, err)
-			}
+		if _, err := postgres.UpsertUser(ctx, user(first.OAuthSubject, "B@example.com", "Takeover")); !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("conflict error=%v, want ErrConflict", err)
 		}
 		for _, want := range []model.User{first, second} {
 			found, err := postgres.FindUserByOAuth(ctx, "google", want.OAuthSubject)
@@ -306,15 +286,4 @@ func TestAuthPostgresIntegration(t *testing.T) {
 			t.Fatalf("unexpired session removed: %v", err)
 		}
 	})
-}
-
-func memoryWithUsers(t *testing.T, users ...model.User) *repository.Memory {
-	t.Helper()
-	memory := repository.NewMemory()
-	for _, user := range users {
-		if _, err := memory.UpsertUser(t.Context(), user); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return memory
 }

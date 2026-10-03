@@ -49,13 +49,6 @@ type Store interface {
 	Close()
 }
 
-func replacedPhotoKey(newKey, previousKey string) string {
-	if newKey == "" || newKey == previousKey {
-		return ""
-	}
-	return previousKey
-}
-
 func normalizedRecordSort(field string, descending bool) (string, bool) {
 	switch field {
 	case "date", "mileage", "cost":

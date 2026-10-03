@@ -23,13 +23,14 @@ import (
 	"github.com/bitofbytes-io/carma/internal/middleware"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
+	"github.com/bitofbytes-io/carma/internal/testdb"
 	"github.com/google/uuid"
 )
 
 type fixture struct {
 	s      *Server
 	router http.Handler
-	store  *repository.Memory
+	store  *repository.Postgres
 	cookie *http.Cookie
 	user   model.User
 }
@@ -111,7 +112,7 @@ func (f fakeGoogle) Allowed(_ string) bool                                     {
 
 func setup(t *testing.T) fixture {
 	t.Helper()
-	store := repository.NewMemory()
+	store := testdb.Store(t)
 	a, e := assets.NewLocalStore(t.TempDir())
 	if e != nil {
 		t.Fatal(e)
@@ -931,7 +932,7 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 		{"allowlisted", true, true, true}, {"not allowlisted", false, true, false}, {"unverified", true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := repository.NewMemory()
+			store := testdb.Store(t)
 			a, _ := assets.NewLocalStore(t.TempDir())
 			cfg := &config.Config{AppEnv: "production", AuthMode: config.AuthGoogle, SessionTTL: 90 * 24 * time.Hour, MaxUploadBytes: 25 << 20}
 			svc := auth.NewService(store, cfg.SessionTTL, nil)
@@ -976,7 +977,7 @@ func TestGoogleCallbackAcceptsAllowlistedAndFriendlyRejectsOthers(t *testing.T) 
 }
 
 func TestGoogleCallbackReportsIdentityConflict(t *testing.T) {
-	store := repository.NewMemory()
+	store := testdb.Store(t)
 	now := time.Now()
 	for _, existing := range []model.User{
 		{ID: uuid.New(), OAuthProvider: "google", OAuthSubject: "sub-a", Email: "a@example.com", CreatedAt: now},
@@ -1012,7 +1013,7 @@ func TestGoogleCallbackReportsIdentityConflict(t *testing.T) {
 }
 
 func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
-	store := repository.NewMemory()
+	store := testdb.Store(t)
 	a, err := assets.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1088,7 +1089,7 @@ func TestGoogleOAuthPreservesOnlySafeDeepLinks(t *testing.T) {
 }
 
 func TestGoogleOAuthRejectsTamperedState(t *testing.T) {
-	store := repository.NewMemory()
+	store := testdb.Store(t)
 	a, err := assets.NewLocalStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
