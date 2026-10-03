@@ -134,7 +134,7 @@ first-cycle baselines.
 
 ## Email reminders
 
-- `internal/reminderemail.Schedule`: runs at startup and daily; its runner takes a Postgres session advisory lock
+- `internal/reminderemail.Runner` runs at startup and daily (via `internal/schedule.Every`); it takes a Postgres session advisory lock
   (`pg_try_advisory_lock`) so only one of the 3 replicas sends.
 - For each enabled, overdue reminder: skip if a `reminder_notifications` row exists
   within the last 30 days; otherwise send and log.

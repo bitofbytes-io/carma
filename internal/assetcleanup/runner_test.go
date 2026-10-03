@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -201,46 +200,5 @@ func TestRunnerPartialDeletionFailureRetainsCountsAndProtectsFilenames(t *testin
 func TestDefaultScheduleIntervalIsWeekly(t *testing.T) {
 	if DefaultInterval != 7*24*time.Hour {
 		t.Fatalf("default interval = %v", DefaultInterval)
-	}
-}
-
-func TestScheduleRunsAtStartupRepeatsAndStopsOnCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	var mu sync.Mutex
-	var triggers []string
-	called := make(chan struct{}, 4)
-	run := func(_ context.Context, stringTrigger string) (assets.CleanupReport, error) {
-		mu.Lock()
-		triggers = append(triggers, stringTrigger)
-		mu.Unlock()
-		select {
-		case called <- struct{}{}:
-		default:
-		}
-		return assets.CleanupReport{}, nil
-	}
-	done := make(chan struct{})
-	go func() {
-		Schedule(ctx, 10*time.Millisecond, run)
-		close(done)
-	}()
-	for range 2 {
-		select {
-		case <-called:
-		case <-time.After(time.Second):
-			t.Fatal("scheduled run did not occur")
-		}
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("scheduler did not stop")
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(triggers) < 2 || triggers[0] != TriggerStartup || triggers[1] != TriggerScheduled {
-		t.Fatalf("triggers=%v", triggers)
 	}
 }

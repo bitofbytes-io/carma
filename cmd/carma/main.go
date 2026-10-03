@@ -18,6 +18,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/mailer"
 	"github.com/bitofbytes-io/carma/internal/reminderemail"
 	"github.com/bitofbytes-io/carma/internal/repository"
+	"github.com/bitofbytes-io/carma/internal/schedule"
 	"github.com/bitofbytes-io/carma/internal/server"
 )
 
@@ -92,25 +93,37 @@ func run() error {
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
 	var scheduler sync.WaitGroup
-	scheduler.Add(1)
-	go func() {
-		defer scheduler.Done()
-		authService.ScheduleSessionCleanup(ctx, auth.SessionCleanupInterval, slog.Default())
-	}()
-	if postgresBacked {
-		runner := assetcleanup.NewRunner(postgresStore, assetStore, slog.Default())
+	every := func(interval time.Duration, job func(context.Context)) {
 		scheduler.Add(1)
 		go func() {
 			defer scheduler.Done()
-			assetcleanup.Schedule(ctx, assetcleanup.DefaultInterval, runner.Run)
+			schedule.Every(ctx, interval, job)
 		}()
 	}
+	every(auth.SessionCleanupInterval, func(ctx context.Context) {
+		if deleted, err := authService.DeleteExpiredSessions(ctx); err != nil {
+			if ctx.Err() == nil {
+				slog.Error("expired session cleanup failed", "error", err)
+			}
+		} else if deleted > 0 {
+			slog.Info("expired sessions deleted", "count", deleted)
+		}
+	})
+	if postgresBacked {
+		runner := assetcleanup.NewRunner(postgresStore, assetStore, slog.Default())
+		trigger := assetcleanup.TriggerStartup
+		every(assetcleanup.DefaultInterval, func(ctx context.Context) {
+			_, _ = runner.Run(ctx, trigger) // Run logs its own outcome.
+			trigger = assetcleanup.TriggerScheduled
+		})
+	}
 	if reminderRunner != nil {
-		scheduler.Add(1)
-		go func() {
-			defer scheduler.Done()
-			reminderemail.Schedule(ctx, reminderemail.DefaultInterval, reminderRunner.Run, slog.Default())
-		}()
+		every(reminderemail.DefaultInterval, func(ctx context.Context) {
+			report, err := reminderRunner.Run(ctx, reminderemail.Options{})
+			if err != nil && ctx.Err() == nil {
+				slog.Error("reminder email run failed", "evaluated", report.Evaluated, "sent", report.Sent, "failed", report.Failed, "error", err)
+			}
+		})
 	}
 	go func() {
 		slog.Info("carma listening", "port", cfg.Port, "store", cfg.DataStore, "auth", cfg.AuthMode)

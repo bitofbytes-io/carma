@@ -11,7 +11,11 @@ import (
 	"github.com/google/uuid"
 )
 
-const GracePeriod = 48 * time.Hour
+const (
+	GracePeriod = 48 * time.Hour
+	// DefaultInterval is how often the server runs asset cleanup.
+	DefaultInterval = 7 * 24 * time.Hour
+)
 
 const (
 	TriggerStartup   = "startup"
