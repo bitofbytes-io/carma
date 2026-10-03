@@ -1,0 +1,15 @@
+{{/* Shared by every page. Pages that render "records-section" set .RecordsURL and define "records-heading" and "records-filter-actions". */}}
+{{define "records-section"}}<section class="card records-card" id="records-section">
+  <div class="section-head">{{template "records-heading" .}}</div>
+  <form method="get" class="filters" hx-get="{{.RecordsURL}}" hx-trigger="submit, input changed delay:300ms, change" hx-target="#records-section" hx-swap="outerHTML" hx-push-url="true">
+    <input name="q" aria-label="Search records" placeholder="Search records…" value="{{.Params.Get "q"}}">
+    <select name="type" aria-label="Filter by service type"><option value="">All types</option>{{range .Types}}<option value="{{.ID}}" {{selected .ID.String ($.Params.Get "type")}}>{{.Name}}</option>{{end}}</select>
+    <input type="date" name="from" value="{{.Params.Get "from"}}" aria-label="From date"><input type="date" name="to" value="{{.Params.Get "to"}}" aria-label="To date">
+    <select name="sort" aria-label="Sort records by"><option value="date">Date</option><option value="mileage" {{selected "mileage" (.Params.Get "sort")}}>Mileage</option><option value="cost" {{selected "cost" (.Params.Get "sort")}}>Cost</option></select>
+    <select name="direction" aria-label="Sort direction"><option value="desc">Newest/highest</option><option value="asc" {{selected "asc" (.Params.Get "direction")}}>Oldest/lowest</option></select>
+    <button class="secondary">Apply</button>{{template "records-filter-actions" .}}
+  </form>
+  {{template "record-list" .}}
+</section>{{end}}
+{{define "records-export"}}<a class="secondary" href="{{.RecordsURL}}/export.csv?{{query .Params}}">⇩ Export CSV</a>{{end}}
+{{define "record-list"}}<div class="record-list" id="records-list"><div class="record-row header"><span>Date</span><span>Service type</span><span>Mileage</span><span>Cost</span><span></span></div>{{range .Records}}<a class="record-row" href="/records/{{.ID}}"><span data-label="Date">{{date .OccurredOn}}</span><strong data-label="Service">{{.ServiceTypeName}}</strong><span data-label="Mileage">{{num .OdometerMiles}}</span><span data-label="Cost">{{money .CostCents}}</span><span>{{if .AttachmentCount}}📎 {{.AttachmentCount}}{{end}}</span></a>{{else}}<p class="empty-row">No records match this view.</p>{{end}}</div>{{end}}

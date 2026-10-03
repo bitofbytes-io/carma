@@ -22,6 +22,7 @@ func (s *Server) allRecords(response http.ResponseWriter, request *http.Request)
 		s.fail(response, err)
 		return
 	}
+	data.RecordsURL = "/records"
 	data.Params = cleanParams(request.URL.Query())
 	data.Records, err = s.store.ListRecords(request.Context(), recordQuery(request, nil))
 	if err != nil {

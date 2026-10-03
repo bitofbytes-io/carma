@@ -4,11 +4,6 @@ import "context"
 
 const assetCleanupAdvisoryLockID int64 = 0x4341524d41415354 // "CARMAAST"
 
-type AssetCleanupStore interface {
-	ListReferencedAssetKeys(context.Context) ([]string, error)
-	TryAssetCleanupLock(context.Context) (unlock func(context.Context) error, acquired bool, err error)
-}
-
 func (p *Postgres) ListReferencedAssetKeys(ctx context.Context) ([]string, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT photo_key AS storage_key FROM vehicles WHERE photo_key <> ''

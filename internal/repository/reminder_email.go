@@ -9,7 +9,6 @@ import (
 )
 
 const reminderEmailAdvisoryLockID int64 = 0x4341524d41454d4c // "CARMAEML"
-const reminderLockAcquireTimeout = advisoryLockAcquireTimeout
 
 type ReminderEmailStore interface {
 	ListReminders(context.Context, *uuid.UUID, bool) ([]model.Reminder, error)
@@ -52,8 +51,4 @@ func (p *Postgres) CreateReminderNotification(ctx context.Context, notification 
 
 func (p *Postgres) TryReminderEmailLock(ctx context.Context) (func(context.Context) error, bool, error) {
 	return p.tryAdvisoryLock(ctx, reminderEmailAdvisoryLockID, "reminder")
-}
-
-func boundedReminderLockAcquireContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return boundedAdvisoryLockAcquireContext(ctx)
 }

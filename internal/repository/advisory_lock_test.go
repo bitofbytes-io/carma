@@ -81,6 +81,18 @@ func TestAdvisoryLockQueryUsesBoundedContext(t *testing.T) {
 	}
 }
 
+func TestBoundedAdvisoryLockAcquireContextPreservesEarlierCallerDeadline(t *testing.T) {
+	caller, cancelCaller := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelCaller()
+	callerDeadline, _ := caller.Deadline()
+	ctx, cancel := boundedAdvisoryLockAcquireContext(caller)
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok || !deadline.Equal(callerDeadline) {
+		t.Fatalf("deadline = %v, want caller deadline %v", deadline, callerDeadline)
+	}
+}
+
 func TestReleaseAdvisoryLockDiscardsConnectionOnQueryError(t *testing.T) {
 	queryErr := errors.New("unlock query failed")
 	connection := &recordingAdvisoryLockConnection{row: advisoryLockResultRow{err: queryErr}}

@@ -44,17 +44,17 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 }
 
 type pageData struct {
-	Title, Error, Flash, Redirect                 string
-	Authenticated, Development, Editing, Archived bool
-	User                                          *model.User
-	NavVehicles, Vehicles                         []model.Vehicle
-	Vehicle                                       model.Vehicle
-	Record                                        model.Record
-	Records                                       []model.Record
-	Types                                         []model.ServiceType
-	Attachments                                   []model.Attachment
-	Reminders, Attention                          []reminder.Result
-	Params                                        url.Values
+	Title, Error, Flash, Redirect, RecordsURL string
+	Authenticated, Development, Editing       bool
+	User                                      *model.User
+	NavVehicles, Vehicles                     []model.Vehicle
+	Vehicle                                   model.Vehicle
+	Record                                    model.Record
+	Records                                   []model.Record
+	Types                                     []model.ServiceType
+	Attachments                               []model.Attachment
+	Reminders, Attention                      []reminder.Result
+	Params                                    url.Values
 }
 
 func (s *Server) Router() http.Handler {

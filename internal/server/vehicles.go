@@ -46,13 +46,12 @@ func (s *Server) archivedVehicles(response http.ResponseWriter, request *http.Re
 		s.fail(response, err)
 		return
 	}
-	data.Archived = true
 	data.Vehicles, err = s.store.ListVehicles(request.Context(), true)
 	if err != nil {
 		s.fail(response, err)
 		return
 	}
-	s.render(response, http.StatusOK, "records", data)
+	s.render(response, http.StatusOK, "archived", data)
 }
 
 func (s *Server) newVehicle(response http.ResponseWriter, request *http.Request) {
@@ -227,6 +226,7 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	data.Vehicle = vehicle
+	data.RecordsURL = "/vehicles/" + vehicle.ID.String()
 	data.Params = cleanParams(request.URL.Query())
 	query := recordQuery(request, &vehicle.ID)
 	data.Records, err = s.store.ListRecords(request.Context(), query)
