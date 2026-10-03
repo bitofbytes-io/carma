@@ -118,42 +118,47 @@ func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 	return vehicle, err
 }
 
-func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, error) {
+func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, string, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
-		return vehicle, err
+		return vehicle, "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	tag, err := tx.Exec(
-		ctx, `UPDATE vehicles SET nickname=$2,year=$3,make=$4,model=$5,vin=$6,license_plate=$7,photo_key=$8,notes=$9,
-			current_odometer_miles=$10,updated_at=$11
-		WHERE id=$1`, vehicle.ID,
+	// Lock the row and read the photo it held before this write, so a concurrent
+	// replacement is never overwritten or reported as the wrong old key.
+	var previousPhotoKey string
+	err = tx.QueryRow(
+		ctx, `UPDATE vehicles v SET nickname=$2,year=$3,make=$4,model=$5,vin=$6,license_plate=$7,
+			photo_key=COALESCE(NULLIF($8,''),v.photo_key),notes=$9,current_odometer_miles=$10,updated_at=$11
+		FROM (SELECT id,photo_key FROM vehicles WHERE id=$1 FOR UPDATE) previous
+		WHERE v.id=previous.id
+		RETURNING previous.photo_key`, vehicle.ID,
 		vehicle.Nickname, vehicle.Year, vehicle.Make,
 		vehicle.Model, vehicle.VIN, vehicle.LicensePlate,
 		vehicle.PhotoKey, vehicle.Notes, vehicle.CurrentOdometer,
 		vehicle.UpdatedAt,
-	)
-	if err != nil {
-		return vehicle, err
+	).Scan(&previousPhotoKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vehicle, "", ErrNotFound
 	}
-	if tag.RowsAffected() == 0 {
-		return vehicle, ErrNotFound
+	if err != nil {
+		return vehicle, "", err
 	}
 	if vehicle.CurrentOdometer != nil {
 		if _, err = tx.Exec(ctx, initializeReminderOdometerSQL, vehicle.ID, vehicle.CurrentOdometer); err != nil {
-			return vehicle, err
+			return vehicle, "", err
 		}
 	}
 	updated, err := scanVehicle(tx.QueryRow(ctx, `SELECT `+vehicleCols+`,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id))
 		FROM vehicles v
 		WHERE v.id=$1`, vehicle.ID))
 	if err != nil {
-		return vehicle, err
+		return vehicle, "", err
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return vehicle, err
+		return vehicle, "", err
 	}
-	return updated, nil
+	return updated, replacedPhotoKey(vehicle.PhotoKey, previousPhotoKey), nil
 }
 
 func (p *Postgres) ArchiveVehicle(ctx context.Context, id uuid.UUID) error {

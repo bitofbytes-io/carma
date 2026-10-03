@@ -184,12 +184,16 @@ func (m *Memory) CreateVehicle(_ context.Context, v model.Vehicle) (model.Vehicl
 	m.vehicles[v.ID] = v
 	return m.enrichVehicle(v), nil
 }
-func (m *Memory) UpdateVehicle(_ context.Context, v model.Vehicle) (model.Vehicle, error) {
+func (m *Memory) UpdateVehicle(_ context.Context, v model.Vehicle) (model.Vehicle, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	old, ok := m.vehicles[v.ID]
 	if !ok {
-		return v, ErrNotFound
+		return v, "", ErrNotFound
+	}
+	replaced := replacedPhotoKey(v.PhotoKey, old.PhotoKey)
+	if v.PhotoKey == "" {
+		v.PhotoKey = old.PhotoKey
 	}
 	v.CreatedAt = old.CreatedAt
 	v.ArchivedAt = old.ArchivedAt
@@ -204,7 +208,7 @@ func (m *Memory) UpdateVehicle(_ context.Context, v model.Vehicle) (model.Vehicl
 			}
 		}
 	}
-	return m.enrichVehicle(v), nil
+	return m.enrichVehicle(v), replaced, nil
 }
 func (m *Memory) ArchiveVehicle(_ context.Context, id uuid.UUID) error {
 	m.mu.Lock()

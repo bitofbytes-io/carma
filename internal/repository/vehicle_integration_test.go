@@ -89,7 +89,7 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 				t.Errorf("remove reminder failure trigger: %v", err)
 			}
 		})
-		if _, err := store.UpdateVehicle(ctx, vehicle); err == nil {
+		if _, _, err := store.UpdateVehicle(ctx, vehicle); err == nil {
 			t.Fatal("expected reminder initialization failure")
 		}
 		persisted, err := store.GetVehicle(ctx, vehicleID)
@@ -113,7 +113,7 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 				t.Errorf("remove vehicle commit failure trigger: %v", err)
 			}
 		})
-		if _, err := store.UpdateVehicle(ctx, vehicle); err == nil {
+		if _, _, err := store.UpdateVehicle(ctx, vehicle); err == nil {
 			t.Fatal("expected commit failure")
 		}
 		persisted, err := store.GetVehicle(ctx, vehicleID)
@@ -131,9 +131,12 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 	})
 
 	t.Run("returns persisted photo and effective odometer", func(t *testing.T) {
-		updated, err := store.UpdateVehicle(ctx, vehicle)
+		updated, replaced, err := store.UpdateVehicle(ctx, vehicle)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if replaced != "old.jpg" {
+			t.Fatalf("replaced photo key = %q, want old.jpg", replaced)
 		}
 		if updated.PhotoKey != "new.jpg" || updated.CurrentOdometer == nil || *updated.CurrentOdometer != 1200 || updated.LatestOdometer == nil || *updated.LatestOdometer != 1400 || updated.Nickname != "Updated" || !updated.CreatedAt.Equal(vehicle.CreatedAt) || !updated.UpdatedAt.Equal(vehicle.UpdatedAt) {
 			t.Fatalf("incomplete returned vehicle: %+v", updated)
@@ -148,11 +151,39 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("update without upload keeps the current photo", func(t *testing.T) {
+		// A form loaded before another edit replaced the photo must not write
+		// the stale key back (CAR-6).
+		if _, err := connection.Exec(ctx, `UPDATE vehicles SET photo_key='concurrent.jpg' WHERE id=$1`, vehicleID); err != nil {
+			t.Fatal(err)
+		}
+		withoutUpload := vehicle
+		withoutUpload.PhotoKey = ""
+		withoutUpload.Nickname = "Renamed"
+		updated, replaced, err := store.UpdateVehicle(ctx, withoutUpload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.PhotoKey != "concurrent.jpg" || replaced != "" || updated.Nickname != "Renamed" {
+			t.Fatalf("update without upload photo=%q replaced=%q nickname=%q", updated.PhotoKey, replaced, updated.Nickname)
+		}
+		if _, err := connection.Exec(ctx, `UPDATE vehicles SET photo_key='new.jpg' WHERE id=$1`, vehicleID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("resaving the current photo key replaces nothing", func(t *testing.T) {
+		updated, replaced, err := store.UpdateVehicle(ctx, vehicle)
+		if err != nil || updated.PhotoKey != "new.jpg" || replaced != "" {
+			t.Fatalf("photo=%q replaced=%q err=%v", updated.PhotoKey, replaced, err)
+		}
+	})
+
 	t.Run("canceled update preserves saved photo", func(t *testing.T) {
 		canceled, stop := context.WithCancel(ctx)
 		stop()
 		vehicle.PhotoKey = "canceled.jpg"
-		if _, err := store.UpdateVehicle(canceled, vehicle); !errors.Is(err, context.Canceled) {
+		if _, _, err := store.UpdateVehicle(canceled, vehicle); !errors.Is(err, context.Canceled) {
 			t.Fatalf("canceled update error=%v", err)
 		}
 		persisted, err := store.GetVehicle(ctx, vehicleID)
@@ -163,7 +194,7 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 
 	t.Run("missing vehicle", func(t *testing.T) {
 		vehicle.ID = uuid.New()
-		if _, err := store.UpdateVehicle(ctx, vehicle); !errors.Is(err, repository.ErrNotFound) {
+		if _, _, err := store.UpdateVehicle(ctx, vehicle); !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("missing vehicle error=%v", err)
 		}
 	})
