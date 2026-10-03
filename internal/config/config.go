@@ -164,7 +164,16 @@ func validateReminderEmail(c ReminderEmail) error {
 	return nil
 }
 
-func (c *Config) SecureCookies() bool { return strings.EqualFold(c.AppEnv, "production") }
+// SecureCookies reports whether cookies need the Secure attribute: always in
+// production, and whenever the OAuth redirect URL is HTTPS, so an HTTPS
+// deployment gets Secure cookies even without APP_ENV=production.
+func (c *Config) SecureCookies() bool {
+	if strings.EqualFold(c.AppEnv, "production") {
+		return true
+	}
+	redirect, err := url.Parse(c.GoogleRedirectURL)
+	return err == nil && strings.EqualFold(redirect.Scheme, "https")
+}
 func LoadDatabaseURL() (string, error) {
 	return envOrFile("DATABASE_URL", "/run/secrets/carma_database_url")
 }

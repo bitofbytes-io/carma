@@ -151,12 +151,12 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 
 | Variable | Prod source | Purpose |
 |---|---|---|
-| `APP_ENV` | stack env (`production`) | prod behaviors (secure cookies) |
+| `APP_ENV` | stack env (`production`) | prod behaviors (secure cookies, no development auth) |
 | `PORT` | stack env (`4700`) | listen port |
 | `DATABASE_URL` | secret `carma_database_url` | Postgres DSN |
 | `DATA_STORE` | stack env (`postgres`; `memory` for local preview) | repo selection |
 | `AUTH_GOOGLE_CLIENT_ID` / `_SECRET` | secrets `carma_google_client_id` / `_secret` | OIDC |
-| `AUTH_GOOGLE_REDIRECT_URL` | stack env | `https://carma.bitofbytes.io/api/auth/google/callback` |
+| `AUTH_GOOGLE_REDIRECT_URL` | stack env | `https://carma.bitofbytes.io/api/auth/google/callback`; an `https` URL also makes cookies `Secure` |
 | `AUTH_GOOGLE_ALLOWED_EMAILS` | stack env | comma-separated allowlist |
 | `SESSION_TTL` | default `2160h` | session lifetime |
 | `APP_TIMEZONE` | default `America/New_York` | IANA zone that decides "today" for due dates, reminder emails, and new-record defaults; tzdata is embedded in the binary |

@@ -139,3 +139,22 @@ func TestAppTimezoneDefaultsToNewYorkAndIsValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestSecureCookiesFollowRedirectSchemeOrProduction(t *testing.T) {
+	for _, tc := range []struct {
+		appEnv, redirect string
+		want             bool
+	}{
+		{"development", "https://carma.bitofbytes.io/api/auth/google/callback", true},
+		{"development", "HTTPS://carma.bitofbytes.io/api/auth/google/callback", true},
+		{"development", "http://localhost:4700/api/auth/google/callback", false},
+		{"development", "", false},
+		{"production", "http://localhost:4700/api/auth/google/callback", true},
+		{"Production", "", true},
+	} {
+		c := &Config{AppEnv: tc.appEnv, GoogleRedirectURL: tc.redirect}
+		if got := c.SecureCookies(); got != tc.want {
+			t.Errorf("APP_ENV=%q redirect=%q: SecureCookies()=%t, want %t", tc.appEnv, tc.redirect, got, tc.want)
+		}
+	}
+}
