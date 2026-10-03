@@ -17,7 +17,7 @@ type Renderer struct{ pages map[string]*template.Template }
 
 func New() (*Renderer, error) {
 	r := &Renderer{pages: map[string]*template.Template{}}
-	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records"}
+	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived"}
 	for _, n := range names {
 		t, e := template.New("base.html").Funcs(template.FuncMap{"date": func(t time.Time) string { return t.Format("Jan 2, 2006") }, "iso": func(t time.Time) string { return t.Format("2006-01-02") }, "money": func(v *int64) string {
 			if v == nil {
@@ -39,7 +39,7 @@ func New() (*Renderer, error) {
 				return template.HTMLAttr("selected")
 			}
 			return template.HTMLAttr("")
-		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower}).ParseFS(files, "templates/base.html", "templates/"+n+".html")
+		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower}).ParseFS(files, "templates/base.html", "templates/partials.html", "templates/"+n+".html")
 		if e != nil {
 			return nil, e
 		}

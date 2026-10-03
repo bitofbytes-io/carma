@@ -202,6 +202,7 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 		User          *model.User
 		NavVehicles   []model.Vehicle
 		Vehicle       model.Vehicle
+		RecordsURL    string
 		Params        url.Values
 		Types         []model.ServiceType
 		Records       []model.Record
@@ -209,11 +210,11 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 	}
 	v := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 	var b bytes.Buffer
-	err = r.Render(&b, "vehicle", data{Authenticated: true, User: &model.User{}, Vehicle: v, Params: url.Values{}, Types: []model.ServiceType{{ID: uuid.New(), Name: "Oil change"}}})
+	err = r.Render(&b, "vehicle", data{Authenticated: true, User: &model.User{}, Vehicle: v, RecordsURL: "/vehicles/" + v.ID.String(), Params: url.Values{}, Types: []model.ServiceType{{ID: uuid.New(), Name: "Oil change"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), "Export CSV") || !strings.Contains(b.String(), "Manage reminders") {
+	if !strings.Contains(b.String(), `href="/vehicles/`+v.ID.String()+`/export.csv?"`) || !strings.Contains(b.String(), "Manage reminders") {
 		t.Fatal("vehicle page rendered incompletely")
 	}
 	for _, name := range []string{"Search records", "Filter by service type", "From date", "To date", "Sort records by", "Sort direction"} {
@@ -254,6 +255,7 @@ func TestVehicleTemplateRendersReminderIntervals(t *testing.T) {
 				User          *model.User
 				NavVehicles   []model.Vehicle
 				Vehicle       model.Vehicle
+				RecordsURL    string
 				Params        url.Values
 				Types         []model.ServiceType
 				Records       []model.Record

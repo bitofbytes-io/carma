@@ -723,6 +723,11 @@ func TestHTMXRecordPartialAndFilterAttributes(t *testing.T) {
 			t.Fatalf("global records missing accessible name %q", name)
 		}
 	}
+	for _, want := range []string{`<h1>All records</h1>`, `hx-get="/records"`, `href="/records/export.csv?"`} {
+		if !strings.Contains(global, want) {
+			t.Fatalf("global records missing %s", want)
+		}
+	}
 	req := httptest.NewRequest("GET", "http://example.com/vehicles/"+v.ID.String()+"?q=Beta", nil)
 	req.AddCookie(f.cookie)
 	req.Header.Set("HX-Request", "true")
@@ -731,6 +736,26 @@ func TestHTMXRecordPartialAndFilterAttributes(t *testing.T) {
 	body = w.Body.String()
 	if strings.Contains(body, "<html") || !strings.Contains(body, `id="records-list"`) || !strings.Contains(body, types[1].Name) || strings.Count(body, `class="record-row" href=`) != 1 || strings.Contains(body, "ZgotmplZ") || !strings.Contains(body, "export.csv?q=Beta") {
 		t.Fatalf("bad partial: %s", body)
+	}
+}
+
+func TestArchivedVehiclesPageListsOnlyArchivedVehicles(t *testing.T) {
+	f := setup(t)
+	empty := f.do(t, "GET", "/vehicles/archived", nil, "").Body.String()
+	if !strings.Contains(empty, "No archived vehicles.") {
+		t.Fatalf("empty archived page: %s", empty)
+	}
+	v := createVehicle(t, f)
+	if err := f.store.ArchiveVehicle(t.Context(), v.ID); err != nil {
+		t.Fatal(err)
+	}
+	w := f.do(t, "GET", "/vehicles/archived", nil, "")
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `<h1>Archived vehicles</h1>`) || !strings.Contains(body, `href="/vehicles/`+v.ID.String()+`"`) || strings.Contains(body, "No archived vehicles.") {
+		t.Fatalf("archived page: %d %s", w.Code, body)
+	}
+	if strings.Contains(body, `class="filters"`) || strings.Contains(body, "Export CSV") {
+		t.Fatalf("archived page rendered record controls: %s", body)
 	}
 }
 
