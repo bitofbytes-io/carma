@@ -139,7 +139,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err = assetUnlockOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assetUnlockTwo, acquired, err := storeTwo.TryAssetCleanupLock(context.Background())
+	assetUnlockTwo, acquired, err := eventuallyLock(storeTwo.TryAssetCleanupLock)
 	if err != nil || !acquired {
 		t.Fatalf("reacquired asset lock acquired=%t err=%v", acquired, err)
 	}
@@ -209,7 +209,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err = unlockOne(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	unlockTwo, acquired, err := storeTwo.TryReminderEmailLock(context.Background())
+	unlockTwo, acquired, err := eventuallyLock(storeTwo.TryReminderEmailLock)
 	if err != nil || !acquired {
 		t.Fatalf("reacquired lock acquired=%t err=%v", acquired, err)
 	}
@@ -242,6 +242,35 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	}
 	if err = unlockLimited(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if err = unlockLimited(context.Background()); err != nil {
+		t.Fatalf("repeated unlock error = %v", err)
+	}
+	// Unlocking closes the lock's connection, which frees the only pool slot
+	// and ends the session that held the lock.
+	relockLimited, acquired, err := eventuallyLock(limitedStore.TryReminderEmailLock)
+	if err != nil || !acquired {
+		t.Fatalf("limited-pool relock acquired=%t err=%v", acquired, err)
+	}
+	if err = relockLimited(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = limitedStore.ListReminders(context.Background(), nil, false); err != nil {
+		t.Fatalf("pool unusable after unlock: %v", err)
+	}
+}
+
+// eventuallyLock retries a lock attempt briefly. Unlocking closes the holder's
+// connection, and the server releases the lock when that session ends, which
+// can trail the client-side close by a moment.
+func eventuallyLock(try func(context.Context) (func(context.Context) error, bool, error)) (func(context.Context) error, bool, error) {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		unlock, acquired, err := try(context.Background())
+		if err != nil || acquired || time.Now().After(deadline) {
+			return unlock, acquired, err
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
