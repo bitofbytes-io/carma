@@ -10,6 +10,7 @@ PLATFORMS ?= linux/arm64/v8
 GOCACHE ?= /tmp/carma-go-cache
 
 .PHONY: run test test-integration check-entrypoints lint vuln build migrate db-up db-down docker-build docker-buildx
+
 # Needs the local database: run `make db-up` and `make migrate` first.
 run:
 	APP_ENV=development AUTH_MODE=development DATABASE_URL='$(DATABASE_URL)' PORT=$(PORT) ASSET_ROOT=.local/carma-assets $(GO) run ./cmd/carma
