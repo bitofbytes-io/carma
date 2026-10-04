@@ -50,5 +50,6 @@ db-down:
 docker-build:
 	docker build -t $(REGISTRY)/$(IMAGE_REPO):$(TAG) .
 
+# CI sets METADATA_FILE to read the pushed image digest from buildx's metadata.
 docker-buildx:
-	docker buildx build --platform $(PLATFORMS) -t $(REGISTRY)/$(IMAGE_REPO):$(TAG) -t $(REGISTRY)/$(IMAGE_REPO):latest --push .
+	docker buildx build --platform $(PLATFORMS) -t $(REGISTRY)/$(IMAGE_REPO):$(TAG) -t $(REGISTRY)/$(IMAGE_REPO):latest $(if $(METADATA_FILE),--metadata-file $(METADATA_FILE)) --push .
