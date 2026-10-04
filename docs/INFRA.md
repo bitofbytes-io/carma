@@ -15,10 +15,12 @@ Use these files in the current `home_swarm` default branch:
 
 - `carma-stack.yml` for runtime environment, external secrets, replicas, volumes,
   health checks, and update policy.
-- `README.md`, section “Carma CI and deployment,” for NAS/MailPlus and 1Password
+- `README.md`, section “Carma deployment,” for NAS/MailPlus and 1Password
   bootstrap, four-secret creation, first deployment, recipient-count-guarded email
   proof, credential rotation, and recovery.
-- `carma/post-receive` for migration and immutable-image rollout behavior.
+- `hooks/post-receive`, `hooks/lib.sh`, and `hooks/apps/carma.conf` for migration
+  and immutable-image rollout behavior. CI passes the digest it built as an
+  `image-digest` push option; see the README section “Image digests from CI.”
 - `Makefile` target `deploy-carma` for manual bootstrap and recovery deployment.
 - `traefik/dynamic/dynamic.routers-services.yml` for public routing.
 

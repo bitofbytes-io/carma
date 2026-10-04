@@ -140,10 +140,22 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
       - name: Build and push image
+        id: build
+        shell: bash
         env:
           REGISTRY: ${{ env.IMAGE_REG }}
           TAG: ${{ steps.meta.outputs.tag }}
-        run: make docker-buildx
+          METADATA_FILE: ${{ runner.temp }}/carma-build-metadata.json
+        run: |
+          set -euo pipefail
+          make docker-buildx
+          digest="$(jq -r '."containerimage.digest" // empty' "${METADATA_FILE}")"
+          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "buildx metadata has no valid containerimage.digest: '${digest}'" >&2
+            exit 1
+          fi
+          echo "Pushed ${REGISTRY}/${IMAGE_REPO}@${digest}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
       - name: Install deployment SSH material
         shell: bash
@@ -160,8 +172,11 @@ jobs:
 
       - name: Push main to Crystal deployment repository
         shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
+          : "${IMAGE_DIGEST:?Missing image digest from the build step}"
           git remote add crystal "ssh://git@${MANAGER_HOST}/${MANAGER_REPO_PATH}"
           if git ls-remote --exit-code crystal refs/heads/main >/dev/null 2>&1; then
             git fetch --no-tags crystal \
@@ -171,7 +186,9 @@ jobs:
               exit 1
             fi
           fi
-          git push --atomic crystal \
+          git push --atomic \
+            -o "image-digest=${IMAGE_REG}/${IMAGE_REPO}@${IMAGE_DIGEST}" \
+            crystal \
             HEAD:refs/heads/main \
             "HEAD:${DEPLOY_REQUEST_REF}"
 

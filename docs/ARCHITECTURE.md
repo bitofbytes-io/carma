@@ -180,8 +180,8 @@ sequenceDiagram
   GH->>GH: test, vet, build, govulncheck
   GH->>TS: join tailnet, ping manager
   GH->>REG: buildx push carma:<shortsha> (linux/arm64/v8)
-  GH->>CR: ssh git push -> /srv/git/carma-ci.git
-  CR->>REG: wait for manifest, resolve digest
+  GH->>CR: ssh git push -o image-digest=<built digest> -> /srv/git/carma-ci.git
+  CR->>REG: wait for the manifest of that digest
   CR->>SW: run carma-migrate as one-shot Swarm job
   CR->>SW: docker service update --with-registry-auth proxy_carma
   CR->>SW: verify health, rollback on failure
