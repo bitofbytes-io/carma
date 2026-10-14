@@ -3,8 +3,10 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -63,4 +65,33 @@ func (p *Postgres) AddOdometerReading(ctx context.Context, reading model.Odomete
 		return vehicle, err
 	}
 	return updated, nil
+}
+
+func (p *Postgres) ListMileagePoints(ctx context.Context, vehicleIDs []uuid.UUID, since time.Time) ([]model.MileagePoint, error) {
+	if len(vehicleIDs) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, len(vehicleIDs))
+	for i, id := range vehicleIDs {
+		ids[i] = id.String()
+	}
+	rows, err := p.pool.Query(ctx, `SELECT vehicle_id,read_on,odometer_miles FROM odometer_readings
+		WHERE vehicle_id=ANY($1::uuid[]) AND read_on>=$2::date
+		UNION ALL
+		SELECT vehicle_id,occurred_on,odometer_miles FROM records
+		WHERE vehicle_id=ANY($1::uuid[]) AND occurred_on>=$2::date AND odometer_miles IS NOT NULL
+		ORDER BY 1,2`, ids, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var points []model.MileagePoint
+	for rows.Next() {
+		var point model.MileagePoint
+		if err := rows.Scan(&point.VehicleID, &point.On, &point.Miles); err != nil {
+			return nil, err
+		}
+		points = append(points, point)
+	}
+	return points, rows.Err()
 }

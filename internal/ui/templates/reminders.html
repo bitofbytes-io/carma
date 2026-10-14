@@ -23,6 +23,7 @@
         <label class="reminder-field"><span class="field-label">Every (miles)</span><input type="number" min="1" name="miles" aria-label="Interval miles for {{.Reminder.ServiceTypeName}} reminder" value="{{if .Reminder.IntervalMiles}}{{.Reminder.IntervalMiles}}{{end}}"></label>
         <div class="reminder-field reminder-status"><span class="field-label">Status</span><span class="status {{.Status}}">{{.Status}}</span></div>
         <label class="reminder-field reminder-enabled"><span class="field-label">Enabled</span><input type="checkbox" name="enabled" value="true" aria-label="Enable {{.Reminder.ServiceTypeName}} reminder" {{checked .Reminder.Enabled}} hx-post="/vehicles/{{$.Vehicle.ID}}/reminders" hx-include="closest form" hx-target="#reminder-list" hx-swap="outerHTML"></label>
+        {{if .Detail}}<p class="reminder-detail muted">{{.Detail}}</p>{{end}}
       </form>
       <div class="reminder-actions">
         <button class="secondary" type="submit" form="reminder-{{.Reminder.ID}}">Save</button>

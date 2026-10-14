@@ -1,6 +1,7 @@
 package reminder
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -86,6 +87,101 @@ func TestCalendarMonthBehavior(t *testing.T) {
 	got := Evaluate(r, today)
 	if got.Status != Soon || got.DueDate == nil || !got.DueDate.Equal(time.Date(2024, 3, 2, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("status=%s due date=%v", got.Status, got.DueDate)
+	}
+}
+
+func f64p(v float64) *float64 { return &v }
+
+func TestEstimateMilesPerDay(t *testing.T) {
+	today := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	point := func(daysAgo int, miles int64) model.MileagePoint {
+		return model.MileagePoint{On: today.AddDate(0, 0, -daysAgo), Miles: miles}
+	}
+	tests := []struct {
+		name   string
+		points []model.MileagePoint
+		want   *float64
+	}{
+		{name: "no points"},
+		{name: "one point", points: []model.MileagePoint{point(30, 1000)}},
+		{name: "span under two weeks", points: []model.MileagePoint{point(13, 1000), point(0, 1500)}},
+		{name: "two points two weeks apart", points: []model.MileagePoint{point(14, 1000), point(0, 1420)}, want: f64p(30)},
+		{name: "linear fit", points: []model.MileagePoint{point(100, 1000), point(50, 1600), point(0, 2000)}, want: f64p(10)},
+		{name: "uneven points", points: []model.MileagePoint{point(60, 10000), point(45, 13000), point(0, 14000)}, want: f64p(110000.0 / 1950)},
+		{name: "older than twelve months ignored", points: []model.MileagePoint{point(400, 0), point(100, 1000), point(0, 2000)}, want: f64p(10)},
+		{name: "future dates ignored", points: []model.MileagePoint{point(-30, 99999), point(100, 1000), point(0, 2000)}, want: f64p(10)},
+		{name: "only old points", points: []model.MileagePoint{point(500, 0), point(400, 1000)}},
+		{name: "decreasing mileage", points: []model.MileagePoint{point(60, 2000), point(0, 1000)}},
+		{name: "flat mileage", points: []model.MileagePoint{point(60, 1000), point(0, 1000)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EstimateMilesPerDay(tc.points, today)
+			if (got == nil) != (tc.want == nil) || (got != nil && math.Abs(*got-*tc.want) > 1e-9) {
+				t.Fatalf("got %v want %v", deref(got), deref(tc.want))
+			}
+		})
+	}
+}
+
+func deref(v *float64) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func TestEvaluateProjectsMileageDueDate(t *testing.T) {
+	today := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	mileage := func(latest int64, rate *float64) model.Reminder {
+		return model.Reminder{Enabled: true, IntervalMiles: i64p(5000), StartingOdometer: i64p(10000), LatestOdometer: i64p(latest), MilesPerDay: rate}
+	}
+	tests := []struct {
+		name       string
+		r          model.Reminder
+		want       Status
+		projectIn  int
+		wantDetail string
+	}{
+		{name: "far off", r: mileage(11900, f64p(30)), want: OK, projectIn: 103, wantDetail: "~3,100 mi left, est. Nov 11"},
+		{name: "projection after thirty days", r: mileage(11900, f64p(100)), want: OK, projectIn: 31, wantDetail: "~3,100 mi left, est. Aug 31"},
+		{name: "projection on thirty days is soon", r: mileage(12000, f64p(100)), want: Soon, projectIn: 30, wantDetail: "~3,000 mi left, est. Aug 30"},
+		{name: "projection soon before mileage is", r: mileage(14000, f64p(50)), want: Soon, projectIn: 20, wantDetail: "~1,000 mi left, est. Aug 20"},
+		{name: "mileage soon before projection is", r: mileage(14600, f64p(1)), want: Soon, projectIn: 400, wantDetail: "~400 mi left, est. Sep 4, 2027"},
+		{name: "fractional days round", r: mileage(14000, f64p(110000.0/1950)), want: Soon, projectIn: 18, wantDetail: "~1,000 mi left, est. Aug 18"},
+		{name: "projection never makes overdue", r: mileage(14990, f64p(1000)), want: Soon, projectIn: 0, wantDetail: "~10 mi left, est. Jul 31"},
+		{name: "no estimate", r: mileage(14000, nil), want: OK, projectIn: -1, wantDetail: "~1,000 mi left · add a mileage reading to estimate"},
+		{name: "zero rate", r: mileage(14000, f64p(0)), want: OK, projectIn: -1, wantDetail: "~1,000 mi left · add a mileage reading to estimate"},
+		{name: "projection too far out", r: mileage(10000, f64p(.001)), want: OK, projectIn: -1, wantDetail: "~5,000 mi left"},
+		{name: "overdue by mileage", r: mileage(15200, f64p(30)), want: Due, projectIn: -1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Evaluate(tc.r, today)
+			if got.Status != tc.want || got.Detail != tc.wantDetail {
+				t.Fatalf("status=%s detail=%q, want %s %q", got.Status, got.Detail, tc.want, tc.wantDetail)
+			}
+			if tc.projectIn < 0 {
+				if got.ProjectedDueDate != nil {
+					t.Fatalf("projected %v, want none", got.ProjectedDueDate)
+				}
+				return
+			}
+			if want := today.AddDate(0, 0, tc.projectIn); got.ProjectedDueDate == nil || !got.ProjectedDueDate.Equal(want) {
+				t.Fatalf("projected %v, want %v", got.ProjectedDueDate, want)
+			}
+		})
+	}
+}
+
+func TestProjectionDoesNotHideTimeStatus(t *testing.T) {
+	today := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	r := model.Reminder{
+		Enabled: true, IntervalMonths: ip(6), IntervalMiles: i64p(5000), CreatedAt: today.AddDate(0, -6, 0),
+		StartingOdometer: i64p(10000), LatestOdometer: i64p(10100), MilesPerDay: f64p(10),
+	}
+	if got := Evaluate(r, today); got.Status != Due || got.MilesLeft == nil || *got.MilesLeft != 4900 {
+		t.Fatalf("status=%s miles left=%v", got.Status, got.MilesLeft)
 	}
 }
 

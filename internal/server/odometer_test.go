@@ -62,6 +62,48 @@ func TestOdometerUpdateFromDashboardSwapsCardAndAttention(t *testing.T) {
 	}
 }
 
+func TestMileageProjectionOnDashboardAndReminders(t *testing.T) {
+	f := setup(t)
+	v := createVehicle(t, f)
+	types, _ := f.store.ListServiceTypes(t.Context())
+	miles := int64(5000)
+	if _, err := f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometerPending: true, Enabled: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	today := f.s.today()
+	addReading := func(readOn time.Time, miles int64) {
+		t.Helper()
+		if _, err := f.store.AddOdometerReading(t.Context(), model.OdometerReading{ID: uuid.New(), VehicleID: v.ID, ReadOn: readOn, OdometerMiles: miles, CreatedBy: f.user.ID, CreatedAt: time.Now()}, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The first reading starts the 5000 mi interval at 10000 mi.
+	addReading(today.AddDate(0, 0, -60), 10000)
+	page := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
+	if !strings.Contains(page, "~5,000 mi left · add a mileage reading to estimate") {
+		t.Fatalf("reminders page missing estimate hint: %s", page)
+	}
+
+	// Service records count as mileage history too. Fitting 10000, 13000, and
+	// 14000 mi at 60, 45, and 0 days ago gives about 56 mi a day, so the last
+	// 1000 mi are about 18 days away: due soon by date.
+	recordMiles := int64(13000)
+	other := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[1].ID, CreatedBy: f.user.ID, OccurredOn: today.AddDate(0, 0, -45), OdometerMiles: &recordMiles, CreatedAt: time.Now()}
+	if _, err := f.store.CreateRecord(t.Context(), other, nil); err != nil {
+		t.Fatal(err)
+	}
+	addReading(today, 14000)
+	want := "~1,000 mi left, est. " + today.AddDate(0, 0, 18).Format("Jan 2")
+	dashboard := f.do(t, http.MethodGet, "/", nil, "").Body.String()
+	if !strings.Contains(dashboard, "DUE SOON") || !strings.Contains(dashboard, want) {
+		t.Fatalf("dashboard missing projection %q: %s", want, dashboard)
+	}
+	page = f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
+	if !strings.Contains(page, want) || !strings.Contains(page, "due-soon") {
+		t.Fatalf("reminders page missing projection %q: %s", want, page)
+	}
+}
+
 func TestOdometerUpdateRejectsLowerReadingUntilConfirmed(t *testing.T) {
 	f := setup(t)
 	v := createVehicle(t, f)

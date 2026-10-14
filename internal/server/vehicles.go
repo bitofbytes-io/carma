@@ -40,10 +40,12 @@ func (s *Server) attention(ctx context.Context) ([]reminder.Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	today := s.today()
+	evaluated, err := s.evaluateReminders(ctx, reminders)
+	if err != nil {
+		return nil, err
+	}
 	var results []reminder.Result
-	for _, schedule := range reminders {
-		result := reminder.Evaluate(schedule, today)
+	for _, result := range evaluated {
 		if result.Status == reminder.Due || result.Status == reminder.Soon {
 			results = append(results, result)
 		}
@@ -272,8 +274,9 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 		s.fail(response, err)
 		return
 	}
-	for _, schedule := range reminders {
-		data.Reminders = append(data.Reminders, reminder.Evaluate(schedule, s.today()))
+	if data.Reminders, err = s.evaluateReminders(request.Context(), reminders); err != nil {
+		s.fail(response, err)
+		return
 	}
 	if isHTMX(request) {
 		s.renderNamed(response, "vehicle", "records-section", data)

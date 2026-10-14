@@ -31,6 +31,7 @@
 .add-reminder-form input[type="number"] { height: 46px; }
 .reminder-status { align-items: center; }
 .reminder-enabled { align-items: center; justify-content: center; }
+.reminder-detail { grid-column: 1 / -1; margin: 0; font-size: .9rem; }
 .reminder-enabled input[type="checkbox"] {
   width: 1.35rem;
   height: 1.35rem;
