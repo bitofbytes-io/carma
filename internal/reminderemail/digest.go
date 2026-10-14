@@ -96,11 +96,11 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 			defer cancel()
 			runErr = errors.Join(runErr, unlock(unlockContext))
 		}()
-		sent, err := r.store.ReminderDigestSent(ctx, report.WeekStart)
+		claimed, err := r.store.ReminderDigestClaimed(ctx, report.WeekStart)
 		if err != nil {
 			return report, fmt.Errorf("check reminder digest: %w", err)
 		}
-		if sent {
+		if claimed {
 			report.AlreadySent = true
 			return report, nil
 		}
@@ -147,20 +147,38 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 	if options.DryRun {
 		return report, nil
 	}
+	// Claim the week before sending: once the relay may have the message, a
+	// crash or failed write must never lead to a second send.
+	digest := model.ReminderDigest{
+		ID: uuid.New(), WeekStart: report.WeekStart, ReservedAt: r.now().UTC(),
+		Recipients: append([]string(nil), recipients...),
+	}
+	reserved, err := r.store.ReserveReminderDigest(ctx, digest)
+	if err != nil {
+		return report, fmt.Errorf("reserve reminder digest: %w", err)
+	}
+	if !reserved {
+		report.AlreadySent = true
+		return report, nil
+	}
+	// Record the outcome even when ctx is canceled during shutdown.
+	recordContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	messageID, err := r.sender.Send(ctx, message)
 	if err != nil {
 		r.logger.Error("reminder digest failed", "week_start", report.WeekStart.Format(time.DateOnly), "recipient_count", len(recipients), "error", err)
-		return report, fmt.Errorf("send reminder digest: %w", err)
+		err = fmt.Errorf("send reminder digest: %w", err)
+		if releaseErr := r.store.ReleaseReminderDigest(recordContext, digest.ID); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("release reminder digest: %w", releaseErr))
+		}
+		return report, err
 	}
-	digest := model.ReminderDigest{
-		ID: uuid.New(), WeekStart: report.WeekStart, SentAt: r.now().UTC(),
-		Recipients: append([]string(nil), recipients...), MessageID: messageID,
-	}
-	if err = r.store.CreateReminderDigest(ctx, digest); err != nil {
+	report.Sent = true
+	if err = r.store.CompleteReminderDigest(recordContext, digest.ID, messageID, r.now().UTC()); err != nil {
+		// The claim still stands, so the week is not sent again.
 		r.logger.Error("reminder digest audit failed", "week_start", report.WeekStart.Format(time.DateOnly), "message_id", messageID, "error", err)
 		return report, fmt.Errorf("audit reminder digest: %w", err)
 	}
-	report.Sent = true
 	r.logger.Info("reminder digest sent", "week_start", report.WeekStart.Format(time.DateOnly), "overdue", report.Overdue, "due_soon", report.DueSoon, "recipient_count", len(recipients), "message_id", messageID)
 	return report, nil
 }

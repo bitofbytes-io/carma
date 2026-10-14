@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -32,23 +33,47 @@ func TestReminderDigestPostgresIntegration(t *testing.T) {
 	// Late Monday evening in New York is already Tuesday in UTC; the stored week
 	// must still be the local Monday.
 	monday := time.Date(2026, time.March, 16, 0, 0, 0, 0, newYork)
-	if sent, err := store.ReminderDigestSent(ctx, monday); err != nil || sent {
-		t.Fatalf("sent=%v err=%v", sent, err)
+	if claimed, err := store.ReminderDigestClaimed(ctx, monday); err != nil || claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
 	}
-	digest := model.ReminderDigest{ID: uuid.New(), WeekStart: monday, SentAt: time.Now(), Recipients: []string{"user@example.com"}, MessageID: "<digest-1@example.com>"}
-	if err := store.CreateReminderDigest(ctx, digest); err != nil {
-		t.Fatal(err)
+	digest := model.ReminderDigest{ID: uuid.New(), WeekStart: monday, ReservedAt: time.Now(), Recipients: []string{"user@example.com"}}
+	if reserved, err := store.ReserveReminderDigest(ctx, digest); err != nil || !reserved {
+		t.Fatalf("reserved=%v err=%v", reserved, err)
 	}
-	if sent, err := store.ReminderDigestSent(ctx, monday); err != nil || !sent {
-		t.Fatalf("sent=%v err=%v", sent, err)
+	if claimed, err := store.ReminderDigestClaimed(ctx, monday); err != nil || !claimed {
+		t.Fatalf("claimed=%v err=%v", claimed, err)
 	}
-	if sent, err := store.ReminderDigestSent(ctx, monday.AddDate(0, 0, 7)); err != nil || sent {
-		t.Fatalf("next week sent=%v err=%v", sent, err)
+	if claimed, err := store.ReminderDigestClaimed(ctx, monday.AddDate(0, 0, 7)); err != nil || claimed {
+		t.Fatalf("next week claimed=%v err=%v", claimed, err)
 	}
 	duplicate := digest
-	duplicate.ID, duplicate.MessageID = uuid.New(), "<digest-2@example.com>"
-	if err := store.CreateReminderDigest(ctx, duplicate); err == nil {
-		t.Fatal("a second digest for the same week was recorded")
+	duplicate.ID = uuid.New()
+	if reserved, err := store.ReserveReminderDigest(ctx, duplicate); err != nil || reserved {
+		t.Fatalf("second reservation for the same week: reserved=%v err=%v", reserved, err)
+	}
+
+	// Releasing an unsent claim lets the week be retried.
+	if err := store.ReleaseReminderDigest(ctx, digest.ID); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := store.ReminderDigestClaimed(ctx, monday); err != nil || claimed {
+		t.Fatalf("claimed after release=%v err=%v", claimed, err)
+	}
+	if reserved, err := store.ReserveReminderDigest(ctx, duplicate); err != nil || !reserved {
+		t.Fatalf("reserved after release=%v err=%v", reserved, err)
+	}
+	if err := store.CompleteReminderDigest(ctx, duplicate.ID, "<digest-1@example.com>", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// A completed digest is never released.
+	if err := store.ReleaseReminderDigest(ctx, duplicate.ID); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := store.ReminderDigestClaimed(ctx, monday); err != nil || !claimed {
+		t.Fatalf("claimed after completed release=%v err=%v", claimed, err)
+	}
+	if err := store.CompleteReminderDigest(ctx, uuid.New(), "<digest-2@example.com>", time.Now()); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("complete unknown digest err=%v", err)
 	}
 
 	unlock, acquired, err := store.TryReminderDigestLock(ctx)

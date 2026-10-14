@@ -10,18 +10,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/mailer"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/google/uuid"
 )
+
+type fakeDigest struct {
+	model.ReminderDigest
+	MessageID string
+}
 
 type fakeDigestStore struct {
 	reminders     []model.Reminder
 	points        []model.MileagePoint
 	emails        []string
-	digests       []model.ReminderDigest
+	digests       []fakeDigest
 	lockAvailable bool
 	lockCalls     int
 	unlockCalls   int
+	completeErr   error
+	// claimOnCheck makes the week look unclaimed to the first check and
+	// claimed on reservation, as if another writer raced it.
+	claimOnCheck bool
 }
 
 func (f *fakeDigestStore) ListReminders(context.Context, *uuid.UUID, bool) ([]model.Reminder, error) {
@@ -33,7 +43,7 @@ func (f *fakeDigestStore) ListMileagePoints(context.Context, []uuid.UUID, time.T
 func (f *fakeDigestStore) ListReminderRecipientEmails(context.Context) ([]string, error) {
 	return append([]string(nil), f.emails...), nil
 }
-func (f *fakeDigestStore) ReminderDigestSent(_ context.Context, weekStart time.Time) (bool, error) {
+func (f *fakeDigestStore) ReminderDigestClaimed(_ context.Context, weekStart time.Time) (bool, error) {
 	for _, digest := range f.digests {
 		if digest.WeekStart.Equal(weekStart) {
 			return true, nil
@@ -41,8 +51,33 @@ func (f *fakeDigestStore) ReminderDigestSent(_ context.Context, weekStart time.T
 	}
 	return false, nil
 }
-func (f *fakeDigestStore) CreateReminderDigest(_ context.Context, digest model.ReminderDigest) error {
-	f.digests = append(f.digests, digest)
+func (f *fakeDigestStore) ReserveReminderDigest(ctx context.Context, digest model.ReminderDigest) (bool, error) {
+	if f.claimOnCheck {
+		return false, nil
+	}
+	if claimed, _ := f.ReminderDigestClaimed(ctx, digest.WeekStart); claimed {
+		return false, nil
+	}
+	f.digests = append(f.digests, fakeDigest{ReminderDigest: digest})
+	return true, nil
+}
+func (f *fakeDigestStore) CompleteReminderDigest(ctx context.Context, id uuid.UUID, messageID string, _ time.Time) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if f.completeErr != nil {
+		return f.completeErr
+	}
+	for i := range f.digests {
+		if f.digests[i].ID == id {
+			f.digests[i].MessageID = messageID
+			return nil
+		}
+	}
+	return errors.New("no reservation")
+}
+func (f *fakeDigestStore) ReleaseReminderDigest(_ context.Context, id uuid.UUID) error {
+	f.digests = slices.DeleteFunc(f.digests, func(digest fakeDigest) bool { return digest.ID == id && digest.MessageID == "" })
 	return nil
 }
 func (f *fakeDigestStore) TryReminderDigestLock(context.Context) (func(context.Context) error, bool, error) {
@@ -183,6 +218,57 @@ func TestDigestSendFailureIsRetried(t *testing.T) {
 	sender.err = nil
 	if report, err := runner.Run(context.Background(), DigestOptions{}); err != nil || !report.Sent || len(store.digests) != 1 {
 		t.Fatalf("retry: report=%+v err=%v", report, err)
+	}
+}
+
+func TestDigestAuditFailureAfterDeliveryDoesNotResend(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, _, _ := digestFixture(now)
+	store.completeErr = errors.New("database unavailable")
+	sender := &fakeSender{}
+	runner := newTestDigestRunner(store, sender, now)
+	if report, err := runner.Run(context.Background(), DigestOptions{}); err == nil || !report.Sent || len(sender.messages) != 1 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	store.completeErr = nil
+	runner.now = func() time.Time { return now.Add(time.Hour) }
+	if report, err := runner.Run(context.Background(), DigestOptions{}); err != nil || !report.AlreadySent || len(sender.messages) != 1 {
+		t.Fatalf("retry after audit failure: report=%+v err=%v messages=%d", report, err, len(sender.messages))
+	}
+}
+
+func TestDigestRecordsDeliveryWhenCanceledDuringSend(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, _, _ := digestFixture(now)
+	ctx, cancel := context.WithCancel(context.Background())
+	sender := &cancelingSender{cancel: cancel}
+	runner := NewDigestRunner(store, sender, "https://carma.bitofbytes.io", nil, time.UTC, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner.now = func() time.Time { return now }
+	if report, err := runner.Run(ctx, DigestOptions{}); err != nil || !report.Sent {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if len(store.digests) != 1 || store.digests[0].MessageID != "<canceled@bitofbytes.io>" {
+		t.Fatalf("digests=%+v", store.digests)
+	}
+}
+
+// cancelingSender accepts the message and then cancels the run's context, as a
+// shutdown arriving right after delivery would.
+type cancelingSender struct{ cancel context.CancelFunc }
+
+func (s *cancelingSender) Send(context.Context, mailer.Message) (string, error) {
+	s.cancel()
+	return "<canceled@bitofbytes.io>", nil
+}
+
+func TestDigestConcurrentClaimSkipsSend(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, _, _ := digestFixture(now)
+	store.claimOnCheck = true
+	sender := &fakeSender{}
+	report, err := newTestDigestRunner(store, sender, now).Run(context.Background(), DigestOptions{})
+	if err != nil || !report.AlreadySent || report.Sent || len(sender.messages) != 0 {
+		t.Fatalf("report=%+v err=%v", report, err)
 	}
 }
 
