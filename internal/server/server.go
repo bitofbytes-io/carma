@@ -75,6 +75,10 @@ type pageData struct {
 	// Spend is the vehicle page's cost summary for SpendYear and all time.
 	Spend     model.SpendSummary
 	SpendYear int
+	// CalendarFeed is the household's calendar link, if any; CalendarURL is
+	// set only right after it is created, the one time its token is known.
+	CalendarFeed *model.CalendarFeed
+	CalendarURL  string
 }
 
 func (s *Server) Router() http.Handler {
@@ -90,6 +94,9 @@ func (s *Server) Router() http.Handler {
 	router.Post("/login", s.devLogin)
 	router.Get("/api/auth/google", s.oauthStart)
 	router.Get("/api/auth/google/callback", s.oauthCallback)
+	// Calendar apps can't sign in, so the feed is authorized by its token.
+	router.Get("/calendar/{token}/reminders.ics", s.calendarFeed)
+	router.Head("/calendar/{token}/reminders.ics", s.calendarFeed)
 	router.Group(func(router chi.Router) {
 		router.Use(middleware.RequireAuth(s.auth, s.cfg.SecureCookies()))
 		router.Post("/logout", s.logout)
@@ -97,6 +104,9 @@ func (s *Server) Router() http.Handler {
 		router.Get("/records", s.allRecords)
 		router.Get("/records/export.csv", s.globalCSV)
 		router.Get("/vehicles/archived", s.archivedVehicles)
+		router.Get("/calendar", s.calendarPage)
+		router.Post("/calendar", s.createCalendarFeed)
+		router.Post("/calendar/delete", s.deleteCalendarFeed)
 		router.Get("/vehicles/new", s.newVehicle)
 		router.Post("/vehicles/vin-decode", s.decodeVIN)
 		router.Post("/vehicles", s.createVehicle)

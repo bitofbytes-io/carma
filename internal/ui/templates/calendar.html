@@ -1,0 +1,23 @@
+{{define "content"}}
+<section class="card form-card calendar-card">
+  <div class="section-head"><h1>Calendar feed</h1><a class="secondary" href="/">Back to garage</a></div>
+  <p>Subscribe to this feed in a calendar app to see reminder due dates there. Each enabled reminder with a time interval appears as an all-day event on its due date. Reminders set only by mileage are left out, because their dates are estimates.</p>
+  {{if .CalendarURL}}
+  <div class="alert calendar-link">
+    <p><strong>Copy this link now.</strong> Carma keeps only a fingerprint of it, so it can't show it again.</p>
+    <label><span class="field-label">Calendar link</span><input type="text" readonly value="{{.CalendarURL}}" aria-label="Calendar link" onclick="this.select()"></label>
+    <p>In Google Calendar, choose <em>Other calendars → From URL</em> and paste the link. On an iPhone or Mac, add it as a subscribed calendar.</p>
+  </div>
+  {{end}}
+  {{if .CalendarFeed}}
+  <p class="muted">The current link was created {{date .CalendarFeed.CreatedAt}}. Anyone with it can see your vehicles' reminder due dates. Calendar apps refresh subscriptions on their own schedule, so changes can take a few hours to show up.</p>
+  <div class="actions">
+    <form method="post" action="/calendar/delete" onsubmit="return confirm('Turn off the calendar feed? Subscribed calendars will stop updating.')"><button class="danger" type="submit">Turn off feed</button></form>
+    <form method="post" action="/calendar" onsubmit="return confirm('Reset the link? Calendars subscribed with the old link will stop updating.')"><button class="secondary" type="submit">Reset link</button></form>
+  </div>
+  {{else}}
+  <p class="muted">The feed is off. Creating a link turns it on. Anyone with the link can see your vehicles' reminder due dates, so share it only with your household.</p>
+  <form method="post" action="/calendar" class="actions"><button class="primary" type="submit">Create calendar link</button></form>
+  {{end}}
+</section>
+{{end}}

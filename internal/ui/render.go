@@ -61,7 +61,7 @@ func Dollars(cents int64) string {
 
 func New() (*Renderer, error) {
 	r := &Renderer{pages: map[string]*template.Template{}}
-	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived", "odometer", "history"}
+	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived", "odometer", "history", "calendar"}
 	for _, n := range names {
 		t, e := template.New("base.html").Funcs(template.FuncMap{"date": func(t time.Time) string { return t.Format("Jan 2, 2006") }, "iso": func(t time.Time) string { return t.Format("2006-01-02") }, "money": func(v *int64) string {
 			if v == nil {

@@ -67,6 +67,15 @@ and on the vehicle page, where they can be dismissed once fixed or not applicabl
 Both APIs are keyless; the containers only need outbound HTTPS to
 `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 
+Due dates can also appear in a calendar app. Under **Calendar feed** on the
+dashboard, create a link and subscribe to it (Google Calendar: *Other calendars →
+From URL*); each enabled reminder with a time interval becomes an all-day event on
+its due date, and mileage-only reminders are left out. The link is a secret
+`/calendar/<token>/reminders.ics` URL that works without signing in, so calendar
+services must be able to reach Carma. Only a hash of its token is stored, so the
+link is shown once; resetting it or turning the feed off stops the old link. Links
+use `PUBLIC_URL` when it is set, otherwise the address the page was opened on.
+
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
 declared by this project. The HTTP handler and repository tests need PostgreSQL:

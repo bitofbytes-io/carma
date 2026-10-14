@@ -62,7 +62,7 @@ func SameOrigin(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		want := origin(r)
+		want := Origin(r)
 		got := r.Header.Get("Origin")
 		if got == "" {
 			if ref := r.Header.Get("Referer"); ref != "" {
@@ -79,7 +79,9 @@ func SameOrigin(next http.Handler) http.Handler {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 	})
 }
-func origin(r *http.Request) string {
+
+// Origin returns the request's scheme and host, honoring X-Forwarded-Proto.
+func Origin(r *http.Request) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

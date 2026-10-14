@@ -186,3 +186,39 @@ func TestVehicleRecallsMigrationIsAdditive(t *testing.T) {
 		}
 	}
 }
+
+func TestCalendarFeedMigrationIsAdditive(t *testing.T) {
+	up, err := fs.ReadFile(FS, "007_calendar_feed.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"create table calendar_feeds",
+		"id smallint primary key default 1 check (id = 1)",
+		"token_hash bytea not null check (octet_length(token_hash) = 32)",
+		"created_by uuid references users(id) on delete set null",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("calendar feed migration missing %q", declaration)
+		}
+	}
+	for _, statement := range []string{"alter table", "drop ", "delete from", "update "} {
+		if strings.Contains(sql, statement) {
+			t.Fatalf("calendar feed migration must only add a table, found %q", statement)
+		}
+	}
+	down, err := fs.ReadFile(FS, "007_calendar_feed.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '007_calendar_feed'",
+		"drop table if exists calendar_feeds",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("calendar feed down migration missing %q", declaration)
+		}
+	}
+}

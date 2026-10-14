@@ -67,6 +67,14 @@ type Store interface {
 	// SetRecallDismissed hides a vehicle's recall campaign, or shows it again
 	// when dismissedAt is nil.
 	SetRecallDismissed(ctx context.Context, vehicleID uuid.UUID, campaignNumber string, dismissedAt *time.Time) error
+
+	// GetCalendarFeed returns the household's calendar feed link, or nil when
+	// none has been created.
+	GetCalendarFeed(context.Context) (*model.CalendarFeed, error)
+	// ReplaceCalendarFeed saves feed as the household's only calendar feed
+	// link, so the token of any earlier link stops working.
+	ReplaceCalendarFeed(ctx context.Context, feed model.CalendarFeed) error
+	DeleteCalendarFeed(context.Context) error
 	Close()
 }
 
