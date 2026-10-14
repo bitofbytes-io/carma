@@ -149,3 +149,40 @@ func TestOdometerReadingsMigrationHistoryShape(t *testing.T) {
 		}
 	}
 }
+
+func TestVehicleRecallsMigrationIsAdditive(t *testing.T) {
+	up, err := fs.ReadFile(FS, "006_vehicle_recalls.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"create table vehicle_recalls",
+		"create table vehicle_recall_checks",
+		"primary key (vehicle_id, campaign_number)",
+		"vehicle_id uuid primary key references vehicles(id) on delete cascade",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("vehicle recalls migration missing %q", declaration)
+		}
+	}
+	for _, statement := range []string{"alter table", "drop ", "delete from", "update "} {
+		if strings.Contains(sql, statement) {
+			t.Fatalf("vehicle recalls migration must only add tables, found %q", statement)
+		}
+	}
+	down, err := fs.ReadFile(FS, "006_vehicle_recalls.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '006_vehicle_recalls'",
+		"drop table if exists vehicle_recall_checks",
+		"drop table if exists vehicle_recalls",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("vehicle recalls down migration missing %q", declaration)
+		}
+	}
+}

@@ -16,6 +16,8 @@ import (
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
 	"github.com/bitofbytes-io/carma/internal/mailer"
+	"github.com/bitofbytes-io/carma/internal/nhtsa"
+	"github.com/bitofbytes-io/carma/internal/recallcheck"
 	"github.com/bitofbytes-io/carma/internal/reminderemail"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/bitofbytes-io/carma/internal/schedule"
@@ -73,6 +75,12 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	var recallRunner *recallcheck.Runner
+	if cfg.NHTSAEnabled {
+		client := nhtsa.NewClient()
+		app.EnableVINDecode(client)
+		recallRunner = recallcheck.NewRunner(store, client, slog.Default())
+	}
 	var reminderRunner *reminderemail.Runner
 	var digestRunner *reminderemail.DigestRunner
 	if cfg.ReminderEmail.Enabled {
@@ -122,6 +130,13 @@ func run() error {
 		every(reminderemail.DefaultDigestInterval, func(ctx context.Context) {
 			if _, err := digestRunner.Run(ctx, reminderemail.DigestOptions{}); err != nil && ctx.Err() == nil {
 				slog.Error("reminder digest run failed", "error", err)
+			}
+		})
+	}
+	if recallRunner != nil {
+		every(recallcheck.DefaultInterval, func(ctx context.Context) {
+			if report, err := recallRunner.Run(ctx); err != nil && ctx.Err() == nil {
+				slog.Error("recall check failed", "checked", report.Checked, "failed", report.Failed, "error", err)
 			}
 		})
 	}

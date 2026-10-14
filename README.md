@@ -58,6 +58,15 @@ due send nothing. Preview it without sending using
 now unless it has already gone out, nothing is due, or it is still before Monday
 08:00 household time (each of these is a no-op, not a failure).
 
+NHTSA lookups are off by default. Set `NHTSA_ENABLED=true` to add a "Decode VIN"
+button to the vehicle form, which fills in year, make, and model from NHTSA's free
+vPIC API, and a recall check that, under its own advisory lock, fetches NHTSA safety
+recalls for each active vehicle's year, make, and model about once a week (and
+again right after any of them is edited). Open recalls appear in "Needs attention"
+and on the vehicle page, where they can be dismissed once fixed or not applicable.
+Both APIs are keyless; the containers only need outbound HTTPS to
+`vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
+
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
 declared by this project. The HTTP handler and repository tests need PostgreSQL:

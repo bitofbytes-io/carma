@@ -19,6 +19,7 @@ func (s *Server) base(request *http.Request, title string) (pageData, error) {
 		Authenticated: true,
 		User:          middleware.User(request),
 		NavVehicles:   vehicles,
+		VINDecode:     s.vinDecoder != nil,
 	}, err
 }
 

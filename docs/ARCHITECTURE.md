@@ -158,6 +158,22 @@ due soon, but only an actual reading makes it overdue, so email is unaffected.
   across replicas; a week with nothing to report is not recorded, so a later check
   that week still sends once something comes due.
 
+## NHTSA recalls and VIN decode
+
+Opt-in with `NHTSA_ENABLED=true`; both NHTSA APIs are public and keyless.
+- `internal/nhtsa`: VIN decode via vPIC (`DecodeVinValues`) and recall campaigns via
+  `api.nhtsa.gov/recalls/recallsByVehicle` (make, model, model year).
+- `POST /vehicles/vin-decode` (htmx) re-renders the form's identity fields filled in
+  from vPIC, keeping what was typed when the VIN can't be decoded.
+- `internal/recallcheck.Runner` runs at startup and every 6 hours under its own
+  advisory lock. It checks vehicles never checked, last checked over 7 days ago, or
+  whose year, make, or model changed since (`vehicle_recall_checks`), and replaces
+  their `vehicle_recalls` rows, keeping dismissals of campaigns still listed. A
+  failed fetch is retried on the next run.
+- Campaigns cover a model year rather than a VIN, so the vehicle page lets the
+  household dismiss (and restore) each one. Undismissed campaigns show in the
+  dashboard's "Needs attention" as one row per vehicle.
+
 ## Configuration
 
 Same `getEnvOrFile` convention as dined/noted - every secret readable from env or
@@ -178,6 +194,7 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
 | `SMTP_PASSWORD` | secret `carma_smtp_password` via `SMTP_PASSWORD_FILE` | email reminders |
 | `REMINDER_DIGEST_ENABLED` | default `false` | weekly due-soon digest; requires `REMINDER_EMAIL_ENABLED=true` and reuses its SMTP settings |
+| `NHTSA_ENABLED` | default `false` | VIN decode button and weekly NHTSA recall check; needs outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`, no key |
 
 ## CI/CD pipeline
 

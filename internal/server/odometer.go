@@ -75,7 +75,7 @@ func (s *Server) addOdometerReading(response http.ResponseWriter, request *http.
 		return
 	}
 	data.OdometerForm.Return = "dashboard"
-	if data.Attention, err = s.attention(request.Context()); err != nil {
+	if err = s.loadAttention(request.Context(), &data); err != nil {
 		s.fail(response, err)
 		return
 	}

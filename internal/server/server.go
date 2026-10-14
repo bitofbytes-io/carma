@@ -25,6 +25,8 @@ type Server struct {
 	google auth.Google
 	ui     *ui.Renderer
 	now    func() time.Time
+	// vinDecoder is nil unless NHTSA lookups are enabled.
+	vinDecoder VINDecoder
 }
 
 func New(cfg *config.Config, store repository.Store, assetStore assets.Store, authService *auth.Service, google auth.Google) (*Server, error) {
@@ -57,6 +59,15 @@ type pageData struct {
 	Params                                    url.Values
 	OdometerForm                              ui.OdometerForm
 	ReminderPresets                           []ui.ReminderPreset
+	// Recalls are the vehicle page's NHTSA campaigns, open and dismissed;
+	// RecallAlerts are the dashboard's vehicles with open ones.
+	Recalls, DismissedRecalls []model.Recall
+	RecallAlerts              []ui.RecallAlert
+	// VINDecode shows the vehicle form's "Decode VIN" button; VINMessage is
+	// the outcome of a decode.
+	VINDecode  bool
+	VINMessage string
+	VINError   bool
 }
 
 func (s *Server) Router() http.Handler {
@@ -80,6 +91,7 @@ func (s *Server) Router() http.Handler {
 		router.Get("/records/export.csv", s.globalCSV)
 		router.Get("/vehicles/archived", s.archivedVehicles)
 		router.Get("/vehicles/new", s.newVehicle)
+		router.Post("/vehicles/vin-decode", s.decodeVIN)
 		router.Post("/vehicles", s.createVehicle)
 		router.Get("/vehicles/{vehicleID}", s.vehicle)
 		router.Get("/vehicles/{vehicleID}/edit", s.editVehicle)
@@ -93,6 +105,8 @@ func (s *Server) Router() http.Handler {
 		router.Get("/vehicles/{vehicleID}/reminders", s.remindersPage)
 		router.Post("/vehicles/{vehicleID}/reminders", s.upsertReminder)
 		router.Post("/vehicles/{vehicleID}/reminders/{reminderID}/delete", s.deleteReminder)
+		router.Post("/vehicles/{vehicleID}/recalls/{campaign}/dismiss", s.dismissRecall)
+		router.Post("/vehicles/{vehicleID}/recalls/{campaign}/restore", s.restoreRecall)
 		router.Get("/records/{recordID}", s.record)
 		router.Get("/records/{recordID}/edit", s.editRecord)
 		router.Post("/records/{recordID}", s.updateRecord)
