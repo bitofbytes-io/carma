@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bitofbytes-io/carma/internal/model"
 )
 
 //go:embed templates/*.html
@@ -15,9 +17,18 @@ var files embed.FS
 
 type Renderer struct{ pages map[string]*template.Template }
 
+// OdometerForm is the quick mileage update control for one vehicle. Return is
+// the page showing it: "dashboard" or "vehicle".
+type OdometerForm struct {
+	Vehicle      model.Vehicle
+	Return       string
+	Value, Error string
+	Confirm      bool
+}
+
 func New() (*Renderer, error) {
 	r := &Renderer{pages: map[string]*template.Template{}}
-	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived"}
+	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived", "odometer"}
 	for _, n := range names {
 		t, e := template.New("base.html").Funcs(template.FuncMap{"date": func(t time.Time) string { return t.Format("Jan 2, 2006") }, "iso": func(t time.Time) string { return t.Format("2006-01-02") }, "money": func(v *int64) string {
 			if v == nil {
@@ -39,7 +50,9 @@ func New() (*Renderer, error) {
 				return template.HTMLAttr("selected")
 			}
 			return template.HTMLAttr("")
-		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower}).ParseFS(files, "templates/base.html", "templates/partials.html", "templates/"+n+".html")
+		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower, "odometerForm": func(v model.Vehicle, ret string) OdometerForm {
+			return OdometerForm{Vehicle: v, Return: ret}
+		}}).ParseFS(files, "templates/base.html", "templates/partials.html", "templates/"+n+".html")
 		if e != nil {
 			return nil, e
 		}

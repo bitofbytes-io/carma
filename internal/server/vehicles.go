@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -25,19 +26,29 @@ func (s *Server) dashboard(response http.ResponseWriter, request *http.Request) 
 		s.fail(response, err)
 		return
 	}
-	reminders, err := s.store.ListReminders(request.Context(), nil, false)
+	data.Attention, err = s.attention(request.Context())
 	if err != nil {
 		s.fail(response, err)
 		return
 	}
+	s.render(response, http.StatusOK, "dashboard", data)
+}
+
+// attention returns the dashboard's overdue and due-soon reminders.
+func (s *Server) attention(ctx context.Context) ([]reminder.Result, error) {
+	reminders, err := s.store.ListReminders(ctx, nil, false)
+	if err != nil {
+		return nil, err
+	}
 	today := s.today()
+	var results []reminder.Result
 	for _, schedule := range reminders {
 		result := reminder.Evaluate(schedule, today)
 		if result.Status == reminder.Due || result.Status == reminder.Soon {
-			data.Attention = append(data.Attention, result)
+			results = append(results, result)
 		}
 	}
-	s.render(response, http.StatusOK, "dashboard", data)
+	return results, nil
 }
 
 func (s *Server) archivedVehicles(response http.ResponseWriter, request *http.Request) {

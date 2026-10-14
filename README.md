@@ -77,7 +77,8 @@ In Grafana, run it newest-first with a line limit of one to confirm the latest r
 ## What it will do
 
 - **Vehicles** - manage the whole household garage; every allowlisted user sees
-  and edits the same vehicles.
+  and edits the same vehicles. A one-field mileage update on each dashboard card
+  and vehicle page keeps mileage reminders current and records every reading.
 - **Records** - log service/repairs with date, type, odometer, cost, vendor, and
   notes; search, sort, and filter the history.
 - **Receipts** - attach PDF/photo receipts to any record; stored on the NAS, no

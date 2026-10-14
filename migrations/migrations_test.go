@@ -114,3 +114,38 @@ func TestReminderNotificationsMigrationAuditShape(t *testing.T) {
 		}
 	}
 }
+
+func TestOdometerReadingsMigrationHistoryShape(t *testing.T) {
+	up, err := fs.ReadFile(FS, "004_odometer_readings.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"create table odometer_readings",
+		"references vehicles(id) on delete cascade",
+		"read_on date not null",
+		"odometer_miles bigint not null check (odometer_miles >= 0)",
+		"created_by uuid not null references users(id)",
+		"odometer_readings_vehicle_read_on_idx",
+		"(vehicle_id, read_on desc)",
+		"create index odometer_readings_created_by_idx on odometer_readings(created_by)",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("odometer readings migration missing %q", declaration)
+		}
+	}
+	down, err := fs.ReadFile(FS, "004_odometer_readings.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '004_odometer_readings'",
+		"drop table if exists odometer_readings",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("odometer readings down migration missing %q", declaration)
+		}
+	}
+}

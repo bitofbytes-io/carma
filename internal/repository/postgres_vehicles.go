@@ -12,6 +12,11 @@ import (
 
 const vehicleCols = `v.id,v.nickname,v.year,v.make,v.model,v.vin,v.license_plate,v.photo_key,v.notes,v.archived_at,v.created_at,v.updated_at,v.current_odometer_miles`
 
+// selectVehicleSQL loads one vehicle by ID with its effective latest mileage.
+const selectVehicleSQL = `SELECT ` + vehicleCols + `,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id))
+		FROM vehicles v
+		WHERE v.id=$1`
+
 func scanVehicle(row pgx.Row) (model.Vehicle, error) {
 	var vehicle model.Vehicle
 	err := row.Scan(
@@ -91,9 +96,7 @@ func (p *Postgres) ListVehicles(ctx context.Context, archived bool) ([]model.Veh
 }
 
 func (p *Postgres) GetVehicle(ctx context.Context, id uuid.UUID) (model.Vehicle, error) {
-	return scanVehicle(p.pool.QueryRow(ctx, `SELECT `+vehicleCols+`,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id))
-		FROM vehicles v
-		WHERE v.id=$1`, id))
+	return scanVehicle(p.pool.QueryRow(ctx, selectVehicleSQL, id))
 }
 
 func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, error) {
@@ -149,9 +152,7 @@ func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 			return vehicle, "", err
 		}
 	}
-	updated, err := scanVehicle(tx.QueryRow(ctx, `SELECT `+vehicleCols+`,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id))
-		FROM vehicles v
-		WHERE v.id=$1`, vehicle.ID))
+	updated, err := scanVehicle(tx.QueryRow(ctx, selectVehicleSQL, vehicle.ID))
 	if err != nil {
 		return vehicle, "", err
 	}
