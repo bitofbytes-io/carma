@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
@@ -338,13 +337,6 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 		s.fail(response, err)
 		return
 	}
-	today := s.today()
-	data.SpendYear = today.Year()
-	data.Spend, err = s.store.VehicleSpend(request.Context(), vehicle.ID, time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC))
-	if err != nil {
-		s.fail(response, err)
-		return
-	}
 	recalls, err := s.store.ListRecalls(request.Context(), &vehicle.ID, true)
 	if err != nil {
 		s.fail(response, err)
@@ -359,6 +351,14 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 	}
 	if isHTMX(request) {
 		s.renderNamed(response, "vehicle", "records-section", data)
+		return
+	}
+	// The spend card is outside the records section, so filter requests skip it.
+	today := s.today()
+	data.SpendYear = today.Year()
+	data.Spend, err = s.store.VehicleSpend(request.Context(), vehicle.ID, today)
+	if err != nil {
+		s.fail(response, err)
 		return
 	}
 	s.render(response, 200, "vehicle", data)

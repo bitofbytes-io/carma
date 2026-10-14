@@ -1,7 +1,7 @@
 package model
 
-// SpendSummary is what a vehicle's service records cost, this calendar year
-// and over its whole history. Records without a cost are left out.
+// SpendSummary is what a vehicle's service records cost this year through
+// today, and over its whole history. Records without a cost are left out.
 type SpendSummary struct {
 	YearToDateCents, LifetimeCents int64
 	// PricedRecords counts the records that have a cost.

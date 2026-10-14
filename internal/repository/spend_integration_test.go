@@ -38,6 +38,7 @@ func TestVehicleSpendPostgresIntegration(t *testing.T) {
 			($1,$3,'2025-06-01',$5,7500),
 			($1,$3,'2026-01-01',$5,8000),
 			($1,$3,'2026-07-30',$5,8250),
+			($1,$3,'2026-08-01',$5,1000),
 			($1,$4,'2026-03-01',$5,NULL),
 			($1,$2,'2027-01-01',$5,100),
 			($6,$2,'2026-02-02',$5,99999)`, []any{vehicleID, tiresID, oilID, washID, userID, otherVehicleID}},
@@ -47,11 +48,13 @@ func TestVehicleSpendPostgresIntegration(t *testing.T) {
 		}
 	}
 
-	summary, err := store.VehicleSpend(ctx, vehicleID, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
+	// Today is Jul 31, 2026 in the household's time zone: the Aug 1 record is
+	// dated in the future and counts toward all time only.
+	summary, err := store.VehicleSpend(ctx, vehicleID, time.Date(2026, time.July, 31, 0, 0, 0, 0, time.FixedZone("EDT", -4*3600)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.YearToDateCents != 16250 || summary.LifetimeCents != 83850 || summary.PricedRecords != 5 {
+	if summary.YearToDateCents != 16250 || summary.LifetimeCents != 84850 || summary.PricedRecords != 6 {
 		t.Fatalf("totals=%+v", summary)
 	}
 	if len(summary.Types) != 2 {
@@ -61,11 +64,11 @@ func TestVehicleSpendPostgresIntegration(t *testing.T) {
 	if tires.Name != "Spend tires" || tires.Records != 2 || tires.YearToDateCents != 0 || tires.LifetimeCents != 60100 {
 		t.Fatalf("tires=%+v", tires)
 	}
-	if oil.Name != "Spend oil" || oil.Records != 3 || oil.YearToDateCents != 16250 || oil.LifetimeCents != 23750 {
+	if oil.Name != "Spend oil" || oil.Records != 4 || oil.YearToDateCents != 16250 || oil.LifetimeCents != 24750 {
 		t.Fatalf("oil=%+v", oil)
 	}
 
-	empty, err := store.VehicleSpend(ctx, emptyVehicleID, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
+	empty, err := store.VehicleSpend(ctx, emptyVehicleID, time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC))
 	if err != nil || empty.PricedRecords != 0 || empty.LifetimeCents != 0 || empty.Types != nil {
 		t.Fatalf("empty=%+v err=%v", empty, err)
 	}
