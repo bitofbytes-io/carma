@@ -1,0 +1,17 @@
+{{define "content"}}
+<div class="history-toolbar no-print"><a href="/vehicles/{{.Vehicle.ID}}">‹ Back to {{.Vehicle.Nickname}}</a><button class="primary" type="button" onclick="window.print()">Print or save as PDF</button></div>
+<article class="card history">
+  <header class="history-head"><div><p class="muted">Service history</p><h1>{{if .Vehicle.Year}}{{.Vehicle.Year}} {{end}}{{.Vehicle.Make}} {{.Vehicle.Model}}{{if not (or .Vehicle.Make .Vehicle.Model)}}{{.Vehicle.Nickname}}{{end}}</h1></div><p class="muted">Prepared {{date .Generated}} with Carma</p></header>
+  <dl class="history-facts">
+    {{if .Vehicle.VIN}}<div><dt>VIN</dt><dd>{{.Vehicle.VIN}}</dd></div>{{end}}
+    {{if .Vehicle.LatestOdometer}}<div><dt>Odometer</dt><dd>{{num .Vehicle.LatestOdometer}} mi</dd></div>{{end}}
+    <div><dt>Service records</dt><dd>{{.History.Records}}{{with .History.First}} · {{date .}}{{end}}{{with .History.Last}} – {{date .}}{{end}}</dd></div>
+    <div><dt>Total spent</dt><dd>{{money .History.TotalCents}}</dd></div>
+    <div><dt>Receipts on file</dt><dd>{{.History.Receipts}}</dd></div>
+  </dl>
+  {{if .Records}}<div class="history-table-wrap"><table class="history-table">
+    <thead><tr><th scope="col">Date</th><th scope="col">Service</th><th scope="col" class="number">Mileage</th><th scope="col" class="number">Cost</th><th scope="col">Shop</th><th scope="col">Notes</th><th scope="col" class="number">Receipts</th></tr></thead>
+    <tbody>{{range .Records}}<tr><td>{{date .OccurredOn}}</td><td>{{.ServiceTypeName}}</td><td class="number">{{num .OdometerMiles}}</td><td class="number">{{money .CostCents}}</td><td>{{.Vendor}}</td><td class="history-notes">{{.Notes}}</td><td class="number">{{if .AttachmentCount}}{{.AttachmentCount}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
+  </table></div>{{else}}<p>No service records yet.</p>{{end}}
+</article>
+{{end}}
