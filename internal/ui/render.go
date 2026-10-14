@@ -48,6 +48,17 @@ func ReminderPresets(selected []string) []ReminderPreset {
 	return options
 }
 
+// Dollars formats cents exactly as dollars, such as "$1234.50" or "-$0.05".
+func Dollars(cents int64) string {
+	sign := ""
+	magnitude := uint64(cents)
+	if cents < 0 {
+		sign = "-"
+		magnitude = -magnitude
+	}
+	return fmt.Sprintf("%s$%d.%02d", sign, magnitude/100, magnitude%100)
+}
+
 func New() (*Renderer, error) {
 	r := &Renderer{pages: map[string]*template.Template{}}
 	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived", "odometer", "history"}
@@ -56,8 +67,8 @@ func New() (*Renderer, error) {
 			if v == nil {
 				return "—"
 			}
-			return fmt.Sprintf("$%.2f", float64(*v)/100)
-		}, "num": func(v *int64) string {
+			return Dollars(*v)
+		}, "cents": Dollars, "num": func(v *int64) string {
 			if v == nil {
 				return "—"
 			}

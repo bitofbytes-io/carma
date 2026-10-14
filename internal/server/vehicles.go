@@ -353,6 +353,14 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 		s.renderNamed(response, "vehicle", "records-section", data)
 		return
 	}
+	// The spend card is outside the records section, so filter requests skip it.
+	today := s.today()
+	data.SpendYear = today.Year()
+	data.Spend, err = s.store.VehicleSpend(request.Context(), vehicle.ID, today)
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
 	s.render(response, 200, "vehicle", data)
 }
 

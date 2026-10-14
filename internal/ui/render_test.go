@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"math"
 	"net/url"
 	"strings"
 	"testing"
@@ -301,6 +302,8 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 		Reminders     []any
 
 		Recalls, DismissedRecalls []model.Recall
+		Spend                     model.SpendSummary
+		SpendYear                 int
 	}
 	v := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 	var b bytes.Buffer
@@ -356,6 +359,8 @@ func TestVehicleTemplateRendersReminderIntervals(t *testing.T) {
 				Reminders     []reminder.Result
 
 				Recalls, DismissedRecalls []model.Recall
+				Spend                     model.SpendSummary
+				SpendYear                 int
 			}
 			vehicle := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 			row := reminder.Result{
@@ -464,6 +469,8 @@ func TestRecallTemplates(t *testing.T) {
 	section := struct {
 		Vehicle                   model.Vehicle
 		Recalls, DismissedRecalls []model.Recall
+		Spend                     model.SpendSummary
+		SpendYear                 int
 	}{
 		Vehicle:          model.Vehicle{ID: vehicleID, Year: &year, Make: "Subaru", Model: "Outback"},
 		Recalls:          []model.Recall{{VehicleID: vehicleID, CampaignNumber: "19V493000", Component: "STRUCTURE", Summary: "Spot welds <b>", Remedy: "Repair.", ReportReceivedOn: &received, ParkIt: true}},
@@ -513,6 +520,22 @@ func TestVehicleIdentityOffersVINDecodeOnlyWhenEnabled(t *testing.T) {
 	for _, want := range []string{`id="vehicle-identity"`, `hx-post="/vehicles/vin-decode"`, `hx-target="#vehicle-identity"`, `type="button"`, `class="vin-message full vin-error"`, "could not decode"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("decode enabled missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestDollarsFormatsCentsExactly(t *testing.T) {
+	for cents, want := range map[int64]string{
+		0:                "$0.00",
+		5:                "$0.05",
+		123450:           "$1234.50",
+		-5:               "-$0.05",
+		9007199254740993: "$90071992547409.93",
+		math.MaxInt64:    "$92233720368547758.07",
+		math.MinInt64:    "-$92233720368547758.08",
+	} {
+		if got := Dollars(cents); got != want {
+			t.Errorf("Dollars(%d)=%q want %q", cents, got, want)
 		}
 	}
 }

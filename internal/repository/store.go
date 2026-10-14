@@ -53,6 +53,10 @@ type Store interface {
 	AddAttachments(context.Context, uuid.UUID, []model.Attachment) error
 	DeleteAttachment(context.Context, uuid.UUID) (string, error)
 
+	// VehicleSpend totals a vehicle's record costs from January 1 through
+	// today (a calendar date) and for all time, overall and by service type.
+	VehicleSpend(ctx context.Context, vehicleID uuid.UUID, today time.Time) (model.SpendSummary, error)
+
 	ListReminders(context.Context, *uuid.UUID, bool) ([]model.Reminder, error)
 	UpsertReminder(context.Context, model.Reminder) (model.Reminder, error)
 	DeleteReminder(context.Context, uuid.UUID) error
