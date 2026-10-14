@@ -1,6 +1,7 @@
 package export
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -31,5 +32,13 @@ func TestSummarizeTotalsCostsReceiptsAndDates(t *testing.T) {
 	}
 	if !summary.First.Equal(day("2023-01-05")) || !summary.Last.Equal(day("2026-02-20")) {
 		t.Fatalf("dates first=%v last=%v", summary.First, summary.Last)
+	}
+}
+
+func TestSummarizeCapsOverflowingTotal(t *testing.T) {
+	huge := int64(math.MaxInt64)
+	summary := Summarize([]model.Record{{CostCents: &huge}, {CostCents: &huge}})
+	if summary.TotalCents == nil || *summary.TotalCents != math.MaxInt64 {
+		t.Fatalf("total=%v, want capped at MaxInt64", summary.TotalCents)
 	}
 }

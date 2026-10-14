@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -66,6 +67,15 @@ func TestVehicleSpendPostgresIntegration(t *testing.T) {
 	}
 	if oil.Name != "Spend oil" || oil.Records != 4 || oil.YearToDateCents != 16250 || oil.LifetimeCents != 24750 {
 		t.Fatalf("oil=%+v", oil)
+	}
+
+	if _, err := connection.Exec(ctx, `INSERT INTO records(vehicle_id,service_type_id,occurred_on,created_by,cost_cents) VALUES
+			($1,$2,'2026-05-01',$3,9223372036854775807),($1,$2,'2026-05-02',$3,9223372036854775807)`, otherVehicleID, washID, userID); err != nil {
+		t.Fatal(err)
+	}
+	huge, err := store.VehicleSpend(ctx, otherVehicleID, time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC))
+	if err != nil || huge.LifetimeCents != math.MaxInt64 || huge.YearToDateCents != math.MaxInt64 {
+		t.Fatalf("overflowing totals=%+v err=%v, want capped at MaxInt64", huge, err)
 	}
 
 	empty, err := store.VehicleSpend(ctx, emptyVehicleID, time.Date(2026, time.July, 31, 0, 0, 0, 0, time.UTC))

@@ -25,7 +25,7 @@ func Summarize(records []model.Record) HistorySummary {
 		if record.CostCents != nil {
 			total := *record.CostCents
 			if summary.TotalCents != nil {
-				total += *summary.TotalCents
+				total = model.AddCents(total, *summary.TotalCents)
 			}
 			summary.TotalCents = &total
 		}
