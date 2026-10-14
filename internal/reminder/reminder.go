@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/google/uuid"
 )
 
 type Status string
@@ -121,6 +122,39 @@ func Evaluate(r model.Reminder, today time.Time) Result {
 		res.Status = Soon
 	}
 	return res
+}
+
+// ProjectionVehicles returns the vehicles with enabled mileage reminders, whose
+// mileage history EvaluateAll uses to project due dates.
+func ProjectionVehicles(reminders []model.Reminder) []uuid.UUID {
+	var vehicleIDs []uuid.UUID
+	seen := map[uuid.UUID]bool{}
+	for _, schedule := range reminders {
+		if schedule.Enabled && schedule.IntervalMiles != nil && !seen[schedule.VehicleID] {
+			seen[schedule.VehicleID] = true
+			vehicleIDs = append(vehicleIDs, schedule.VehicleID)
+		}
+	}
+	return vehicleIDs
+}
+
+// EvaluateAll evaluates reminders on today, projecting mileage intervals from
+// each vehicle's mileage points in the EstimateWindowMonths before today.
+func EvaluateAll(reminders []model.Reminder, points []model.MileagePoint, today time.Time) []Result {
+	byVehicle := map[uuid.UUID][]model.MileagePoint{}
+	for _, point := range points {
+		byVehicle[point.VehicleID] = append(byVehicle[point.VehicleID], point)
+	}
+	rates := map[uuid.UUID]*float64{}
+	for _, id := range ProjectionVehicles(reminders) {
+		rates[id] = EstimateMilesPerDay(byVehicle[id], today)
+	}
+	results := make([]Result, 0, len(reminders))
+	for _, schedule := range reminders {
+		schedule.MilesPerDay = rates[schedule.VehicleID]
+		results = append(results, Evaluate(schedule, today))
+	}
+	return results
 }
 
 // EstimateMilesPerDay fits a least-squares line through the points dated in

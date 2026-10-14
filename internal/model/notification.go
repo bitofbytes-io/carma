@@ -13,3 +13,12 @@ type ReminderNotification struct {
 	Recipients []string
 	MessageID  string
 }
+
+// ReminderDigest claims the weekly digest email for the week starting on
+// WeekStart, a Monday in the household time zone.
+type ReminderDigest struct {
+	ID         uuid.UUID
+	WeekStart  time.Time
+	ReservedAt time.Time
+	Recipients []string
+}

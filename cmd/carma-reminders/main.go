@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
@@ -49,19 +50,40 @@ func run(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if options.Digest {
+		return runDigest(ctx, reminderemail.NewDigestRunner(store, sender, cfg.ReminderEmail.PublicURL, auth.AccessPolicy(cfg), cfg.Location, slog.Default()), options.DryRun, output)
+	}
 	runner := reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, auth.AccessPolicy(cfg), cfg.Location, slog.Default())
-	report, err := runner.Run(ctx, options)
+	report, err := runner.Run(ctx, options.Options)
 	if _, printErr := fmt.Fprintf(output, "evaluated=%d due=%d recipients=%d suppressed=%d sent=%d failed=%d lock_contended=%t dry_run=%t\n", report.Evaluated, report.Due, report.RecipientCount, report.Suppressed, report.Sent, report.Failed, report.LockContended, options.DryRun); printErr != nil {
 		return errors.Join(err, printErr)
 	}
 	return err
 }
 
-func parseOptions(args []string) (reminderemail.Options, error) {
-	var options reminderemail.Options
+// runDigest runs the weekly digest once. A dry run prints the digest it would
+// send instead of sending it.
+func runDigest(ctx context.Context, runner *reminderemail.DigestRunner, dryRun bool, output io.Writer) error {
+	report, err := runner.Run(ctx, reminderemail.DigestOptions{DryRun: dryRun})
+	_, printErr := fmt.Fprintf(output, "week_start=%s overdue=%d due_soon=%d recipients=%d already_sent=%t too_early=%t sent=%t lock_contended=%t dry_run=%t\n", report.WeekStart.Format(time.DateOnly), report.Overdue, report.DueSoon, report.RecipientCount, report.AlreadySent, report.TooEarly, report.Sent, report.LockContended, dryRun)
+	if dryRun && report.Message != nil && printErr == nil {
+		_, printErr = fmt.Fprintf(output, "\nSubject: %s\n\n%s\n", report.Message.Subject, report.Message.Body)
+	}
+	return errors.Join(err, printErr)
+}
+
+type cliOptions struct {
+	reminderemail.Options
+	// Digest runs the weekly digest instead of overdue reminder emails.
+	Digest bool
+}
+
+func parseOptions(args []string) (cliOptions, error) {
+	var options cliOptions
 	flags := flag.NewFlagSet("carma-reminders", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.BoolVar(&options.DryRun, "dry-run", false, "evaluate without locking, sending, or auditing")
+	flags.BoolVar(&options.Digest, "digest", false, "send this week's due-soon digest instead of overdue reminders")
 	var reminderID string
 	flags.StringVar(&reminderID, "reminder-id", "", "process one reminder UUID")
 	requiredRecipientCount := -1
@@ -87,6 +109,9 @@ func parseOptions(args []string) (reminderemail.Options, error) {
 			return options, errors.New("--require-recipient-count requires --reminder-id")
 		}
 		options.RequireRecipientCount = &requiredRecipientCount
+	}
+	if options.Digest && options.ReminderID != nil {
+		return options, errors.New("--digest cannot be combined with --reminder-id")
 	}
 	return options, nil
 }
