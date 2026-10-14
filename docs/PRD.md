@@ -97,7 +97,9 @@ filters, inspections) doesn't get forgotten.
   - *Mileage:* due when `latest known odometer on the vehicle >= baseline odometer +
     interval_miles`. Latest known odometer is the greater of the manually entered
     current odometer and the max reading across the vehicle's records.
-  - "Due soon" threshold: within 30 days or 500 miles of due.
+  - "Due soon" threshold: within 30 days or 500 miles of due. A mileage interval is
+    also due soon when its date projected from the last 12 months of odometer
+    readings and record mileages falls within 30 days ("~3,100 mi left, est. Jan 12").
 - Dashboard shows an Overdue / Due soon panel across all vehicles; each vehicle page
   shows its own reminders with status.
 - Logging a new record of the matching service type automatically resets the

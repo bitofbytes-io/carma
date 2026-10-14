@@ -120,7 +120,7 @@ flowchart TD
   T -->|yes| DUE2[Overdue]
   M -->|yes| DUE2
   T -->|"within 30 days"| SOON[Due soon]
-  M -->|"within 500 miles"| SOON
+  M -->|"within 500 miles or projected within 30 days"| SOON
   T -->|no| OK[OK]
   M -->|no| OK
 ```
@@ -131,6 +131,13 @@ record readings); the handler classifies each row as overdue / due soon / ok. A
 reminder snapshots that effective odometer when first created. Edits preserve its
 creation date and snapshot, while logging a matching record naturally replaces both
 first-cycle baselines.
+
+Mileage intervals are also projected to a date. A second query loads the last 12
+months of each vehicle's `odometer_readings` and record mileages, and
+`reminder.EstimateMilesPerDay` fits a least-squares line through them (at least two
+points spanning 14 days, with increasing mileage). The projected due date is
+`today + miles left / miles per day`; a projection within 30 days makes the reminder
+due soon, but only an actual reading makes it overdue, so email is unaffected.
 
 ## Email reminders
 
