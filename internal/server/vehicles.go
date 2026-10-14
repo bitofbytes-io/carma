@@ -196,7 +196,8 @@ func (s *Server) vehicleFormError(response http.ResponseWriter, request *http.Re
 
 // presetReminders builds the starter reminders checked on the new-vehicle
 // form. Like reminders added later, they start from the vehicle's creation
-// date and mileage. Unknown presets and missing service types are skipped.
+// date and mileage; when that mileage is unknown, mileage presets wait for the
+// first reading. Unknown presets and missing service types are skipped.
 func (s *Server) presetReminders(ctx context.Context, vehicle model.Vehicle, selected []string) ([]model.Reminder, error) {
 	if len(selected) == 0 {
 		return nil, nil
@@ -233,6 +234,9 @@ func (s *Server) presetReminders(ctx context.Context, vehicle model.Vehicle, sel
 			if preset.Miles > 0 {
 				miles := preset.Miles
 				saved.IntervalMiles = &miles
+				// Without a starting odometer, the first mileage entered by an
+				// edit or check-in becomes the baseline.
+				saved.StartingOdometerPending = vehicle.CurrentOdometer == nil
 			}
 			reminders = append(reminders, saved)
 		}

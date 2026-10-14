@@ -307,6 +307,42 @@ func TestCreateVehicleSeedsCheckedReminderPresets(t *testing.T) {
 	}
 }
 
+func TestMileagePresetWithoutOdometerStartsAtFirstReading(t *testing.T) {
+	f := setup(t)
+	var b bytes.Buffer
+	mw := multipart.NewWriter(&b)
+	_ = mw.WriteField("nickname", "No mileage yet")
+	_ = mw.WriteField("reminder_preset", "Tire rotation")
+	_ = mw.WriteField("reminder_preset", "Cabin air filter")
+	_ = mw.Close()
+	if response := f.do(t, http.MethodPost, "/vehicles", &b, mw.FormDataContentType()); response.Code != http.StatusSeeOther {
+		t.Fatalf("create vehicle: %d %s", response.Code, response.Body.String())
+	}
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	rows, _ := f.store.ListReminders(t.Context(), &v.ID, true)
+	pending := map[string]bool{}
+	for _, row := range rows {
+		if row.StartingOdometer != nil {
+			t.Fatalf("preset has a starting odometer without one entered: %+v", row)
+		}
+		pending[row.ServiceTypeName] = row.StartingOdometerPending
+	}
+	if len(rows) != 2 || !pending["Tire rotation"] || pending["Cabin air filter"] {
+		t.Fatalf("pending flags=%v rows=%+v", pending, rows)
+	}
+
+	if response := postOdometer(t, f, v.ID, url.Values{"odometer_miles": {"30000"}}, false); response.Code != http.StatusSeeOther {
+		t.Fatalf("odometer: %d %s", response.Code, response.Body.String())
+	}
+	rows, _ = f.store.ListReminders(t.Context(), &v.ID, true)
+	for _, row := range rows {
+		if row.ServiceTypeName == "Tire rotation" && (row.StartingOdometerPending || row.StartingOdometer == nil || *row.StartingOdometer != 30000) {
+			t.Fatalf("first reading did not start the mileage preset: %+v", row)
+		}
+	}
+}
+
 func TestVehicleEditShowsEffectiveRecordMileage(t *testing.T) {
 	f := setup(t)
 	v := createVehicle(t, f)
