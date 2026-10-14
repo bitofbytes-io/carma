@@ -49,6 +49,14 @@ For production proofs, add `--require-recipient-count <n>` to a targeted run; it
 compares only the normalized recipient count and refuses to send or audit on a
 mismatch. Recipient addresses cannot be supplied or overridden through the CLI.
 
+A weekly due-soon digest is also available and off by default. Set
+`REMINDER_DIGEST_ENABLED=true` (it requires `REMINDER_EMAIL_ENABLED=true` and uses
+the same SMTP settings) to email, from Monday 08:00 household time, one summary per
+week of every overdue and due-soon reminder grouped by vehicle. Weeks with nothing
+due send nothing. Preview it without sending using
+`/app/carma-reminders --digest --dry-run`; `--digest` alone sends this week's digest
+now unless it has already gone out.
+
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
 declared by this project. The HTTP handler and repository tests need PostgreSQL:

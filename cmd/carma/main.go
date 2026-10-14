@@ -74,12 +74,16 @@ func run() error {
 		return e
 	}
 	var reminderRunner *reminderemail.Runner
+	var digestRunner *reminderemail.DigestRunner
 	if cfg.ReminderEmail.Enabled {
 		sender, err := mailer.NewSMTP(cfg.ReminderEmail.SMTPHost, cfg.ReminderEmail.SMTPUsername, cfg.ReminderEmail.SMTPPassword, cfg.ReminderEmail.FromAddress, cfg.ReminderEmail.FromName)
 		if err != nil {
 			return err
 		}
 		reminderRunner = reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
+		if cfg.ReminderEmail.DigestEnabled {
+			digestRunner = reminderemail.NewDigestRunner(store, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
+		}
 	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
@@ -111,6 +115,13 @@ func run() error {
 			report, err := reminderRunner.Run(ctx, reminderemail.Options{})
 			if err != nil && ctx.Err() == nil {
 				slog.Error("reminder email run failed", "evaluated", report.Evaluated, "sent", report.Sent, "failed", report.Failed, "error", err)
+			}
+		})
+	}
+	if digestRunner != nil {
+		every(reminderemail.DefaultDigestInterval, func(ctx context.Context) {
+			if _, err := digestRunner.Run(ctx, reminderemail.DigestOptions{}); err != nil && ctx.Err() == nil {
+				slog.Error("reminder digest run failed", "error", err)
 			}
 		})
 	}

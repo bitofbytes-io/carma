@@ -150,6 +150,13 @@ due soon, but only an actual reading makes it overdue, so email is unaffected.
   `REMINDER_EMAIL_ENABLED=false` leaves the scheduler off.
 - Email content: vehicle, service type, baseline (last done date/mileage), what
   triggered it (time or mileage), and a link to the vehicle page.
+- `internal/reminderemail.DigestRunner` (opt-in, `REMINDER_DIGEST_ENABLED=true`)
+  checks hourly, under its own advisory lock, whether this week's digest is due:
+  from 08:00 household time on Monday, one email per week lists every overdue and
+  due-soon reminder (including projected mileage dates) grouped by vehicle, overdue
+  first. A `reminder_digests` row per `week_start` (the local Monday) dedupes sends
+  across replicas; a week with nothing to report is not recorded, so a later check
+  that week still sends once something comes due.
 
 ## Configuration
 
@@ -170,6 +177,7 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
 | `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
 | `SMTP_PASSWORD` | secret `carma_smtp_password` via `SMTP_PASSWORD_FILE` | email reminders |
+| `REMINDER_DIGEST_ENABLED` | default `false` | weekly due-soon digest; requires `REMINDER_EMAIL_ENABLED=true` and reuses its SMTP settings |
 
 ## CI/CD pipeline
 
