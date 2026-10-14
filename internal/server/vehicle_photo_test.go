@@ -24,10 +24,10 @@ type vehicleWriteErrorStore struct {
 	called  bool
 }
 
-func (s *vehicleWriteErrorStore) CreateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, error) {
+func (s *vehicleWriteErrorStore) CreateVehicle(ctx context.Context, vehicle model.Vehicle, reminders []model.Reminder) (model.Vehicle, error) {
 	s.called = true
 	if s.persist {
-		if _, err := s.Store.CreateVehicle(ctx, vehicle); err != nil {
+		if _, err := s.Store.CreateVehicle(ctx, vehicle, reminders); err != nil {
 			return vehicle, err
 		}
 	}

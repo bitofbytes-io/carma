@@ -105,6 +105,12 @@ filters, inspections) doesn't get forgotten.
 - Logging a new record of the matching service type automatically resets the
   reminder - no manual "mark done" needed.
 - Reminders can be disabled without deleting them.
+- The new-vehicle form offers optional starter reminders (oil change 6 months /
+  5,000 mi, tire rotation 7,500 mi, engine air filter 15,000 mi, cabin air filter,
+  wipers, and registration/inspection 12 months). Checked presets are created with
+  the vehicle, start from its starting odometer (or, when none was entered, from
+  the first mileage set by an edit or check-in), and stay editable on the
+  Reminders page.
 
 #### Export
 

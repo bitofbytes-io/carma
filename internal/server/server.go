@@ -56,6 +56,7 @@ type pageData struct {
 	Reminders, Attention                      []reminder.Result
 	Params                                    url.Values
 	OdometerForm                              ui.OdometerForm
+	ReminderPresets                           []ui.ReminderPreset
 }
 
 func (s *Server) Router() http.Handler {

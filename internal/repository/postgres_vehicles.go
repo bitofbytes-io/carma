@@ -99,8 +99,13 @@ func (p *Postgres) GetVehicle(ctx context.Context, id uuid.UUID) (model.Vehicle,
 	return scanVehicle(p.pool.QueryRow(ctx, selectVehicleSQL, id))
 }
 
-func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, error) {
-	err := p.pool.QueryRow(
+func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle, reminders []model.Reminder) (model.Vehicle, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return vehicle, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	err = tx.QueryRow(
 		ctx, `INSERT INTO vehicles(id,nickname,year,make,model,vin,license_plate,photo_key,notes,current_odometer_miles,
 			created_at,updated_at)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -117,8 +122,21 @@ func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 		&vehicle.ArchivedAt, &vehicle.CreatedAt, &vehicle.UpdatedAt,
 		&vehicle.CurrentOdometer,
 	)
+	if err != nil {
+		return vehicle, err
+	}
 	vehicle.LatestOdometer = cloneInt64(vehicle.CurrentOdometer)
-	return vehicle, err
+	for _, reminder := range reminders {
+		if _, err = tx.Exec(
+			ctx, upsertReminderSQL, reminder.ID,
+			vehicle.ID, reminder.ServiceTypeID, reminder.IntervalMonths,
+			reminder.IntervalMiles, reminder.StartingOdometer, reminder.StartingOdometerPending,
+			reminder.Enabled, reminder.CreatedAt, reminder.UpdatedAt,
+		); err != nil {
+			return vehicle, err
+		}
+	}
+	return vehicle, tx.Commit(ctx)
 }
 
 func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (model.Vehicle, string, error) {
