@@ -1,0 +1,1 @@
+{{define "content"}}<section class="card form-card"><div class="section-head"><h1>Update mileage · {{.OdometerForm.Vehicle.Nickname}}</h1></div>{{template "odometer-form" .OdometerForm}}<p><a href="{{if eq .OdometerForm.Return "vehicle"}}/vehicles/{{.OdometerForm.Vehicle.ID}}{{else}}/{{end}}">Cancel</a></p></section>{{end}}

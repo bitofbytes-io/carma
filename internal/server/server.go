@@ -55,6 +55,7 @@ type pageData struct {
 	Attachments                               []model.Attachment
 	Reminders, Attention                      []reminder.Result
 	Params                                    url.Values
+	OdometerForm                              ui.OdometerForm
 }
 
 func (s *Server) Router() http.Handler {
@@ -83,6 +84,7 @@ func (s *Server) Router() http.Handler {
 		router.Get("/vehicles/{vehicleID}/edit", s.editVehicle)
 		router.Post("/vehicles/{vehicleID}", s.updateVehicle)
 		router.Post("/vehicles/{vehicleID}/archive", s.archiveVehicle)
+		router.Post("/vehicles/{vehicleID}/odometer", s.addOdometerReading)
 		router.Get("/vehicles/{vehicleID}/photo", s.vehiclePhoto)
 		router.Get("/vehicles/{vehicleID}/records/new", s.newRecord)
 		router.Post("/vehicles/{vehicleID}/records", s.createRecord)

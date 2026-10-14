@@ -30,7 +30,7 @@ func (s *Server) render(response http.ResponseWriter, status int, name string, d
 	}
 }
 
-func (s *Server) renderNamed(response http.ResponseWriter, page, name string, data pageData) {
+func (s *Server) renderNamed(response http.ResponseWriter, page, name string, data any) {
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.ui.RenderNamed(response, page, name, data); err != nil {
 		s.fail(response, err)

@@ -30,6 +30,11 @@ type Store interface {
 	// existing one, the replaced key is returned so its object can be deleted.
 	UpdateVehicle(context.Context, model.Vehicle) (updated model.Vehicle, replacedPhotoKey string, err error)
 	ArchiveVehicle(context.Context, uuid.UUID) error
+	// AddOdometerReading stores a mileage check-in and raises the vehicle's
+	// current odometer to it, returning the updated vehicle. A reading below the
+	// latest known mileage fails with ErrOdometerBelowLatest unless allowLower
+	// is set; it is then kept in the history without lowering the mileage.
+	AddOdometerReading(ctx context.Context, reading model.OdometerReading, allowLower bool) (model.Vehicle, error)
 
 	ListServiceTypes(context.Context) ([]model.ServiceType, error)
 	CreateServiceType(context.Context, model.ServiceType) (model.ServiceType, error)
