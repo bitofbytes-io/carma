@@ -27,6 +27,8 @@ func TestDashboardOdometerFormSitsOutsideCardLink(t *testing.T) {
 		Vehicles            []model.Vehicle
 		Attention           []reminder.Result
 		OdometerForm        OdometerForm
+
+		RecallAlerts []RecallAlert
 	}
 	var b bytes.Buffer
 	if err := r.Render(&b, "dashboard", data{Authenticated: true, User: &model.User{}, Vehicles: []model.Vehicle{vehicle}}); err != nil {
@@ -187,6 +189,10 @@ func TestVehicleFormShowsExistingPhotoOnlyWhenEditingSavedPhoto(t *testing.T) {
 				Editing             bool
 				Vehicle             model.Vehicle
 				ReminderPresets     []ReminderPreset
+
+				VINDecode  bool
+				VINMessage string
+				VINError   bool
 			}
 			var b bytes.Buffer
 			if err := r.Render(&b, "vehicle-form", data{Editing: tt.editing, Vehicle: tt.vehicle}); err != nil {
@@ -243,6 +249,10 @@ func TestVehicleFormOffersReminderPresetsOnlyWhenAdding(t *testing.T) {
 		Editing             bool
 		Vehicle             model.Vehicle
 		ReminderPresets     []ReminderPreset
+
+		VINDecode  bool
+		VINMessage string
+		VINError   bool
 	}
 	presets := ReminderPresets([]string{"oil change"})
 	var b bytes.Buffer
@@ -289,6 +299,8 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 		Types         []model.ServiceType
 		Records       []model.Record
 		Reminders     []any
+
+		Recalls, DismissedRecalls []model.Recall
 	}
 	v := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 	var b bytes.Buffer
@@ -342,6 +354,8 @@ func TestVehicleTemplateRendersReminderIntervals(t *testing.T) {
 				Types         []model.ServiceType
 				Records       []model.Record
 				Reminders     []reminder.Result
+
+				Recalls, DismissedRecalls []model.Recall
 			}
 			vehicle := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 			row := reminder.Result{
@@ -411,6 +425,94 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing responsive/accessibility structure %q in %s", want, body)
+		}
+	}
+}
+
+func TestGroupRecallsCountsPerVehicle(t *testing.T) {
+	outback, civic := uuid.New(), uuid.New()
+	alerts := GroupRecalls([]model.Recall{
+		{VehicleID: outback, VehicleName: "Outback", CampaignNumber: "1"},
+		{VehicleID: civic, VehicleName: "Civic", CampaignNumber: "2"},
+		{VehicleID: outback, VehicleName: "Outback", CampaignNumber: "3", ParkIt: true},
+	})
+	if len(alerts) != 2 || alerts[0].VehicleID != outback || alerts[0].Count != 2 || !alerts[0].ParkIt || alerts[1].Count != 1 || alerts[1].ParkIt {
+		t.Fatalf("alerts = %+v", alerts)
+	}
+}
+
+func TestRecallTemplates(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vehicleID := uuid.New()
+	var b bytes.Buffer
+	attention := struct {
+		Attention    []reminder.Result
+		RecallAlerts []RecallAlert
+	}{RecallAlerts: []RecallAlert{{VehicleID: vehicleID, VehicleName: "Outback", Count: 2, ParkIt: true}}}
+	if err = r.RenderNamed(&b, "dashboard", "attention-body", attention); err != nil {
+		t.Fatal(err)
+	}
+	if body := b.String(); !strings.Contains(body, `href="/vehicles/`+vehicleID.String()+`#recalls"`) || !strings.Contains(body, "RECALL · DO NOT DRIVE") || !strings.Contains(body, "2 open safety recalls") || strings.Contains(body, "Nothing needs attention") {
+		t.Fatalf("attention: %s", body)
+	}
+
+	year := 2019
+	received := time.Date(2019, time.June, 26, 0, 0, 0, 0, time.UTC)
+	section := struct {
+		Vehicle                   model.Vehicle
+		Recalls, DismissedRecalls []model.Recall
+	}{
+		Vehicle:          model.Vehicle{ID: vehicleID, Year: &year, Make: "Subaru", Model: "Outback"},
+		Recalls:          []model.Recall{{VehicleID: vehicleID, CampaignNumber: "19V493000", Component: "STRUCTURE", Summary: "Spot welds <b>", Remedy: "Repair.", ReportReceivedOn: &received, ParkIt: true}},
+		DismissedRecalls: []model.Recall{{VehicleID: vehicleID, CampaignNumber: "21V587000", Component: "FUEL PUMP"}},
+	}
+	b.Reset()
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {
+		t.Fatal(err)
+	}
+	body := b.String()
+	for _, want := range []string{`id="recalls"`, "2019 Subaru Outback", "Campaign 19V493000 · reported Jun 26, 2019", "Do not drive", "Spot welds &lt;b&gt;",
+		`action="/vehicles/` + vehicleID.String() + `/recalls/19V493000/dismiss"`, "https://www.nhtsa.gov/recalls?nhtsaId=19V493000",
+		"Dismissed (1)", `action="/vehicles/` + vehicleID.String() + `/recalls/21V587000/restore"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("recalls section missing %q: %s", want, body)
+		}
+	}
+	b.Reset()
+	section.Recalls, section.DismissedRecalls = nil, nil
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil || strings.TrimSpace(b.String()) != "" {
+		t.Fatalf("no recalls should render nothing: %q err=%v", b.String(), err)
+	}
+}
+
+func TestVehicleIdentityOffersVINDecodeOnlyWhenEnabled(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type identity struct {
+		Vehicle             model.Vehicle
+		VINDecode, VINError bool
+		VINMessage          string
+	}
+	var b bytes.Buffer
+	if err = r.RenderNamed(&b, "vehicle-form", "vehicle-identity", identity{Vehicle: model.Vehicle{VIN: "1HGCM82633A004352"}}); err != nil {
+		t.Fatal(err)
+	}
+	if body := b.String(); strings.Contains(body, "Decode VIN") || !strings.Contains(body, `value="1HGCM82633A004352"`) {
+		t.Fatalf("decode disabled: %s", body)
+	}
+	b.Reset()
+	if err = r.RenderNamed(&b, "vehicle-form", "vehicle-identity", identity{VINDecode: true, VINError: true, VINMessage: "NHTSA could not decode this VIN."}); err != nil {
+		t.Fatal(err)
+	}
+	body := b.String()
+	for _, want := range []string{`id="vehicle-identity"`, `hx-post="/vehicles/vin-decode"`, `hx-target="#vehicle-identity"`, `type="button"`, `class="vin-message full vin-error"`, "could not decode"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("decode enabled missing %q: %s", want, body)
 		}
 	}
 }

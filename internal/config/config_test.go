@@ -117,6 +117,23 @@ func TestReminderDigestIsOptInAndNeedsReminderEmail(t *testing.T) {
 	}
 }
 
+func TestNHTSAIsOptIn(t *testing.T) {
+	setReminderEmailEnvironment(t)
+	t.Setenv("NHTSA_ENABLED", "")
+	cfg, err := Load()
+	if err != nil || cfg.NHTSAEnabled {
+		t.Fatalf("NHTSA should default off: cfg=%+v err=%v", cfg, err)
+	}
+	t.Setenv("NHTSA_ENABLED", "true")
+	if cfg, err = Load(); err != nil || !cfg.NHTSAEnabled {
+		t.Fatalf("NHTSA enabled: cfg=%+v err=%v", cfg, err)
+	}
+	t.Setenv("NHTSA_ENABLED", "maybe")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "NHTSA_ENABLED must be true or false") {
+		t.Fatalf("invalid flag error = %v", err)
+	}
+}
+
 func setReminderEmailEnvironment(t *testing.T) {
 	t.Helper()
 	passwordFile := filepath.Join(t.TempDir(), "smtp-password")

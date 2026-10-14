@@ -27,8 +27,7 @@ func (s *Server) dashboard(response http.ResponseWriter, request *http.Request) 
 		s.fail(response, err)
 		return
 	}
-	data.Attention, err = s.attention(request.Context())
-	if err != nil {
+	if err = s.loadAttention(request.Context(), &data); err != nil {
 		s.fail(response, err)
 		return
 	}
@@ -337,6 +336,18 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 	if data.Reminders, err = s.evaluateReminders(request.Context(), reminders); err != nil {
 		s.fail(response, err)
 		return
+	}
+	recalls, err := s.store.ListRecalls(request.Context(), &vehicle.ID, true)
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
+	for _, recall := range recalls {
+		if recall.DismissedAt == nil {
+			data.Recalls = append(data.Recalls, recall)
+		} else {
+			data.DismissedRecalls = append(data.DismissedRecalls, recall)
+		}
 	}
 	if isHTMX(request) {
 		s.renderNamed(response, "vehicle", "records-section", data)

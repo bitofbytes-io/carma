@@ -56,6 +56,13 @@ type Store interface {
 	ListReminders(context.Context, *uuid.UUID, bool) ([]model.Reminder, error)
 	UpsertReminder(context.Context, model.Reminder) (model.Reminder, error)
 	DeleteReminder(context.Context, uuid.UUID) error
+
+	// ListRecalls returns NHTSA recall campaigns for active vehicles, or for one
+	// vehicle when vehicleID is set, skipping dismissed ones unless asked.
+	ListRecalls(ctx context.Context, vehicleID *uuid.UUID, includeDismissed bool) ([]model.Recall, error)
+	// SetRecallDismissed hides a vehicle's recall campaign, or shows it again
+	// when dismissedAt is nil.
+	SetRecallDismissed(ctx context.Context, vehicleID uuid.UUID, campaignNumber string, dismissedAt *time.Time) error
 	Close()
 }
 
