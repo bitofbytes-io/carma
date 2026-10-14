@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -34,8 +35,9 @@ func (s *Server) remindersPage(response http.ResponseWriter, request *http.Reque
 		s.fail(response, err)
 		return
 	}
-	for _, schedule := range reminders {
-		data.Reminders = append(data.Reminders, reminder.Evaluate(schedule, s.today()))
+	if data.Reminders, err = s.evaluateReminders(request.Context(), reminders); err != nil {
+		s.fail(response, err)
+		return
 	}
 	s.render(response, 200, "reminders", data)
 }
@@ -139,13 +141,46 @@ func (s *Server) renderReminderList(response http.ResponseWriter, request *http.
 		s.fail(response, err)
 		return
 	}
-	for _, row := range rows {
-		data.Reminders = append(data.Reminders, reminder.Evaluate(row, s.today()))
+	if data.Reminders, err = s.evaluateReminders(request.Context(), rows); err != nil {
+		s.fail(response, err)
+		return
 	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err = s.ui.RenderNamed(response, "reminders", "reminder-list", data); err != nil {
 		s.fail(response, err)
 	}
+}
+
+// evaluateReminders evaluates reminders on today, projecting mileage intervals
+// from each vehicle's recent mileage history.
+func (s *Server) evaluateReminders(ctx context.Context, reminders []model.Reminder) ([]reminder.Result, error) {
+	today := s.today()
+	var vehicleIDs []uuid.UUID
+	seen := map[uuid.UUID]bool{}
+	for _, schedule := range reminders {
+		if schedule.Enabled && schedule.IntervalMiles != nil && !seen[schedule.VehicleID] {
+			seen[schedule.VehicleID] = true
+			vehicleIDs = append(vehicleIDs, schedule.VehicleID)
+		}
+	}
+	points, err := s.store.ListMileagePoints(ctx, vehicleIDs, today.AddDate(0, -reminder.EstimateWindowMonths, 0))
+	if err != nil {
+		return nil, err
+	}
+	byVehicle := map[uuid.UUID][]model.MileagePoint{}
+	for _, point := range points {
+		byVehicle[point.VehicleID] = append(byVehicle[point.VehicleID], point)
+	}
+	rates := map[uuid.UUID]*float64{}
+	for _, id := range vehicleIDs {
+		rates[id] = reminder.EstimateMilesPerDay(byVehicle[id], today)
+	}
+	results := make([]reminder.Result, 0, len(reminders))
+	for _, schedule := range reminders {
+		schedule.MilesPerDay = rates[schedule.VehicleID]
+		results = append(results, reminder.Evaluate(schedule, today))
+	}
+	return results, nil
 }
 
 func optionalPositiveInt(raw string) (*int, error) {

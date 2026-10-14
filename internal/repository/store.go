@@ -35,6 +35,9 @@ type Store interface {
 	// latest known mileage fails with ErrOdometerBelowLatest unless allowLower
 	// is set; it is then kept in the history without lowering the mileage.
 	AddOdometerReading(ctx context.Context, reading model.OdometerReading, allowLower bool) (model.Vehicle, error)
+	// ListMileagePoints returns the vehicles' odometer readings and service
+	// record mileages dated on or after since, ordered by vehicle and date.
+	ListMileagePoints(ctx context.Context, vehicleIDs []uuid.UUID, since time.Time) ([]model.MileagePoint, error)
 
 	ListServiceTypes(context.Context) ([]model.ServiceType, error)
 	CreateServiceType(context.Context, model.ServiceType) (model.ServiceType, error)

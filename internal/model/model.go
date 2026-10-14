@@ -58,6 +58,9 @@ type Reminder struct {
 	CreatedAt, UpdatedAt         time.Time
 	Baseline                     *Record
 	LatestOdometer               *int64
+	// MilesPerDay is the vehicle's estimated driving rate, used to project when
+	// a mileage interval comes due. Nil when there is too little history.
+	MilesPerDay *float64
 }
 
 type RecordQuery struct {

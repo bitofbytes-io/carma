@@ -13,3 +13,10 @@ type OdometerReading struct {
 	OdometerMiles            int64
 	CreatedAt                time.Time
 }
+
+// MileagePoint is a dated odometer value from a reading or a service record.
+type MileagePoint struct {
+	VehicleID uuid.UUID
+	On        time.Time
+	Miles     int64
+}
