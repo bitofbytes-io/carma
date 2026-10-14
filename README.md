@@ -55,7 +55,8 @@ the same SMTP settings) to email, from Monday 08:00 household time, one summary 
 week of every overdue and due-soon reminder grouped by vehicle. Weeks with nothing
 due send nothing. Preview it without sending using
 `/app/carma-reminders --digest --dry-run`; `--digest` alone sends this week's digest
-now unless it has already gone out.
+now unless it has already gone out, nothing is due, or it is still before Monday
+08:00 household time (each of these is a no-op, not a failure).
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version

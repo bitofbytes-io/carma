@@ -161,10 +161,11 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 		report.AlreadySent = true
 		return report, nil
 	}
-	// Record the outcome even when ctx is canceled during shutdown.
-	recordContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
 	messageID, err := r.sender.Send(ctx, message)
+	// Record the outcome even when ctx is canceled during shutdown. The timeout
+	// starts only now, so a slow send cannot use up the write's time.
+	recordContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), digestRecordTimeout)
+	defer cancel()
 	if err != nil {
 		r.logger.Error("reminder digest failed", "week_start", report.WeekStart.Format(time.DateOnly), "recipient_count", len(recipients), "error", err)
 		err = fmt.Errorf("send reminder digest: %w", err)
@@ -182,6 +183,10 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 	r.logger.Info("reminder digest sent", "week_start", report.WeekStart.Format(time.DateOnly), "overdue", report.Overdue, "due_soon", report.DueSoon, "recipient_count", len(recipients), "message_id", messageID)
 	return report, nil
 }
+
+// digestRecordTimeout bounds the write that records or releases a claimed week
+// after the send attempt.
+const digestRecordTimeout = 5 * time.Second
 
 // RenderDigest lists items by vehicle in the order given, overdue before due
 // soon within each vehicle.

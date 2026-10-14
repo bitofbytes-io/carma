@@ -29,6 +29,8 @@ type fakeDigestStore struct {
 	lockCalls     int
 	unlockCalls   int
 	completeErr   error
+	// releaseDeadline is the deadline of the last release call's context.
+	releaseDeadline time.Time
 	// claimOnCheck makes the week look unclaimed to the first check and
 	// claimed on reservation, as if another writer raced it.
 	claimOnCheck bool
@@ -76,7 +78,8 @@ func (f *fakeDigestStore) CompleteReminderDigest(ctx context.Context, id uuid.UU
 	}
 	return errors.New("no reservation")
 }
-func (f *fakeDigestStore) ReleaseReminderDigest(_ context.Context, id uuid.UUID) error {
+func (f *fakeDigestStore) ReleaseReminderDigest(ctx context.Context, id uuid.UUID) error {
+	f.releaseDeadline, _ = ctx.Deadline()
 	f.digests = slices.DeleteFunc(f.digests, func(digest fakeDigest) bool { return digest.ID == id && digest.MessageID == "" })
 	return nil
 }
@@ -88,7 +91,7 @@ func (f *fakeDigestStore) TryReminderDigestLock(context.Context) (func(context.C
 	return func(context.Context) error { f.unlockCalls++; return nil }, true, nil
 }
 
-func newTestDigestRunner(store *fakeDigestStore, sender *fakeSender, now time.Time) *DigestRunner {
+func newTestDigestRunner(store *fakeDigestStore, sender mailer.Sender, now time.Time) *DigestRunner {
 	runner := NewDigestRunner(store, sender, "https://carma.bitofbytes.io/", nil, time.UTC, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	runner.now = func() time.Time { return now }
 	return runner
@@ -219,6 +222,33 @@ func TestDigestSendFailureIsRetried(t *testing.T) {
 	if report, err := runner.Run(context.Background(), DigestOptions{}); err != nil || !report.Sent || len(store.digests) != 1 {
 		t.Fatalf("retry: report=%+v err=%v", report, err)
 	}
+}
+
+func TestDigestReleaseGetsFullTimeoutAfterSlowSend(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, _, _ := digestFixture(now)
+	sender := &slowFailingSender{delay: 20 * time.Millisecond}
+	if _, err := newTestDigestRunner(store, sender, now).Run(context.Background(), DigestOptions{}); err == nil {
+		t.Fatal("expected send error")
+	}
+	if len(store.digests) != 0 {
+		t.Fatalf("claim was not released: %+v", store.digests)
+	}
+	if remaining := store.releaseDeadline.Sub(sender.returned); remaining < digestRecordTimeout {
+		t.Fatalf("release had %v after the send returned, want %v", remaining, digestRecordTimeout)
+	}
+}
+
+// slowFailingSender fails after a delay, recording when it returned.
+type slowFailingSender struct {
+	delay    time.Duration
+	returned time.Time
+}
+
+func (s *slowFailingSender) Send(context.Context, mailer.Message) (string, error) {
+	time.Sleep(s.delay)
+	s.returned = time.Now()
+	return "", errors.New("smtp timeout")
 }
 
 func TestDigestAuditFailureAfterDeliveryDoesNotResend(t *testing.T) {

@@ -26,13 +26,13 @@ func TestReminderDigestPostgresIntegration(t *testing.T) {
 	defer store.Close()
 	var _ repository.ReminderDigestStore = store
 
-	newYork, err := time.LoadLocation("America/New_York")
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Late Monday evening in New York is already Tuesday in UTC; the stored week
-	// must still be the local Monday.
-	monday := time.Date(2026, time.March, 16, 0, 0, 0, 0, newYork)
+	// Monday midnight in Tokyo is still Sunday in UTC; the stored week must
+	// still be the local Monday.
+	monday := time.Date(2026, time.March, 16, 0, 0, 0, 0, tokyo)
 	if claimed, err := store.ReminderDigestClaimed(ctx, monday); err != nil || claimed {
 		t.Fatalf("claimed=%v err=%v", claimed, err)
 	}
@@ -92,6 +92,10 @@ func TestReminderDigestPostgresIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close(context.Background()) }()
+	var stored string
+	if err = connection.QueryRow(ctx, `SELECT week_start::text FROM reminder_digests WHERE id=$1`, duplicate.ID).Scan(&stored); err != nil || stored != "2026-03-16" {
+		t.Fatalf("stored week_start=%q err=%v", stored, err)
+	}
 	down, err := migrations.FS.ReadFile("005_reminder_digests.down.sql")
 	if err != nil {
 		t.Fatal(err)
