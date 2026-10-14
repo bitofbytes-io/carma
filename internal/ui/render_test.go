@@ -186,6 +186,7 @@ func TestVehicleFormShowsExistingPhotoOnlyWhenEditingSavedPhoto(t *testing.T) {
 				Authenticated       bool
 				Editing             bool
 				Vehicle             model.Vehicle
+				ReminderPresets     []ReminderPreset
 			}
 			var b bytes.Buffer
 			if err := r.Render(&b, "vehicle-form", data{Editing: tt.editing, Vehicle: tt.vehicle}); err != nil {
@@ -228,6 +229,45 @@ func TestVehicleFormShowsExistingPhotoOnlyWhenEditingSavedPhoto(t *testing.T) {
 				t.Fatalf("optional guidance present=%v, want %v in %s", got, tt.wantOptional, body)
 			}
 		})
+	}
+}
+
+func TestVehicleFormOffersReminderPresetsOnlyWhenAdding(t *testing.T) {
+	r, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	type data struct {
+		Title, Error, Flash string
+		Authenticated       bool
+		Editing             bool
+		Vehicle             model.Vehicle
+		ReminderPresets     []ReminderPreset
+	}
+	presets := ReminderPresets([]string{"oil change"})
+	var b bytes.Buffer
+	if err := r.Render(&b, "vehicle-form", data{ReminderPresets: presets}); err != nil {
+		t.Fatal(err)
+	}
+	body := b.String()
+	for _, want := range []string{
+		"Starter reminders",
+		`name="reminder_preset" value="Oil change" checked>`,
+		`name="reminder_preset" value="Tire rotation" >`,
+		"every 6 months or 5,000 mi",
+		"every 7,500 mi",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("add form missing %q in %s", want, body)
+		}
+	}
+
+	b.Reset()
+	if err := r.Render(&b, "vehicle-form", data{Editing: true, Vehicle: model.Vehicle{ID: uuid.New(), Nickname: "Wagon"}, ReminderPresets: presets}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "reminder_preset") {
+		t.Fatalf("edit form offers reminder presets: %s", b.String())
 	}
 }
 

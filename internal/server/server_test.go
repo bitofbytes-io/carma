@@ -252,6 +252,61 @@ func TestVehicleCurrentOdometerCreateEditAndValidation(t *testing.T) {
 	}
 }
 
+func TestCreateVehicleSeedsCheckedReminderPresets(t *testing.T) {
+	f := setup(t)
+	page := f.do(t, http.MethodGet, "/vehicles/new", nil, "")
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), `name="reminder_preset" value="Oil change"`) {
+		t.Fatalf("new vehicle form status=%d body=%s", page.Code, page.Body.String())
+	}
+
+	presetForm := func(fields map[string]string, presets ...string) (*bytes.Buffer, string) {
+		var b bytes.Buffer
+		mw := multipart.NewWriter(&b)
+		for k, v := range fields {
+			_ = mw.WriteField(k, v)
+		}
+		for _, preset := range presets {
+			_ = mw.WriteField("reminder_preset", preset)
+		}
+		_ = mw.Close()
+		return &b, mw.FormDataContentType()
+	}
+
+	b, ct := presetForm(map[string]string{"current_odometer": "1200"}, "Oil change")
+	response := f.do(t, http.MethodPost, "/vehicles", b, ct)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `value="Oil change" checked>`) {
+		t.Fatalf("invalid form should keep preset checks: %d %s", response.Code, response.Body.String())
+	}
+
+	b, ct = presetForm(map[string]string{"nickname": "New car", "current_odometer": "1200"}, "Oil change", "Tire rotation", "oil change", "Repair", "Bogus")
+	response = f.do(t, http.MethodPost, "/vehicles", b, ct)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create vehicle: %d %s", response.Code, response.Body.String())
+	}
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	if len(vehicles) != 1 {
+		t.Fatalf("vehicles=%+v", vehicles)
+	}
+	rows, err := f.store.ListReminders(t.Context(), &vehicles[0].ID, true)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("reminders=%+v err=%v", rows, err)
+	}
+	byName := map[string]model.Reminder{}
+	for _, row := range rows {
+		byName[row.ServiceTypeName] = row
+		if !row.Enabled || row.StartingOdometer == nil || *row.StartingOdometer != 1200 || !row.CreatedAt.Equal(f.s.now()) {
+			t.Fatalf("preset reminder baseline=%+v", row)
+		}
+	}
+	oil, rotation := byName["Oil change"], byName["Tire rotation"]
+	if oil.IntervalMonths == nil || *oil.IntervalMonths != 6 || oil.IntervalMiles == nil || *oil.IntervalMiles != 5000 {
+		t.Fatalf("oil change preset=%+v", oil)
+	}
+	if rotation.IntervalMonths != nil || rotation.IntervalMiles == nil || *rotation.IntervalMiles != 7500 {
+		t.Fatalf("tire rotation preset=%+v", rotation)
+	}
+}
+
 func TestVehicleEditShowsEffectiveRecordMileage(t *testing.T) {
 	f := setup(t)
 	v := createVehicle(t, f)

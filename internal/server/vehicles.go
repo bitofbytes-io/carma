@@ -11,6 +11,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
+	"github.com/bitofbytes-io/carma/internal/ui"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -73,6 +74,7 @@ func (s *Server) newVehicle(response http.ResponseWriter, request *http.Request)
 		s.fail(response, err)
 		return
 	}
+	data.ReminderPresets = ui.ReminderPresets(nil)
 	s.render(response, http.StatusOK, "vehicle-form", data)
 }
 
@@ -104,13 +106,18 @@ func (s *Server) createVehicle(response http.ResponseWriter, request *http.Reque
 	vehicle.ID = uuid.New()
 	vehicle.CreatedAt = s.now()
 	vehicle.UpdatedAt = vehicle.CreatedAt
+	reminders, err := s.presetReminders(request.Context(), vehicle, request.Form["reminder_preset"])
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
 	photoKey, validation := s.savePhoto(request, validation)
 	if validation != "" {
 		s.vehicleFormError(response, request, vehicle, false, validation)
 		return
 	}
 	vehicle.PhotoKey = photoKey
-	if _, err := s.store.CreateVehicle(request.Context(), vehicle); err != nil {
+	if _, err := s.store.CreateVehicle(request.Context(), vehicle, reminders); err != nil {
 		deferPhotoCleanup(vehicle.ID, photoKey, err)
 		s.fail(response, err)
 		return
@@ -181,7 +188,56 @@ func (s *Server) vehicleFormError(response http.ResponseWriter, request *http.Re
 	data.Editing = editing
 	data.Vehicle = vehicle
 	data.Error = validation
+	if !editing {
+		data.ReminderPresets = ui.ReminderPresets(request.Form["reminder_preset"])
+	}
 	s.render(response, 400, "vehicle-form", data)
+}
+
+// presetReminders builds the starter reminders checked on the new-vehicle
+// form. Like reminders added later, they start from the vehicle's creation
+// date and mileage. Unknown presets and missing service types are skipped.
+func (s *Server) presetReminders(ctx context.Context, vehicle model.Vehicle, selected []string) ([]model.Reminder, error) {
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	types, err := s.store.ListServiceTypes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var reminders []model.Reminder
+	added := map[uuid.UUID]bool{}
+	for _, name := range selected {
+		preset, ok := reminder.FindPreset(name)
+		if !ok {
+			continue
+		}
+		for _, serviceType := range types {
+			if !strings.EqualFold(serviceType.Name, preset.ServiceType) || added[serviceType.ID] {
+				continue
+			}
+			added[serviceType.ID] = true
+			saved := model.Reminder{
+				ID:               uuid.New(),
+				VehicleID:        vehicle.ID,
+				ServiceTypeID:    serviceType.ID,
+				StartingOdometer: vehicle.CurrentOdometer,
+				Enabled:          true,
+				CreatedAt:        vehicle.CreatedAt,
+				UpdatedAt:        vehicle.CreatedAt,
+			}
+			if preset.Months > 0 {
+				months := preset.Months
+				saved.IntervalMonths = &months
+			}
+			if preset.Miles > 0 {
+				miles := preset.Miles
+				saved.IntervalMiles = &miles
+			}
+			reminders = append(reminders, saved)
+		}
+	}
+	return reminders, nil
 }
 
 // deferPhotoCleanup keeps a new photo whose vehicle write failed: the write may

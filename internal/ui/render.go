@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/bitofbytes-io/carma/internal/reminder"
 )
 
 //go:embed templates/*.html
@@ -24,6 +25,27 @@ type OdometerForm struct {
 	Return       string
 	Value, Error string
 	Confirm      bool
+}
+
+// ReminderPreset is a starter reminder checkbox on the new-vehicle form.
+type ReminderPreset struct {
+	reminder.Preset
+	Checked bool
+}
+
+// ReminderPresets lists every preset, checking those named in selected.
+func ReminderPresets(selected []string) []ReminderPreset {
+	options := make([]ReminderPreset, 0, len(reminder.Presets))
+	for _, preset := range reminder.Presets {
+		option := ReminderPreset{Preset: preset}
+		for _, name := range selected {
+			if found, ok := reminder.FindPreset(name); ok && found.ServiceType == preset.ServiceType {
+				option.Checked = true
+			}
+		}
+		options = append(options, option)
+	}
+	return options
 }
 
 func New() (*Renderer, error) {

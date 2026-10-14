@@ -24,7 +24,9 @@ type Store interface {
 
 	ListVehicles(context.Context, bool) ([]model.Vehicle, error)
 	GetVehicle(context.Context, uuid.UUID) (model.Vehicle, error)
-	CreateVehicle(context.Context, model.Vehicle) (model.Vehicle, error)
+	// CreateVehicle saves a new vehicle and its starter reminders in one
+	// transaction; each reminder is attached to the vehicle's ID.
+	CreateVehicle(ctx context.Context, vehicle model.Vehicle, reminders []model.Reminder) (model.Vehicle, error)
 	// UpdateVehicle saves the vehicle's fields. Its PhotoKey is a newly uploaded
 	// photo, or empty to keep the current one; when a new photo replaces an
 	// existing one, the replaced key is returned so its object can be deleted.

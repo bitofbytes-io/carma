@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/bitofbytes-io/carma/internal/testdb"
 	"github.com/google/uuid"
@@ -175,4 +176,36 @@ func TestVehicleUpdatePostgresIntegration(t *testing.T) {
 			t.Fatalf("missing vehicle error=%v", err)
 		}
 	})
+}
+
+func TestCreateVehicleWithRemindersIsAtomicPostgresIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	store := testdb.Store(t)
+	types, err := store.ListServiceTypes(ctx)
+	if err != nil || len(types) == 0 {
+		t.Fatalf("service types=%v err=%v", types, err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	months := 6
+	starting := int64(1200)
+	vehicle := model.Vehicle{ID: uuid.New(), Nickname: "Starter", CurrentOdometer: &starting, CreatedAt: now, UpdatedAt: now}
+	valid := model.Reminder{ID: uuid.New(), ServiceTypeID: types[0].ID, IntervalMonths: &months, StartingOdometer: &starting, Enabled: true, CreatedAt: now, UpdatedAt: now}
+	invalid := valid
+	invalid.ID, invalid.ServiceTypeID = uuid.New(), uuid.New()
+	if _, err := store.CreateVehicle(ctx, vehicle, []model.Reminder{valid, invalid}); err == nil {
+		t.Fatal("reminder with an unknown service type was accepted")
+	}
+	if _, err := store.GetVehicle(ctx, vehicle.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("failed reminder insert left the vehicle behind: err=%v", err)
+	}
+
+	created, err := store.CreateVehicle(ctx, vehicle, []model.Reminder{valid})
+	if err != nil || created.ID != vehicle.ID {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	rows, err := store.ListReminders(ctx, &vehicle.ID, true)
+	if err != nil || len(rows) != 1 || rows[0].VehicleID != vehicle.ID || rows[0].StartingOdometer == nil || *rows[0].StartingOdometer != 1200 {
+		t.Fatalf("reminders=%+v err=%v", rows, err)
+	}
 }

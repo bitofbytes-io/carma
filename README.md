@@ -84,7 +84,8 @@ In Grafana, run it newest-first with a line limit of one to confirm the latest r
 - **Receipts** - attach PDF/photo receipts to any record; stored on the NAS, no
   more glove-box paper.
 - **Reminders** - time- and/or mileage-based intervals per vehicle and service
-  type; overdue and due-soon surfaced on the dashboard, with overdue email delivery.
+  type, with common starter presets offered when adding a vehicle; overdue and
+  due-soon surfaced on the dashboard, with overdue email delivery.
 - **Export** - filtered CSV (XLSX later) of any records view.
 
 ## How it will be built

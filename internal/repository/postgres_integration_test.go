@@ -46,7 +46,7 @@ func TestRecordsPostgresIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, vehicle := range []model.Vehicle{car, truck} {
-		if _, err := postgres.CreateVehicle(ctx, vehicle); err != nil {
+		if _, err := postgres.CreateVehicle(ctx, vehicle, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
