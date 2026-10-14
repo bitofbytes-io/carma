@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
@@ -334,6 +335,13 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	if data.Reminders, err = s.evaluateReminders(request.Context(), reminders); err != nil {
+		s.fail(response, err)
+		return
+	}
+	today := s.today()
+	data.SpendYear = today.Year()
+	data.Spend, err = s.store.VehicleSpend(request.Context(), vehicle.ID, time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
 		s.fail(response, err)
 		return
 	}

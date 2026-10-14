@@ -301,6 +301,8 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 		Reminders     []any
 
 		Recalls, DismissedRecalls []model.Recall
+		Spend                     model.SpendSummary
+		SpendYear                 int
 	}
 	v := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 	var b bytes.Buffer
@@ -356,6 +358,8 @@ func TestVehicleTemplateRendersReminderIntervals(t *testing.T) {
 				Reminders     []reminder.Result
 
 				Recalls, DismissedRecalls []model.Recall
+				Spend                     model.SpendSummary
+				SpendYear                 int
 			}
 			vehicle := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
 			row := reminder.Result{
@@ -464,6 +468,8 @@ func TestRecallTemplates(t *testing.T) {
 	section := struct {
 		Vehicle                   model.Vehicle
 		Recalls, DismissedRecalls []model.Recall
+		Spend                     model.SpendSummary
+		SpendYear                 int
 	}{
 		Vehicle:          model.Vehicle{ID: vehicleID, Year: &year, Make: "Subaru", Model: "Outback"},
 		Recalls:          []model.Recall{{VehicleID: vehicleID, CampaignNumber: "19V493000", Component: "STRUCTURE", Summary: "Spot welds <b>", Remedy: "Repair.", ReportReceivedOn: &received, ParkIt: true}},

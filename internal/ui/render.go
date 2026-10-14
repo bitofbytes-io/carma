@@ -57,7 +57,7 @@ func New() (*Renderer, error) {
 				return "—"
 			}
 			return fmt.Sprintf("$%.2f", float64(*v)/100)
-		}, "num": func(v *int64) string {
+		}, "cents": func(v int64) string { return fmt.Sprintf("$%.2f", float64(v)/100) }, "num": func(v *int64) string {
 			if v == nil {
 				return "—"
 			}

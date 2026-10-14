@@ -72,6 +72,9 @@ type pageData struct {
 	// History totals the printable history's records, dated Generated.
 	History   carmaexport.HistorySummary
 	Generated time.Time
+	// Spend is the vehicle page's cost summary for SpendYear and all time.
+	Spend     model.SpendSummary
+	SpendYear int
 }
 
 func (s *Server) Router() http.Handler {

@@ -10,8 +10,13 @@
   {{template "records-section" .}}
   <aside class="card reminder-panel"><div class="section-head"><h2>Reminders</h2></div>{{if .Reminders}}{{range .Reminders}}<div class="reminder-summary"><span class="dot {{.Status}}"></span><div><strong>{{.Reminder.ServiceTypeName}}</strong> <span class="status {{.Status}}">{{.Status}}</span><small>{{if .Reminder.IntervalMonths}}{{.Reminder.IntervalMonths}} mo{{end}}{{if and .Reminder.IntervalMonths .Reminder.IntervalMiles}} / {{end}}{{if .Reminder.IntervalMiles}}{{.Reminder.IntervalMiles}} mi{{end}}</small></div></div>{{end}}{{else}}<p class="muted">No reminders configured.</p>{{end}}<a href="/vehicles/{{.Vehicle.ID}}/reminders">Manage reminders ›</a></aside>
 </div>
+{{template "spend-section" .}}
 {{template "recalls-section" .}}
 {{end}}
+{{define "spend-section"}}{{if .Spend.PricedRecords}}<section class="card spend" id="spending"><div class="section-head"><h2>Spending</h2></div>
+<dl class="spend-totals"><div><dt>{{.SpendYear}} so far</dt><dd>{{cents .Spend.YearToDateCents}}</dd></div><div><dt>All time</dt><dd>{{cents .Spend.LifetimeCents}}</dd></div><div><dt>Records with a cost</dt><dd>{{.Spend.PricedRecords}}</dd></div></dl>
+<div class="spend-table-wrap"><table class="spend-table"><thead><tr><th scope="col">Service type</th><th scope="col" class="number">Records</th><th scope="col" class="number">{{.SpendYear}}</th><th scope="col" class="number">All time</th></tr></thead><tbody>{{range .Spend.Types}}<tr><td>{{.Name}}</td><td class="number">{{.Records}}</td><td class="number">{{if .YearToDateCents}}{{cents .YearToDateCents}}{{else}}—{{end}}</td><td class="number">{{cents .LifetimeCents}}</td></tr>{{end}}</tbody></table></div>
+<p class="muted spend-note">Totals include every record with a cost, regardless of the record filters.</p></section>{{end}}{{end}}
 {{define "records-heading"}}<h2>Records</h2><a class="primary" href="/vehicles/{{.Vehicle.ID}}/records/new">＋ Add record</a>{{end}}
 {{define "records-filter-actions"}}{{template "records-export" .}}{{end}}
 {{define "recalls-section"}}{{if or .Recalls .DismissedRecalls}}<section class="card recalls" id="recalls"><div class="section-head"><h2>Safety recalls</h2></div>
