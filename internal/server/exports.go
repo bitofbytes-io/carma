@@ -19,6 +19,31 @@ func (s *Server) vehicleCSV(response http.ResponseWriter, request *http.Request)
 	s.writeCSV(response, request, recordQuery(request, &vehicle.ID), "carma-"+slug(vehicle.Nickname)+"-"+s.now().Format("2006-01-02")+".csv")
 }
 
+// vehicleHistory renders the printable, sale-ready service history: every
+// record oldest first with its totals. The browser's print dialog saves it as a
+// PDF.
+func (s *Server) vehicleHistory(response http.ResponseWriter, request *http.Request) {
+	vehicle, err := s.getVehicle(request)
+	if err != nil {
+		s.notFound(response, err)
+		return
+	}
+	data, err := s.base(request, vehicle.Nickname+" service history")
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
+	data.Vehicle = vehicle
+	data.Records, err = s.store.ListRecords(request.Context(), model.RecordQuery{VehicleID: &vehicle.ID, Sort: "date"})
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
+	data.History = carmaexport.Summarize(data.Records)
+	data.Generated = s.today()
+	s.render(response, http.StatusOK, "history", data)
+}
+
 func (s *Server) globalCSV(response http.ResponseWriter, request *http.Request) {
 	s.writeCSV(response, request, recordQuery(request, nil), "carma-all-records-"+s.now().Format("2006-01-02")+".csv")
 }

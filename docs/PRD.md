@@ -119,6 +119,11 @@ filters, inspections) doesn't get forgotten.
 - Columns: vehicle, date, service type, odometer, cost, vendor, notes, receipt count,
   logged by.
 - **XLSX** export (via `excelize`) as a nice-to-have follow-up; CSV ships first.
+- **Printable history** at `/vehicles/{id}/history` for handing a car to a buyer: the
+  vehicle's year/make/model, VIN, and odometer, its record count and date range, total
+  spent, receipts on file, and every record oldest first (date, service, mileage, cost,
+  shop, notes, receipt count). A print stylesheet drops the app chrome, and the
+  browser's print dialog saves it as a PDF. It leaves out who logged each record.
 
 ### Email reminders
 

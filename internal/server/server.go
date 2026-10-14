@@ -8,6 +8,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/assets"
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
+	carmaexport "github.com/bitofbytes-io/carma/internal/export"
 	"github.com/bitofbytes-io/carma/internal/middleware"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
@@ -68,6 +69,9 @@ type pageData struct {
 	VINDecode  bool
 	VINMessage string
 	VINError   bool
+	// History totals the printable history's records, dated Generated.
+	History   carmaexport.HistorySummary
+	Generated time.Time
 }
 
 func (s *Server) Router() http.Handler {
@@ -102,6 +106,7 @@ func (s *Server) Router() http.Handler {
 		router.Get("/vehicles/{vehicleID}/records/new", s.newRecord)
 		router.Post("/vehicles/{vehicleID}/records", s.createRecord)
 		router.Get("/vehicles/{vehicleID}/export.csv", s.vehicleCSV)
+		router.Get("/vehicles/{vehicleID}/history", s.vehicleHistory)
 		router.Get("/vehicles/{vehicleID}/reminders", s.remindersPage)
 		router.Post("/vehicles/{vehicleID}/reminders", s.upsertReminder)
 		router.Post("/vehicles/{vehicleID}/reminders/{reminderID}/delete", s.deleteReminder)
