@@ -14,7 +14,17 @@ import (
 
 const migrationAdvisoryLockID int64 = 0x4341524d41 // "CARMA"
 
-func Migrate(ctx context.Context, conn *pgx.Conn, files fs.FS) (result error) {
+// HouseholdTimezoneSetting names the transaction setting that holds the
+// household time zone while a migration runs, so SQL that turns timestamps
+// into calendar dates can use current_setting(HouseholdTimezoneSetting).
+const HouseholdTimezoneSetting = "carma.household_timezone"
+
+// Migrate applies the unapplied migrations in files. loc is the household time
+// zone (APP_TIMEZONE); nil means UTC.
+func Migrate(ctx context.Context, conn *pgx.Conn, files fs.FS, loc *time.Location) (result error) {
+	if loc == nil {
+		loc = time.UTC
+	}
 	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationAdvisoryLockID); err != nil {
 		return fmt.Errorf("acquire migration lock: %w", err)
 	}
@@ -58,7 +68,10 @@ func Migrate(ctx context.Context, conn *pgx.Conn, files fs.FS) (result error) {
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, string(body)); err == nil {
+		if _, err = tx.Exec(ctx, `SELECT set_config($1, $2, true)`, HouseholdTimezoneSetting, loc.String()); err == nil {
+			_, err = tx.Exec(ctx, string(body))
+		}
+		if err == nil {
 			_, err = tx.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES($1)`, version)
 		}
 		if err != nil {

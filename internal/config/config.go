@@ -57,14 +57,8 @@ func Load() (*Config, error) {
 	}
 	c.AllowedEmails = csv(os.Getenv("AUTH_GOOGLE_ALLOWED_EMAILS"))
 	c.AllowedDomains = csv(os.Getenv("AUTH_GOOGLE_ALLOWED_DOMAINS"))
-	timezone := env("APP_TIMEZONE", "America/New_York")
-	if strings.EqualFold(timezone, "Local") {
-		// LoadLocation accepts "Local" as the host's zone, which can differ
-		// between the server and reminder hosts.
-		return nil, fmt.Errorf("APP_TIMEZONE must be an IANA time zone name, not Local")
-	}
-	if c.Location, err = time.LoadLocation(timezone); err != nil {
-		return nil, fmt.Errorf("APP_TIMEZONE must be an IANA time zone name: %w", err)
+	if c.Location, err = LoadLocation(); err != nil {
+		return nil, err
 	}
 	if c.SessionTTL, err = time.ParseDuration(env("SESSION_TTL", "2160h")); err != nil || c.SessionTTL <= 0 {
 		return nil, fmt.Errorf("SESSION_TTL must be a positive Go duration")
@@ -166,6 +160,22 @@ func (c *Config) SecureCookies() bool {
 	redirect, err := url.Parse(c.GoogleRedirectURL)
 	return err == nil && strings.EqualFold(redirect.Scheme, "https")
 }
+
+// LoadLocation returns the household time zone named by APP_TIMEZONE.
+func LoadLocation() (*time.Location, error) {
+	timezone := env("APP_TIMEZONE", "America/New_York")
+	if strings.EqualFold(timezone, "Local") {
+		// LoadLocation accepts "Local" as the host's zone, which can differ
+		// between the server and reminder hosts.
+		return nil, fmt.Errorf("APP_TIMEZONE must be an IANA time zone name, not Local")
+	}
+	location, err := time.LoadLocation(timezone)
+	if err != nil {
+		return nil, fmt.Errorf("APP_TIMEZONE must be an IANA time zone name: %w", err)
+	}
+	return location, nil
+}
+
 func LoadDatabaseURL() (string, error) {
 	return envOrFile("DATABASE_URL", "/run/secrets/carma_database_url")
 }

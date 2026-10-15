@@ -20,6 +20,10 @@ func main() {
 	if databaseURL == "" {
 		log.Fatal("DATABASE_URL is required")
 	}
+	location, e := config.LoadLocation()
+	if e != nil {
+		log.Fatal(e)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	conn, e := pgx.Connect(ctx, databaseURL)
@@ -27,7 +31,7 @@ func main() {
 		log.Fatal(e)
 	}
 	defer conn.Close(ctx)
-	if e = database.Migrate(ctx, conn, migrations.FS); e != nil {
+	if e = database.Migrate(ctx, conn, migrations.FS, location); e != nil {
 		log.Fatal(e)
 	}
 	_, _ = os.Stdout.WriteString("migrations applied\n")

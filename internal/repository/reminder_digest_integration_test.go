@@ -103,7 +103,7 @@ func TestReminderDigestPostgresIntegration(t *testing.T) {
 	if _, err = connection.Exec(ctx, string(down)); err != nil {
 		t.Fatal(err)
 	}
-	if err = database.Migrate(ctx, connection, migrations.FS); err != nil {
+	if err = database.Migrate(ctx, connection, migrations.FS, time.UTC); err != nil {
 		t.Fatalf("reapply after down: %v", err)
 	}
 	var rows int

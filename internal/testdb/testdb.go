@@ -67,7 +67,7 @@ func URL(t testing.TB) string {
 		t.Fatal(err)
 	}
 	defer func() { _ = connection.Close(context.Background()) }()
-	if err = database.Migrate(ctx, connection, migrations.FS); err != nil {
+	if err = database.Migrate(ctx, connection, migrations.FS, time.UTC); err != nil {
 		t.Fatal(err)
 	}
 	return scopedURL

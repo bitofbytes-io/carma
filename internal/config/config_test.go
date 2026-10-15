@@ -147,6 +147,23 @@ func TestAppTimezoneDefaultsToNewYorkAndIsValidated(t *testing.T) {
 	}
 }
 
+func TestLoadLocationNeedsOnlyAppTimezone(t *testing.T) {
+	// carma-migrate loads the zone without the server's other settings.
+	t.Setenv("DATABASE_URL", "")
+	t.Setenv("APP_TIMEZONE", "")
+	if location, err := LoadLocation(); err != nil || location.String() != "America/New_York" {
+		t.Fatalf("default location=%v err=%v", location, err)
+	}
+	t.Setenv("APP_TIMEZONE", "Europe/Berlin")
+	if location, err := LoadLocation(); err != nil || location.String() != "Europe/Berlin" {
+		t.Fatalf("location=%v err=%v", location, err)
+	}
+	t.Setenv("APP_TIMEZONE", "Local")
+	if _, err := LoadLocation(); err == nil || !strings.Contains(err.Error(), "APP_TIMEZONE") {
+		t.Fatalf("Local accepted: %v", err)
+	}
+}
+
 func TestSecureCookiesFollowRedirectSchemeOrProduction(t *testing.T) {
 	for _, tc := range []struct {
 		appEnv, redirect string

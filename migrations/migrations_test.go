@@ -197,7 +197,7 @@ func TestVehicleOdometerDateMigrationBackfill(t *testing.T) {
 		"alter table vehicles add column current_odometer_on date",
 		"from odometer_readings o",
 		"from records r",
-		"v.updated_at::date",
+		"(v.updated_at at time zone current_setting('carma.household_timezone'))::date",
 		"where v.current_odometer_miles is not null",
 	} {
 		if !strings.Contains(sql, declaration) {
