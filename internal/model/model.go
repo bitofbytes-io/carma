@@ -22,10 +22,7 @@ type Vehicle struct {
 	Make, Model, VIN, LicensePlate, PhotoKey, Notes string
 	ArchivedAt                                      *time.Time
 	CreatedAt, UpdatedAt                            time.Time
-	// UpdatedBy is the user saving the vehicle, credited with any earlier
-	// mileage the save moves into the reading history.
-	UpdatedBy       uuid.UUID
-	CurrentOdometer *int64
+	CurrentOdometer                                 *int64
 	// CurrentOdometerOn is the calendar date CurrentOdometer was recorded,
 	// stored when the mileage is written so it can feed mileage projections.
 	CurrentOdometerOn *time.Time

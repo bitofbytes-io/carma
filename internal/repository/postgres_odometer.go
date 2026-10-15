@@ -15,8 +15,8 @@ import (
 var ErrOdometerBelowLatest = errors.New("odometer reading is below the latest mileage")
 
 // archiveVehicleMileageSQL keeps the vehicle's dated mileage ($1) in the
-// reading history, attributed to $2 at $3, before it changes to $4, unless a
-// reading or record already holds the same point.
+// reading history, attributed to $2 at $3, before a check-in changes it to
+// $4, unless a reading or record already holds the same point.
 const archiveVehicleMileageSQL = `INSERT INTO odometer_readings(id,vehicle_id,read_on,odometer_miles,created_by,created_at)
 	SELECT gen_random_uuid(),v.id,v.current_odometer_on,v.current_odometer_miles,$2,$3
 	FROM vehicles v

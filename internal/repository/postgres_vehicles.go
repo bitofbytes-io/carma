@@ -145,19 +145,10 @@ func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 		return vehicle, "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var locked int
-	err = tx.QueryRow(ctx, `SELECT 1 FROM vehicles WHERE id=$1 FOR UPDATE`, vehicle.ID).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return vehicle, "", ErrNotFound
-	}
-	if err != nil {
-		return vehicle, "", err
-	}
-	if _, err = tx.Exec(ctx, archiveVehicleMileageSQL, vehicle.ID, vehicle.UpdatedBy, vehicle.UpdatedAt, vehicle.CurrentOdometer); err != nil {
-		return vehicle, "", err
-	}
 	// Lock the row and read the photo it held before this write, so a concurrent
 	// replacement is never overwritten or reported as the wrong old key.
+	// Mileage saved here corrects the vehicle's point rather than adding a
+	// reading, so the old point is replaced; check-ins keep history instead.
 	// An unchanged mileage keeps its date. The edit form shows the effective
 	// latest mileage, so resubmitting a higher one from a service record takes
 	// that record's date; any other new mileage is dated $12.

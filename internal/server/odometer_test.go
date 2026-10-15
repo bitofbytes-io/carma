@@ -156,21 +156,54 @@ func TestVehicleMileageFeedsProjection(t *testing.T) {
 	if len(points) != 2 || !points[1].On.Equal(today) || points[1].Miles != 1102 {
 		t.Fatalf("points after unchanged save=%+v", points)
 	}
-	// Changing it dates it on the day it was entered and keeps the old point.
+	// Changing it on the form is a correction: it replaces the point and is
+	// dated on the day it was entered.
 	saveVehicle("/vehicles/"+v.ID.String(), "1402")
 	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
-	if len(points) != 3 || !points[1].On.Equal(today) || points[1].Miles != 1102 || !points[2].On.Equal(today.AddDate(0, 0, 10)) || points[2].Miles != 1402 {
+	if len(points) != 2 || !points[1].On.Equal(today.AddDate(0, 0, 10)) || points[1].Miles != 1402 {
 		t.Fatalf("points after mileage change=%+v", points)
 	}
 
-	// A reading that raises the mileage moves its date, keeps the old point,
+	// A check-in that raises the mileage moves its date, keeps the old point,
 	// and is not counted twice.
 	if _, err := f.store.AddOdometerReading(t.Context(), model.OdometerReading{ID: uuid.New(), VehicleID: v.ID, ReadOn: today.AddDate(0, 0, 12), OdometerMiles: 1500, CreatedBy: f.user.ID, CreatedAt: time.Now()}, false); err != nil {
 		t.Fatal(err)
 	}
 	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
-	if len(points) != 4 || points[2].Miles != 1402 || !points[3].On.Equal(today.AddDate(0, 0, 12)) || points[3].Miles != 1500 {
+	if len(points) != 3 || points[1].Miles != 1402 || !points[2].On.Equal(today.AddDate(0, 0, 12)) || points[2].Miles != 1500 {
 		t.Fatalf("points after reading=%+v", points)
+	}
+}
+
+func TestVehicleMileageCorrectionReplacesPoint(t *testing.T) {
+	for _, tc := range []struct{ name, entered, corrected string }{
+		{name: "lower", entered: "100000", corrected: "10000"},
+		{name: "higher", entered: "1000", corrected: "10000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			b, ct := formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": tc.entered}, "", nil)
+			if response := f.do(t, http.MethodPost, "/vehicles", b, ct); response.Code != http.StatusSeeOther {
+				t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+			}
+			vehicles, _ := f.store.ListVehicles(t.Context(), false)
+			v := vehicles[0]
+			created := f.s.today()
+			now := f.s.now
+			f.s.now = func() time.Time { return now().AddDate(0, 0, 7) }
+			b, ct = formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": tc.corrected}, "", nil)
+			if response := f.do(t, http.MethodPost, "/vehicles/"+v.ID.String(), b, ct); response.Code != http.StatusSeeOther {
+				t.Fatalf("edit status=%d body=%s", response.Code, response.Body.String())
+			}
+			points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, created.AddDate(-1, 0, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The mistyped value must not stay in the history to skew the rate.
+			if len(points) != 1 || points[0].Miles != 10000 || !points[0].On.Equal(f.s.today()) {
+				t.Fatalf("points=%+v, want only the corrected 10000 mi", points)
+			}
+		})
 	}
 }
 
@@ -238,8 +271,8 @@ func TestVehicleSaveDatesMileageCopiedFromRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(points) != 2 || !points[0].On.Equal(today) || points[0].Miles != 1000 || !points[1].On.Equal(recordOn) || points[1].Miles != 1500 {
-		t.Fatalf("points=%+v, want 1000 mi on %s and the record's 1500 mi on %s", points, today.Format("Jan 2"), recordOn.Format("Jan 2"))
+	if len(points) != 1 || !points[0].On.Equal(recordOn) || points[0].Miles != 1500 {
+		t.Fatalf("points=%+v, want only the record's 1500 mi on %s", points, recordOn.Format("Jan 2"))
 	}
 }
 
