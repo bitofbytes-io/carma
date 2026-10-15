@@ -154,9 +154,17 @@ due soon, but only an actual reading makes it overdue, so email is unaffected.
   settings) checks hourly, under its own advisory lock, whether this week's digest
   is due: from 08:00 household time on Monday, one email per week lists every overdue and
   due-soon reminder (including projected mileage dates) grouped by vehicle, overdue
-  first. A `reminder_digests` row per `week_start` (the local Monday) dedupes sends
-  across replicas; a week with nothing to report is not recorded, so a later check
-  that week still sends once something comes due.
+  first. It leads with new NHTSA recalls: open, undismissed `vehicle_recalls` with no
+  `recall_notifications` row, each linking to NHTSA's VIN lookup (`nhtsa.gov/recalls?vymm=<VIN>`,
+  only for a valid VIN) and to `PUBLIC_URL/vehicles/{id}#recalls` to dismiss it.
+  A `reminder_digests` row per `week_start` (the local Monday) dedupes sends
+  across replicas; reserving it also records its recalls in `recall_notifications`
+  (with the digest's id) in the same transaction, and releasing an unsent claim
+  deletes them, so a recall is announced at most once. That table is kept apart from
+  `vehicle_recalls`, whose rows each check replaces, so a campaign NHTSA drops and
+  lists again is not announced twice. A week with nothing to report is not
+  recorded, so a later check that week still sends once something comes due or a
+  recall is found.
 
 ## NHTSA recalls and VIN decode
 
@@ -169,8 +177,14 @@ outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 - `internal/recallcheck.Runner` runs at startup and every 6 hours under its own
   advisory lock. It checks vehicles never checked, last checked over 7 days ago, or
   whose year, make, or model changed since (`vehicle_recall_checks`), and replaces
-  their `vehicle_recalls` rows, keeping dismissals of campaigns still listed. A
-  failed fetch is retried on the next run.
+  their `vehicle_recalls` rows. Dismissals (`recall_dismissals`) and notifications
+  (`recall_notifications`) are kept apart from those rows, so a campaign NHTSA drops
+  and lists again stays dismissed and is not announced twice. A failed fetch is retried on the next run. A vehicle's first check
+  for a year, make, and model is its baseline: those campaigns are recorded as
+  already notified (they show on the vehicle page right away), so the digest emails
+  only campaigns NHTSA adds later. Migration 008 does the same for campaigns stored
+  before recall emails existed. `carma-reminders --check-recalls` runs one check by
+  hand.
 - Campaigns cover a model year rather than a VIN, so the vehicle page lets the
   household dismiss (and restore) each one. Undismissed campaigns show in the
   dashboard's "Needs attention" as one row per vehicle.
@@ -193,7 +207,7 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `ASSET_ROOT` | stack env (`/data/assets`) | receipt/photo storage root |
 | `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
 | `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
-| `REMINDER_EMAIL_ENABLED` | stack env (`true`), default `false` | overdue reminder emails and the weekly due-soon digest |
+| `REMINDER_EMAIL_ENABLED` | stack env (`true`), default `false` | overdue reminder emails and the weekly digest (due-soon reminders and new recalls) |
 | `SMTP_PASSWORD` | secret `carma_smtp_password` via `SMTP_PASSWORD_FILE` | email reminders |
 
 ## CI/CD pipeline

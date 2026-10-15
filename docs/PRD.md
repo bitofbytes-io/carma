@@ -139,8 +139,9 @@ filters, inspections) doesn't get forgotten.
   `carma_smtp_password`. When explicitly disabled, the scheduler does not start.
 - Weekly digest (sent whenever reminder email is enabled): one email per week, from
   Monday 08:00 household time, listing overdue and due-soon reminders for every car
-  so upcoming work is visible before it is overdue. `reminder_digests` logs one row
-  per week to prevent duplicate sends.
+  so upcoming work is visible before it is overdue, plus NHTSA recalls found since
+  the last digest (each announced once, never if dismissed). `reminder_digests` logs
+  one row per week to prevent duplicate sends.
 
 ## Data model
 
@@ -157,6 +158,9 @@ All timestamps `timestamptz`, money in integer cents, soft deletes via `archived
 | `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, starting_odometer_pending (migration repair marker), enabled, created_at; unique (vehicle_id, service_type_id) |
 | `reminder_notifications` | id, reminder_id FK, sent_at, recipients, message_id |
 | `reminder_digests` | id, week_start (unique date), sent_at, recipients, message_id |
+| `vehicle_recalls` | vehicle_id FK, campaign_number, component, summary, consequence, remedy, park_it, park_outside, first_seen_at, dismissed_at |
+| `recall_dismissals` | vehicle_id FK, campaign_number, dismissed_at (survives a campaign dropping out of a refresh) |
+| `recall_notifications` | vehicle_id FK, campaign_number, notified_at, digest_id (null for baseline campaigns) |
 
 Notes:
 

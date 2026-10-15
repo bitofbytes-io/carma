@@ -21,4 +21,7 @@ type ReminderDigest struct {
 	WeekStart  time.Time
 	ReservedAt time.Time
 	Recipients []string
+	// Recalls are the new recall campaigns the digest announces. Reserving the
+	// digest marks them notified, and releasing it clears that again.
+	Recalls []RecallKey
 }
