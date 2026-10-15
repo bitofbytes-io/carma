@@ -46,8 +46,12 @@ through `SMTP_PASSWORD`.
 Reminder email is optional locally and requires PostgreSQL when enabled. Its
 non-secret contract is `REMINDER_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_USERNAME`,
 `SMTP_FROM_ADDRESS`, `SMTP_FROM_NAME`, `SMTP_TLS_MODE=implicit`, and `PUBLIC_URL`.
+It turns on both the overdue reminder emails and the weekly due-soon digest.
 Incomplete enabled configuration fails startup. TLS certificate and hostname
 verification must remain enabled.
+
+VIN decoding and the weekly recall check always run and need outbound HTTPS to
+`vpic.nhtsa.dot.gov` and `api.nhtsa.gov`; neither needs a key or any configuration.
 
 ## Validation boundary
 

@@ -147,12 +147,12 @@ due soon, but only an actual reading makes it overdue, so email is unaffected.
   within the last 30 days; otherwise send and log.
 - `internal/mailer`: authenticated SMTP over certificate-verified implicit TLS.
   Separate configuration fields keep the password in a password-only `*_FILE` secret.
-  `REMINDER_EMAIL_ENABLED=false` leaves the scheduler off.
+  `REMINDER_EMAIL_ENABLED=false` leaves the reminder and digest schedulers off.
 - Email content: vehicle, service type, baseline (last done date/mileage), what
   triggered it (time or mileage), and a link to the vehicle page.
-- `internal/reminderemail.DigestRunner` (opt-in, `REMINDER_DIGEST_ENABLED=true`)
-  checks hourly, under its own advisory lock, whether this week's digest is due:
-  from 08:00 household time on Monday, one email per week lists every overdue and
+- `internal/reminderemail.DigestRunner` (on whenever reminder email is, same SMTP
+  settings) checks hourly, under its own advisory lock, whether this week's digest
+  is due: from 08:00 household time on Monday, one email per week lists every overdue and
   due-soon reminder (including projected mileage dates) grouped by vehicle, overdue
   first. A `reminder_digests` row per `week_start` (the local Monday) dedupes sends
   across replicas; a week with nothing to report is not recorded, so a later check
@@ -160,7 +160,8 @@ due soon, but only an actual reading makes it overdue, so email is unaffected.
 
 ## NHTSA recalls and VIN decode
 
-Opt-in with `NHTSA_ENABLED=true`; both NHTSA APIs are public and keyless.
+Always on; both NHTSA APIs are public and keyless, so the containers only need
+outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 - `internal/nhtsa`: VIN decode via vPIC (`DecodeVinValues`) and recall campaigns via
   `api.nhtsa.gov/recalls/recallsByVehicle` (make, model, model year).
 - `POST /vehicles/vin-decode` (htmx) re-renders the form's identity fields filled in
@@ -192,9 +193,8 @@ Same `getEnvOrFile` convention as dined/noted - every secret readable from env o
 | `ASSET_ROOT` | stack env (`/data/assets`) | receipt/photo storage root |
 | `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
 | `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
+| `REMINDER_EMAIL_ENABLED` | stack env (`true`), default `false` | overdue reminder emails and the weekly due-soon digest |
 | `SMTP_PASSWORD` | secret `carma_smtp_password` via `SMTP_PASSWORD_FILE` | email reminders |
-| `REMINDER_DIGEST_ENABLED` | default `false` | weekly due-soon digest; requires `REMINDER_EMAIL_ENABLED=true` and reuses its SMTP settings |
-| `NHTSA_ENABLED` | default `false` | VIN decode button and weekly NHTSA recall check; needs outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`, no key |
 
 ## CI/CD pipeline
 
