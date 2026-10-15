@@ -26,7 +26,7 @@ type Server struct {
 	google auth.Google
 	ui     *ui.Renderer
 	now    func() time.Time
-	// vinDecoder is nil unless NHTSA lookups are enabled.
+	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
 }
 

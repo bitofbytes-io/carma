@@ -96,41 +96,15 @@ func TestReminderEmailPasswordFileIsMandatory(t *testing.T) {
 	})
 }
 
-func TestReminderDigestIsOptInAndNeedsReminderEmail(t *testing.T) {
+func TestRemovedFeatureFlagsAreIgnored(t *testing.T) {
+	// NHTSA lookups and the weekly digest are always on now; a stack that still
+	// sets the old flags, even to invalid values, must keep starting.
 	setReminderEmailEnvironment(t)
-	cfg, err := Load()
-	if err != nil || cfg.ReminderEmail.DigestEnabled {
-		t.Fatalf("digest should default off: cfg=%+v err=%v", cfg, err)
-	}
-	t.Setenv("REMINDER_DIGEST_ENABLED", "true")
-	if cfg, err = Load(); err != nil || !cfg.ReminderEmail.DigestEnabled {
-		t.Fatalf("digest enabled: cfg=%+v err=%v", cfg, err)
-	}
-	t.Setenv("REMINDER_DIGEST_ENABLED", "sometimes")
-	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "REMINDER_DIGEST_ENABLED must be true or false") {
-		t.Fatalf("invalid flag error = %v", err)
-	}
-	t.Setenv("REMINDER_DIGEST_ENABLED", "true")
 	t.Setenv("REMINDER_EMAIL_ENABLED", "false")
-	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "requires REMINDER_EMAIL_ENABLED=true") {
-		t.Fatalf("digest without email error = %v", err)
-	}
-}
-
-func TestNHTSAIsOptIn(t *testing.T) {
-	setReminderEmailEnvironment(t)
-	t.Setenv("NHTSA_ENABLED", "")
-	cfg, err := Load()
-	if err != nil || cfg.NHTSAEnabled {
-		t.Fatalf("NHTSA should default off: cfg=%+v err=%v", cfg, err)
-	}
-	t.Setenv("NHTSA_ENABLED", "true")
-	if cfg, err = Load(); err != nil || !cfg.NHTSAEnabled {
-		t.Fatalf("NHTSA enabled: cfg=%+v err=%v", cfg, err)
-	}
+	t.Setenv("REMINDER_DIGEST_ENABLED", "true")
 	t.Setenv("NHTSA_ENABLED", "maybe")
-	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "NHTSA_ENABLED must be true or false") {
-		t.Fatalf("invalid flag error = %v", err)
+	if _, err := Load(); err != nil {
+		t.Fatalf("stale flags should be ignored: %v", err)
 	}
 }
 
@@ -144,7 +118,7 @@ func setReminderEmailEnvironment(t *testing.T) {
 		"APP_ENV": "development", "AUTH_MODE": "development", "DATABASE_URL": "postgres://example",
 		"REMINDER_EMAIL_ENABLED": "true", "SMTP_HOST": "mail.bitofbytes.io:465", "SMTP_USERNAME": "carma",
 		"SMTP_PASSWORD": "", "SMTP_PASSWORD_FILE": passwordFile, "SMTP_FROM_ADDRESS": "carma@bitofbytes.io", "SMTP_FROM_NAME": "Carma",
-		"SMTP_TLS_MODE": "implicit", "PUBLIC_URL": "https://carma.bitofbytes.io", "REMINDER_DIGEST_ENABLED": "",
+		"SMTP_TLS_MODE": "implicit", "PUBLIC_URL": "https://carma.bitofbytes.io",
 	} {
 		t.Setenv(key, value)
 	}

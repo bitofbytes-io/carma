@@ -75,12 +75,9 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	var recallRunner *recallcheck.Runner
-	if cfg.NHTSAEnabled {
-		client := nhtsa.NewClient()
-		app.EnableVINDecode(client)
-		recallRunner = recallcheck.NewRunner(store, client, slog.Default())
-	}
+	nhtsaClient := nhtsa.NewClient()
+	app.EnableVINDecode(nhtsaClient)
+	recallRunner := recallcheck.NewRunner(store, nhtsaClient, slog.Default())
 	var reminderRunner *reminderemail.Runner
 	var digestRunner *reminderemail.DigestRunner
 	if cfg.ReminderEmail.Enabled {
@@ -89,9 +86,7 @@ func run() error {
 			return err
 		}
 		reminderRunner = reminderemail.NewRunner(store, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
-		if cfg.ReminderEmail.DigestEnabled {
-			digestRunner = reminderemail.NewDigestRunner(store, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
-		}
+		digestRunner = reminderemail.NewDigestRunner(store, sender, cfg.ReminderEmail.PublicURL, allowed, cfg.Location, slog.Default())
 	}
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
@@ -133,13 +128,11 @@ func run() error {
 			}
 		})
 	}
-	if recallRunner != nil {
-		every(recallcheck.DefaultInterval, func(ctx context.Context) {
-			if report, err := recallRunner.Run(ctx); err != nil && ctx.Err() == nil {
-				slog.Error("recall check failed", "checked", report.Checked, "failed", report.Failed, "error", err)
-			}
-		})
-	}
+	every(recallcheck.DefaultInterval, func(ctx context.Context) {
+		if report, err := recallRunner.Run(ctx); err != nil && ctx.Err() == nil {
+			slog.Error("recall check failed", "checked", report.Checked, "failed", report.Failed, "error", err)
+		}
+	})
 	go func() {
 		slog.Info("carma listening", "port", cfg.Port, "auth", cfg.AuthMode)
 		errs <- httpServer.ListenAndServe()

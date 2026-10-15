@@ -137,7 +137,7 @@ filters, inspections) doesn't get forgotten.
   per-reminder recipient settings.
 - SMTP uses separate settings and the password-only Docker secret
   `carma_smtp_password`. When explicitly disabled, the scheduler does not start.
-- Optional weekly digest (`REMINDER_DIGEST_ENABLED=true`): one email per week, from
+- Weekly digest (sent whenever reminder email is enabled): one email per week, from
   Monday 08:00 household time, listing overdue and due-soon reminders for every car
   so upcoming work is visible before it is overdue. `reminder_digests` logs one row
   per week to prevent duplicate sends.

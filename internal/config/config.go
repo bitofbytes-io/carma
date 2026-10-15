@@ -27,9 +27,6 @@ type Config struct {
 	MaxUploadBytes                                        int64
 	MaxMultipartBytes                                     int64
 	ReminderEmail                                         ReminderEmail
-	// NHTSAEnabled turns on VIN decoding and the weekly recall check, which
-	// call NHTSA's public APIs.
-	NHTSAEnabled bool
 	// Location is the household time zone (APP_TIMEZONE) that decides "today"
 	// for due dates and new-record defaults.
 	Location *time.Location
@@ -44,8 +41,6 @@ type ReminderEmail struct {
 	FromName     string
 	TLSMode      string
 	PublicURL    string
-	// DigestEnabled adds the weekly due-soon digest; it requires Enabled.
-	DigestEnabled bool
 }
 
 func Load() (*Config, error) {
@@ -82,15 +77,6 @@ func Load() (*Config, error) {
 	}
 	if c.ReminderEmail.Enabled, err = strconv.ParseBool(env("REMINDER_EMAIL_ENABLED", "false")); err != nil {
 		return nil, fmt.Errorf("REMINDER_EMAIL_ENABLED must be true or false")
-	}
-	if c.ReminderEmail.DigestEnabled, err = strconv.ParseBool(env("REMINDER_DIGEST_ENABLED", "false")); err != nil {
-		return nil, fmt.Errorf("REMINDER_DIGEST_ENABLED must be true or false")
-	}
-	if c.NHTSAEnabled, err = strconv.ParseBool(env("NHTSA_ENABLED", "false")); err != nil {
-		return nil, fmt.Errorf("NHTSA_ENABLED must be true or false")
-	}
-	if c.ReminderEmail.DigestEnabled && !c.ReminderEmail.Enabled {
-		return nil, fmt.Errorf("REMINDER_DIGEST_ENABLED requires REMINDER_EMAIL_ENABLED=true")
 	}
 	if c.ReminderEmail.Enabled {
 		c.ReminderEmail.SMTPHost = strings.TrimSpace(os.Getenv("SMTP_HOST"))
