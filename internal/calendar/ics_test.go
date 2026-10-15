@@ -16,18 +16,20 @@ func TestFeedListsDatedEnabledRemindersAsAllDayEvents(t *testing.T) {
 	months, miles := 6, int64(5000)
 	due := time.Date(2027, 1, 31, 0, 0, 0, 0, loc)
 	id, vehicleID := uuid.New(), uuid.New()
+	saved := time.Date(2026, 10, 14, 23, 5, 9, 0, loc)
+	baseline := &model.Record{CreatedAt: saved.AddDate(0, -1, 0), UpdatedAt: saved.Add(time.Hour)}
 	results := []reminder.Result{
-		{Reminder: model.Reminder{ID: id, VehicleID: vehicleID, VehicleName: "Mom's car; the blue one", ServiceTypeName: "Oil, filter", IntervalMonths: &months, IntervalMiles: &miles, Enabled: true}, DueDate: &due, Detail: "~1,200 mi left"},
+		{Reminder: model.Reminder{ID: id, VehicleID: vehicleID, VehicleName: "Mom's car; the blue one", ServiceTypeName: "Oil, filter", IntervalMonths: &months, IntervalMiles: &miles, Enabled: true, CreatedAt: saved.AddDate(-1, 0, 0), UpdatedAt: saved, Baseline: baseline}, DueDate: &due, Detail: "~1,200 mi left"},
 		{Reminder: model.Reminder{ID: uuid.New(), VehicleName: "Truck", ServiceTypeName: "Tires", IntervalMiles: &miles, Enabled: true}},
 		{Reminder: model.Reminder{ID: uuid.New(), VehicleName: "Van", ServiceTypeName: "Wipers", IntervalMonths: &months}, DueDate: &due},
 	}
-	feed := string(Feed(results, time.Date(2026, 10, 14, 23, 5, 9, 0, loc), "https://carma.example"))
+	feed := string(Feed(results, "https://carma.example"))
 	unfolded := strings.ReplaceAll(feed, "\r\n ", "")
 	for _, want := range []string{
 		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\n",
-		"BEGIN:VEVENT\r\nUID:reminder-" + id.String() + "@carma\r\nDTSTAMP:20261015T030509Z\r\nDTSTART;VALUE=DATE:20270131\r\nDTEND;VALUE=DATE:20270201\r\n",
+		"BEGIN:VEVENT\r\nUID:reminder-" + id.String() + "@carma\r\nDTSTAMP:20261015T040509Z\r\nDTSTART;VALUE=DATE:20270131\r\nDTEND;VALUE=DATE:20270201\r\n",
 		`SUMMARY:Oil\, filter due · Mom's car\; the blue one` + "\r\n",
-		`DESCRIPTION:Oil\, filter for Mom's car\; the blue one\, every 6 months or 5000 miles.\n~1\,200 mi left` + "\r\n",
+		`DESCRIPTION:Oil\, filter for Mom's car\; the blue one\, every 6 months or 5000 miles.` + "\r\n",
 		"URL:https://carma.example/vehicles/" + vehicleID.String() + "/reminders\r\n",
 		"END:VCALENDAR\r\n",
 	} {
@@ -50,8 +52,8 @@ func TestFeedListsDatedEnabledRemindersAsAllDayEvents(t *testing.T) {
 func TestFeedWithoutBaseURLOmitsLinks(t *testing.T) {
 	months := 1
 	due := time.Date(2027, 1, 31, 0, 0, 0, 0, time.UTC)
-	feed := string(Feed([]reminder.Result{{Reminder: model.Reminder{ID: uuid.New(), ServiceTypeName: "Wash", VehicleName: "Car", IntervalMonths: &months, Enabled: true}, DueDate: &due}}, due, ""))
-	if strings.Contains(feed, "URL:") || !strings.Contains(feed, "every 1 month.") {
+	feed := string(Feed([]reminder.Result{{Reminder: model.Reminder{ID: uuid.New(), ServiceTypeName: "Wash", VehicleName: "Car", IntervalMonths: &months, Enabled: true, CreatedAt: due.AddDate(0, -1, 0)}, DueDate: &due}}, ""))
+	if strings.Contains(feed, "URL:") || !strings.Contains(feed, "every 1 month.") || !strings.Contains(feed, "DTSTAMP:20261231T000000Z") {
 		t.Fatalf("unexpected feed:\n%s", feed)
 	}
 }

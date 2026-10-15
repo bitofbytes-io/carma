@@ -25,12 +25,12 @@ const upsertReminderSQL = `INSERT INTO reminders(id,vehicle_id,service_type_id,i
 func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disabled bool) ([]model.Reminder, error) {
 	rows, err := p.pool.Query(ctx, `SELECT rm.id,rm.vehicle_id,rm.service_type_id,v.nickname,st.name,rm.interval_months,rm.interval_miles,
 			rm.starting_odometer_miles,rm.starting_odometer_pending,rm.enabled,rm.created_at,rm.updated_at,b.id,
-			b.occurred_on,b.odometer_miles,b.created_at,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records x WHERE x.vehicle_id=rm.vehicle_id))
+			b.occurred_on,b.odometer_miles,b.created_at,b.updated_at,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records x WHERE x.vehicle_id=rm.vehicle_id))
 		FROM reminders rm
 		JOIN vehicles v ON v.id=rm.vehicle_id
 		JOIN service_types st ON st.id=rm.service_type_id
 		LEFT JOIN LATERAL (
-			SELECT r.id,r.occurred_on,r.odometer_miles,r.created_at
+			SELECT r.id,r.occurred_on,r.odometer_miles,r.created_at,r.updated_at
 			FROM records r
 			WHERE r.vehicle_id=rm.vehicle_id
 			AND r.service_type_id=rm.service_type_id
@@ -49,7 +49,7 @@ func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disa
 	for rows.Next() {
 		var reminder model.Reminder
 		var baselineID *uuid.UUID
-		var baselineDate, baselineCreatedAt *time.Time
+		var baselineDate, baselineCreatedAt, baselineUpdatedAt *time.Time
 		var baselineOdometer *int64
 		if err := rows.Scan(
 			&reminder.ID, &reminder.VehicleID, &reminder.ServiceTypeID,
@@ -57,7 +57,7 @@ func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disa
 			&reminder.IntervalMiles, &reminder.StartingOdometer, &reminder.StartingOdometerPending,
 			&reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt,
 			&baselineID, &baselineDate, &baselineOdometer,
-			&baselineCreatedAt, &reminder.LatestOdometer,
+			&baselineCreatedAt, &baselineUpdatedAt, &reminder.LatestOdometer,
 		); err != nil {
 			return nil, err
 		}
@@ -69,6 +69,7 @@ func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disa
 				OccurredOn:    *baselineDate,
 				OdometerMiles: baselineOdometer,
 				CreatedAt:     *baselineCreatedAt,
+				UpdatedAt:     *baselineUpdatedAt,
 			}
 		}
 		reminders = append(reminders, reminder)

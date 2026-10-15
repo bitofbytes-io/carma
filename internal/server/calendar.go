@@ -114,7 +114,7 @@ func (s *Server) calendarFeed(response http.ResponseWriter, request *http.Reques
 	response.Header().Set("Content-Disposition", `inline; filename="carma-reminders.ics"`)
 	response.Header().Set("Cache-Control", "private, no-cache")
 	response.Header().Set("X-Robots-Tag", "noindex")
-	_, _ = response.Write(calendar.Feed(results, s.now(), s.publicOrigin(request)))
+	_, _ = response.Write(calendar.Feed(results, s.publicOrigin(request)))
 }
 
 // publicOrigin is the origin used in links to Carma: PUBLIC_URL when it is

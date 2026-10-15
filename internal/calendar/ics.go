@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
 )
 
@@ -18,9 +19,9 @@ const RefreshInterval = "PT6H"
 
 // Feed returns an iCalendar document with an all-day event on the due date of
 // each enabled reminder that has a time interval. Mileage-only reminders are
-// left out because their dates are only estimates. now stamps the events;
-// baseURL, when set, is the Carma origin that events link back to.
-func Feed(results []reminder.Result, now time.Time, baseURL string) []byte {
+// left out because their dates are only estimates. baseURL, when set, is the
+// Carma origin that events link back to.
+func Feed(results []reminder.Result, baseURL string) []byte {
 	var b strings.Builder
 	line := func(s string) { writeFolded(&b, s) }
 	line("BEGIN:VCALENDAR")
@@ -31,7 +32,6 @@ func Feed(results []reminder.Result, now time.Time, baseURL string) []byte {
 	line("X-WR-CALDESC:Vehicle service due dates from Carma")
 	line("REFRESH-INTERVAL;VALUE=DURATION:" + RefreshInterval)
 	line("X-PUBLISHED-TTL:" + RefreshInterval)
-	stamp := now.UTC().Format("20060102T150405Z")
 	for _, result := range results {
 		r := result.Reminder
 		if !r.Enabled || result.DueDate == nil {
@@ -40,11 +40,11 @@ func Feed(results []reminder.Result, now time.Time, baseURL string) []byte {
 		due := *result.DueDate
 		line("BEGIN:VEVENT")
 		line("UID:reminder-" + r.ID.String() + "@carma")
-		line("DTSTAMP:" + stamp)
+		line("DTSTAMP:" + revised(r).UTC().Format("20060102T150405Z"))
 		line("DTSTART;VALUE=DATE:" + due.Format("20060102"))
 		line("DTEND;VALUE=DATE:" + due.AddDate(0, 0, 1).Format("20060102"))
 		line("SUMMARY:" + escape(r.ServiceTypeName+" due · "+r.VehicleName))
-		line("DESCRIPTION:" + escape(description(result)))
+		line("DESCRIPTION:" + escape(description(r)))
 		if baseURL != "" {
 			line("URL:" + baseURL + "/vehicles/" + r.VehicleID.String() + "/reminders")
 		}
@@ -55,8 +55,7 @@ func Feed(results []reminder.Result, now time.Time, baseURL string) []byte {
 	return []byte(b.String())
 }
 
-func description(result reminder.Result) string {
-	r := result.Reminder
+func description(r model.Reminder) string {
 	var intervals []string
 	if r.IntervalMonths != nil {
 		unit := " months"
@@ -68,11 +67,25 @@ func description(result reminder.Result) string {
 	if r.IntervalMiles != nil {
 		intervals = append(intervals, strconv.FormatInt(*r.IntervalMiles, 10)+" miles")
 	}
-	text := r.ServiceTypeName + " for " + r.VehicleName + ", every " + strings.Join(intervals, " or ") + "."
-	if result.Detail != "" {
-		text += "\n" + result.Detail
+	return r.ServiceTypeName + " for " + r.VehicleName + ", every " + strings.Join(intervals, " or ") + "."
+}
+
+// revised is when r's due date last changed in Carma: when the reminder was
+// saved or its baseline service record was logged or edited. A feed without a
+// METHOD uses it as each event's DTSTAMP (RFC 5545 section 3.8.7.2), so
+// unchanged events keep their stamp from one fetch to the next.
+func revised(r model.Reminder) time.Time {
+	times := []time.Time{r.CreatedAt, r.UpdatedAt}
+	if r.Baseline != nil {
+		times = append(times, r.Baseline.CreatedAt, r.Baseline.UpdatedAt)
 	}
-	return text
+	latest := times[0]
+	for _, t := range times[1:] {
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	return latest
 }
 
 // escape escapes an iCalendar TEXT value.

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
@@ -79,6 +80,10 @@ func TestCalendarFeedServesTimeBasedRemindersToLinkHolders(t *testing.T) {
 	}
 	if count := strings.Count(body, "BEGIN:VEVENT"); count != 1 {
 		t.Fatalf("feed has %d events, want only the enabled time-based reminder: %s", count, body)
+	}
+	f.s.now = func() time.Time { return time.Date(2026, 8, 1, 6, 0, 0, 0, time.UTC) }
+	if later := f.fetchFeed(t, http.MethodGet, link); later.Body.String() != w.Body.String() {
+		t.Fatalf("an unchanged feed changed between fetches:\n%s\n---\n%s", w.Body.String(), later.Body.String())
 	}
 	if head := f.fetchFeed(t, http.MethodHead, link); head.Code != http.StatusOK || head.Header().Get("Content-Type") != "text/calendar; charset=utf-8" {
 		t.Fatalf("HEAD: %d %q", head.Code, head.Header().Get("Content-Type"))
