@@ -23,8 +23,11 @@ type Vehicle struct {
 	ArchivedAt                                      *time.Time
 	CreatedAt, UpdatedAt                            time.Time
 	CurrentOdometer                                 *int64
-	LatestOdometer                                  *int64
-	LastRecord                                      *Record
+	// CurrentOdometerOn is the calendar date CurrentOdometer was recorded,
+	// stored when the mileage is written so it can feed mileage projections.
+	CurrentOdometerOn *time.Time
+	LatestOdometer    *int64
+	LastRecord        *Record
 }
 type ServiceType struct {
 	ID        uuid.UUID
@@ -61,6 +64,9 @@ type Reminder struct {
 	// MilesPerDay is the vehicle's estimated driving rate, used to project when
 	// a mileage interval comes due. Nil when there is too little history.
 	MilesPerDay *float64
+	// EstimateHint says what mileage history MilesPerDay still needs when it
+	// is nil. Empty means a generic hint.
+	EstimateHint string
 }
 
 type RecordQuery struct {

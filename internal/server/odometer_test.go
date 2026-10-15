@@ -80,7 +80,7 @@ func TestMileageProjectionOnDashboardAndReminders(t *testing.T) {
 	// The first reading starts the 5000 mi interval at 10000 mi.
 	addReading(today.AddDate(0, 0, -60), 10000)
 	page := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
-	if !strings.Contains(page, "~5,000 mi left · add a mileage reading to estimate") {
+	if !strings.Contains(page, "~5,000 mi left · log mileage again to estimate a date") {
 		t.Fatalf("reminders page missing estimate hint: %s", page)
 	}
 
@@ -101,6 +101,75 @@ func TestMileageProjectionOnDashboardAndReminders(t *testing.T) {
 	page = f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
 	if !strings.Contains(page, want) || !strings.Contains(page, "due-soon") {
 		t.Fatalf("reminders page missing projection %q: %s", want, page)
+	}
+}
+
+func TestVehicleMileageFeedsProjection(t *testing.T) {
+	f := setup(t)
+	saveVehicle := func(path, mileage string) {
+		t.Helper()
+		b, ct := formBody(t, map[string]string{"nickname": "Ranger", "year": "2026", "make": "Ford", "model": "Ranger", "current_odometer": mileage}, "", nil)
+		if response := f.do(t, http.MethodPost, path, b, ct); response.Code != http.StatusSeeOther {
+			t.Fatalf("save vehicle status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	saveVehicle("/vehicles", "1102")
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	types, _ := f.store.ListServiceTypes(t.Context())
+	miles := int64(10000)
+	if _, err := f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometer: v.LatestOdometer, Enabled: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	reminders := func() string {
+		t.Helper()
+		return f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
+	}
+	today := f.s.today()
+	// The vehicle's mileage is one dated point, so the hint says when a second
+	// one can give a driving rate.
+	want := "~10,000 mi left · log mileage again on or after " + today.AddDate(0, 0, 14).Format("Jan 2") + " to estimate a date"
+	if page := reminders(); !strings.Contains(page, want) {
+		t.Fatalf("reminders page missing %q: %s", want, page)
+	}
+
+	// An older service record pairs with the vehicle's mileage: 900 mi in 30
+	// days is 30 mi a day, so 10,000 mi are about 333 days away.
+	recordMiles := int64(202)
+	record := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[1].ID, CreatedBy: f.user.ID, OccurredOn: today.AddDate(0, 0, -30), OdometerMiles: &recordMiles, CreatedAt: time.Now()}
+	if _, err := f.store.CreateRecord(t.Context(), record, nil); err != nil {
+		t.Fatal(err)
+	}
+	want = "~10,000 mi left, est. " + today.AddDate(0, 0, 333).Format("Jan 2, 2006")
+	if page := reminders(); !strings.Contains(page, want) {
+		t.Fatalf("reminders page missing %q: %s", want, page)
+	}
+
+	// Saving the vehicle later without changing its mileage keeps its date.
+	now := f.s.now
+	f.s.now = func() time.Time { return now().AddDate(0, 0, 10) }
+	saveVehicle("/vehicles/"+v.ID.String(), "1102")
+	points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 || !points[1].On.Equal(today) || points[1].Miles != 1102 {
+		t.Fatalf("points after unchanged save=%+v", points)
+	}
+	// Changing it dates it on the day it was entered.
+	saveVehicle("/vehicles/"+v.ID.String(), "1402")
+	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if len(points) != 2 || !points[1].On.Equal(today.AddDate(0, 0, 10)) || points[1].Miles != 1402 {
+		t.Fatalf("points after mileage change=%+v", points)
+	}
+
+	// A reading that raises the mileage moves its date and is not counted twice.
+	if _, err := f.store.AddOdometerReading(t.Context(), model.OdometerReading{ID: uuid.New(), VehicleID: v.ID, ReadOn: today.AddDate(0, 0, 12), OdometerMiles: 1500, CreatedBy: f.user.ID, CreatedAt: time.Now()}, false); err != nil {
+		t.Fatal(err)
+	}
+	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if len(points) != 2 || !points[1].On.Equal(today.AddDate(0, 0, 12)) || points[1].Miles != 1500 {
+		t.Fatalf("points after reading=%+v", points)
 	}
 }
 
