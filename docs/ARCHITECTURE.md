@@ -155,12 +155,14 @@ due soon, but only an actual reading makes it overdue, so email is unaffected.
   is due: from 08:00 household time on Monday, one email per week lists every overdue and
   due-soon reminder (including projected mileage dates) grouped by vehicle, overdue
   first. It leads with new NHTSA recalls: open, undismissed `vehicle_recalls` with no
-  `notified_at`, each linking to NHTSA's VIN lookup (`nhtsa.gov/recalls?vymm=<VIN>`,
+  `recall_notifications` row, each linking to NHTSA's VIN lookup (`nhtsa.gov/recalls?vymm=<VIN>`,
   only for a valid VIN) and to `PUBLIC_URL/vehicles/{id}#recalls` to dismiss it.
   A `reminder_digests` row per `week_start` (the local Monday) dedupes sends
-  across replicas; reserving it also stamps its recalls' `notified_at` and
-  `notified_digest_id` in the same transaction, and releasing an unsent claim clears
-  them, so a recall is announced at most once. A week with nothing to report is not
+  across replicas; reserving it also records its recalls in `recall_notifications`
+  (with the digest's id) in the same transaction, and releasing an unsent claim
+  deletes them, so a recall is announced at most once. That table is kept apart from
+  `vehicle_recalls`, whose rows each check replaces, so a campaign NHTSA drops and
+  lists again is not announced twice. A week with nothing to report is not
   recorded, so a later check that week still sends once something comes due or a
   recall is found.
 
@@ -177,7 +179,7 @@ outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
   whose year, make, or model changed since (`vehicle_recall_checks`), and replaces
   their `vehicle_recalls` rows, keeping dismissals and notifications of campaigns
   still listed. A failed fetch is retried on the next run. A vehicle's first check
-  for a year, make, and model is its baseline: those campaigns are stamped as
+  for a year, make, and model is its baseline: those campaigns are recorded as
   already notified (they show on the vehicle page right away), so the digest emails
   only campaigns NHTSA adds later. Migration 008 does the same for campaigns stored
   before recall emails existed. `carma-reminders --check-recalls` runs one check by

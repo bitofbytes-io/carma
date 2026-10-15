@@ -158,7 +158,8 @@ All timestamps `timestamptz`, money in integer cents, soft deletes via `archived
 | `reminders` | id, vehicle_id FK, service_type_id FK, interval_months, interval_miles, starting_odometer_miles, starting_odometer_pending (migration repair marker), enabled, created_at; unique (vehicle_id, service_type_id) |
 | `reminder_notifications` | id, reminder_id FK, sent_at, recipients, message_id |
 | `reminder_digests` | id, week_start (unique date), sent_at, recipients, message_id |
-| `vehicle_recalls` | vehicle_id FK, campaign_number, component, summary, consequence, remedy, park_it, park_outside, first_seen_at, dismissed_at, notified_at, notified_digest_id |
+| `vehicle_recalls` | vehicle_id FK, campaign_number, component, summary, consequence, remedy, park_it, park_outside, first_seen_at, dismissed_at |
+| `recall_notifications` | vehicle_id FK, campaign_number, notified_at, digest_id (null for baseline campaigns) |
 
 Notes:
 

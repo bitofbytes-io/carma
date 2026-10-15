@@ -57,9 +57,10 @@ func (p *Postgres) ReserveReminderDigest(ctx context.Context, digest model.Remin
 			campaigns = append(campaigns, key.CampaignNumber)
 		}
 		// A campaign another digest already announced keeps that digest.
-		if _, err = tx.Exec(ctx, `UPDATE vehicle_recalls r SET notified_at=$2,notified_digest_id=$1
-			FROM unnest($3::uuid[],$4::text[]) AS k(vehicle_id,campaign_number)
-			WHERE r.vehicle_id=k.vehicle_id AND r.campaign_number=k.campaign_number AND r.notified_at IS NULL`,
+		if _, err = tx.Exec(ctx, `INSERT INTO recall_notifications(vehicle_id,campaign_number,notified_at,digest_id)
+			SELECT k.vehicle_id,k.campaign_number,$2,$1 FROM unnest($3::uuid[],$4::text[]) AS k(vehicle_id,campaign_number)
+			JOIN vehicles v ON v.id=k.vehicle_id
+			ON CONFLICT(vehicle_id,campaign_number) DO NOTHING`,
 			digest.ID, digest.ReservedAt.UTC(), vehicleIDs, campaigns); err != nil {
 			return false, err
 		}
@@ -85,7 +86,7 @@ func (p *Postgres) ReleaseReminderDigest(ctx context.Context, id uuid.UUID) erro
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE vehicle_recalls SET notified_at=NULL,notified_digest_id=NULL WHERE notified_digest_id=$1`, id); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM recall_notifications WHERE digest_id=$1`, id); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

@@ -118,12 +118,22 @@ func TestRecallNotificationsPostgresIntegration(t *testing.T) {
 	if got := unnotified(); len(got) != 1 || got[0] != "26V200000" {
 		t.Fatalf("after completed digest = %v", got)
 	}
-	// Later checks keep the notification.
+	// Later checks keep the notification, even when NHTSA drops an announced
+	// campaign and lists it again.
 	if _, err := store.SaveRecallCheck(ctx, outback, later, now.Add(14*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got := unnotified(); len(got) != 1 || got[0] != "26V200000" {
 		t.Fatalf("after another check = %v", got)
+	}
+	if _, err := store.SaveRecallCheck(ctx, outback, []model.Recall{{CampaignNumber: "19V493000"}}, now.Add(21*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := store.SaveRecallCheck(ctx, outback, later, now.Add(28*24*time.Hour)); err != nil || added != 3 {
+		t.Fatalf("relisted added=%d err=%v", added, err)
+	}
+	if got := unnotified(); len(got) != 1 || got[0] != "26V200000" {
+		t.Fatalf("relisted campaigns announced again: %v", got)
 	}
 
 	// A model change starts a new baseline.
@@ -163,12 +173,12 @@ func TestRecallNotificationMigrationBackfill(t *testing.T) {
 	if err = database.Migrate(ctx, connection, migrations.FS, time.UTC); err != nil {
 		t.Fatalf("reapply 008: %v", err)
 	}
-	var notifiedAt *time.Time
+	var notifiedAt time.Time
 	var digestID *string
-	if err = connection.QueryRow(ctx, `SELECT notified_at,notified_digest_id::text FROM vehicle_recalls WHERE vehicle_id=$1`, vehicleID).Scan(&notifiedAt, &digestID); err != nil {
+	if err = connection.QueryRow(ctx, `SELECT notified_at,digest_id::text FROM recall_notifications WHERE vehicle_id=$1 AND campaign_number='19V493000'`, vehicleID).Scan(&notifiedAt, &digestID); err != nil {
 		t.Fatal(err)
 	}
-	if want := time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC); notifiedAt == nil || !notifiedAt.Equal(want) || digestID != nil {
+	if want := time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC); !notifiedAt.Equal(want) || digestID != nil {
 		t.Fatalf("notified_at=%v digest=%v, want %v and no digest", notifiedAt, digestID, want)
 	}
 }

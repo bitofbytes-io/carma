@@ -19,7 +19,8 @@ type RecallCheckStore interface {
 	ListRecallCheckDue(ctx context.Context, staleBefore time.Time) ([]model.Vehicle, error)
 	// SaveRecallCheck replaces the vehicle's campaigns with recalls, checked for
 	// its year, make, and model. Campaigns still listed keep their first-seen
-	// time, dismissal, and notification. It returns how many campaigns are new.
+	// time and dismissal. It returns how many campaigns are new.
+	// Notifications are kept separately and survive a campaign dropping out.
 	//
 	// The first check for a year, make, and model is the vehicle's baseline:
 	// its campaigns are shown on the vehicle page but count as already
@@ -64,11 +65,6 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 		vehicle.ID, *vehicle.Year, vehicle.Make, vehicle.Model).Scan(&covered); err != nil {
 		return 0, err
 	}
-	var notifiedAt *time.Time
-	if !covered {
-		baseline := checkedAt.UTC()
-		notifiedAt = &baseline
-	}
 	campaigns := make([]string, 0, len(recalls))
 	for _, recall := range recalls {
 		campaigns = append(campaigns, recall.CampaignNumber)
@@ -80,19 +76,26 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 	for _, recall := range recalls {
 		var inserted bool
 		// xmax is 0 only for a row this statement inserted rather than updated.
-		if err = tx.QueryRow(ctx, `INSERT INTO vehicle_recalls(vehicle_id,campaign_number,component,summary,consequence,remedy,report_received_on,park_it,park_outside,first_seen_at,notified_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		if err = tx.QueryRow(ctx, `INSERT INTO vehicle_recalls(vehicle_id,campaign_number,component,summary,consequence,remedy,report_received_on,park_it,park_outside,first_seen_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 			ON CONFLICT(vehicle_id,campaign_number) DO UPDATE SET
 				component=EXCLUDED.component,summary=EXCLUDED.summary,consequence=EXCLUDED.consequence,remedy=EXCLUDED.remedy,
 				report_received_on=EXCLUDED.report_received_on,park_it=EXCLUDED.park_it,park_outside=EXCLUDED.park_outside
 			RETURNING xmax=0`,
 			vehicle.ID, recall.CampaignNumber, recall.Component, recall.Summary, recall.Consequence, recall.Remedy,
-			recall.ReportReceivedOn, recall.ParkIt, recall.ParkOutside, checkedAt.UTC(), notifiedAt,
+			recall.ReportReceivedOn, recall.ParkIt, recall.ParkOutside, checkedAt.UTC(),
 		).Scan(&inserted); err != nil {
 			return 0, err
 		}
 		if inserted {
 			added++
+		}
+	}
+	if !covered && len(campaigns) > 0 {
+		if _, err = tx.Exec(ctx, `INSERT INTO recall_notifications(vehicle_id,campaign_number,notified_at)
+			SELECT $1,campaign_number,$3 FROM unnest($2::text[]) AS campaign_number
+			ON CONFLICT(vehicle_id,campaign_number) DO NOTHING`, vehicle.ID, campaigns, checkedAt.UTC()); err != nil {
+			return 0, err
 		}
 	}
 	tag, err := tx.Exec(ctx, `INSERT INTO vehicle_recall_checks(vehicle_id,checked_at,model_year,make,model)
@@ -142,7 +145,8 @@ func (p *Postgres) ListUnnotifiedRecalls(ctx context.Context) ([]model.Recall, e
 		FROM vehicle_recalls r
 		JOIN vehicles v ON v.id=r.vehicle_id
 		JOIN vehicle_recall_checks c ON c.vehicle_id=r.vehicle_id
-		WHERE r.notified_at IS NULL AND r.dismissed_at IS NULL AND v.archived_at IS NULL
+		WHERE r.dismissed_at IS NULL AND v.archived_at IS NULL
+			AND NOT EXISTS(SELECT 1 FROM recall_notifications n WHERE n.vehicle_id=r.vehicle_id AND n.campaign_number=r.campaign_number)
 			AND c.model_year=v.year AND c.make=v.make AND c.model=v.model
 		ORDER BY lower(v.nickname),v.id,r.report_received_on DESC NULLS LAST,r.campaign_number`)
 	if err != nil {

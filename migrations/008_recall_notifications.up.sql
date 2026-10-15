@@ -1,14 +1,21 @@
--- When the weekly digest first announced each recall campaign, and which
--- digest did, so a campaign is emailed once. A claimed digest marks its
--- campaigns before sending, and releasing an unsent claim clears them again.
-ALTER TABLE vehicle_recalls ADD COLUMN notified_at TIMESTAMPTZ;
-ALTER TABLE vehicle_recalls ADD COLUMN notified_digest_id UUID;
+-- One row per recall campaign the weekly digest has announced for a vehicle,
+-- so a campaign is emailed once. It is kept apart from vehicle_recalls, whose
+-- rows are replaced on every check, so a campaign NHTSA drops and lists again
+-- is not announced twice. A claimed digest records its campaigns before
+-- sending (digest_id), and releasing an unsent claim deletes them again.
+-- Baseline campaigns, found on a vehicle's first check, have no digest_id.
+CREATE TABLE recall_notifications (
+  vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+  campaign_number TEXT NOT NULL,
+  notified_at TIMESTAMPTZ NOT NULL,
+  digest_id UUID,
+  PRIMARY KEY (vehicle_id, campaign_number)
+);
+
+CREATE INDEX recall_notifications_digest_id_idx
+  ON recall_notifications(digest_id) WHERE digest_id IS NOT NULL;
 
 -- Campaigns found before recall emails existed are already on the vehicle
 -- pages, so they count as announced rather than flooding the first digest.
-UPDATE vehicle_recalls SET notified_at = first_seen_at;
-
-CREATE INDEX vehicle_recalls_unnotified_idx
-  ON vehicle_recalls(vehicle_id) WHERE notified_at IS NULL;
-CREATE INDEX vehicle_recalls_notified_digest_idx
-  ON vehicle_recalls(notified_digest_id) WHERE notified_digest_id IS NOT NULL;
+INSERT INTO recall_notifications(vehicle_id, campaign_number, notified_at)
+SELECT vehicle_id, campaign_number, first_seen_at FROM vehicle_recalls;

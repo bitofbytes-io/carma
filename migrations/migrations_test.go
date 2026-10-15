@@ -226,17 +226,19 @@ func TestRecallNotificationsMigrationIsAdditiveWithBackfill(t *testing.T) {
 	}
 	sql := strings.ToLower(string(up))
 	for _, declaration := range []string{
-		"alter table vehicle_recalls add column notified_at timestamptz",
-		"alter table vehicle_recalls add column notified_digest_id uuid",
-		"update vehicle_recalls set notified_at = first_seen_at",
+		"create table recall_notifications",
+		"vehicle_id uuid not null references vehicles(id) on delete cascade",
+		"primary key (vehicle_id, campaign_number)",
+		"insert into recall_notifications(vehicle_id, campaign_number, notified_at)",
+		"select vehicle_id, campaign_number, first_seen_at from vehicle_recalls",
 	} {
 		if !strings.Contains(sql, declaration) {
 			t.Fatalf("recall notifications migration missing %q", declaration)
 		}
 	}
-	for _, statement := range []string{"drop ", "delete from", "set not null", "timestamptz not null"} {
+	for _, statement := range []string{"alter table", "drop ", "delete from", "update "} {
 		if strings.Contains(sql, statement) {
-			t.Fatalf("recall notifications migration must only add nullable columns, found %q", statement)
+			t.Fatalf("recall notifications migration must only add a table, found %q", statement)
 		}
 	}
 	down, err := fs.ReadFile(FS, "008_recall_notifications.down.sql")
@@ -246,8 +248,7 @@ func TestRecallNotificationsMigrationIsAdditiveWithBackfill(t *testing.T) {
 	downSQL := strings.ToLower(string(down))
 	for _, declaration := range []string{
 		"delete from schema_migrations where version = '008_recall_notifications'",
-		"drop column if exists notified_at",
-		"drop column if exists notified_digest_id",
+		"drop table if exists recall_notifications",
 	} {
 		if !strings.Contains(downSQL, declaration) {
 			t.Fatalf("recall notifications down migration missing %q", declaration)
