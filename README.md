@@ -74,7 +74,8 @@ its due date, and mileage-only reminders are left out. The link is a secret
 `/calendar/<token>/reminders.ics` URL that works without signing in, so calendar
 services must be able to reach Carma. Only a hash of its token is stored, so the
 link is shown once; resetting it or turning the feed off stops the old link. Links
-use `PUBLIC_URL` when it is set, otherwise the address the page was opened on.
+use `PUBLIC_URL` (an HTTPS origin, read even when email is off) when it is set,
+otherwise the address the page was opened on.
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version

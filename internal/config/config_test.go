@@ -200,3 +200,22 @@ func TestDatabaseURLIsRequired(t *testing.T) {
 		t.Fatalf("missing database URL error = %v", err)
 	}
 }
+
+func TestPublicURLLoadsWithoutReminderEmail(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("AUTH_MODE", "development")
+	t.Setenv("REMINDER_EMAIL_ENABLED", "")
+	t.Setenv("PUBLIC_URL", "https://carma.bitofbytes.io/")
+	cfg, err := Load()
+	if err != nil || cfg.ReminderEmail.PublicURL != "https://carma.bitofbytes.io" {
+		t.Fatalf("PUBLIC_URL=%q err=%v", cfg.ReminderEmail.PublicURL, err)
+	}
+	t.Setenv("PUBLIC_URL", "")
+	if cfg, err = Load(); err != nil || cfg.ReminderEmail.PublicURL != "" {
+		t.Fatalf("unset PUBLIC_URL=%q err=%v", cfg.ReminderEmail.PublicURL, err)
+	}
+	t.Setenv("PUBLIC_URL", "http://carma.bitofbytes.io")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "PUBLIC_URL") {
+		t.Fatalf("invalid PUBLIC_URL error = %v", err)
+	}
+}

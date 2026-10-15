@@ -43,7 +43,9 @@ type ReminderEmail struct {
 	FromAddress  string
 	FromName     string
 	TLSMode      string
-	PublicURL    string
+	// PublicURL is Carma's HTTPS origin for links in emails and calendar
+	// feeds. It is required only when reminder email is enabled.
+	PublicURL string
 	// DigestEnabled adds the weekly due-soon digest; it requires Enabled.
 	DigestEnabled bool
 }
@@ -92,6 +94,14 @@ func Load() (*Config, error) {
 	if c.ReminderEmail.DigestEnabled && !c.ReminderEmail.Enabled {
 		return nil, fmt.Errorf("REMINDER_DIGEST_ENABLED requires REMINDER_EMAIL_ENABLED=true")
 	}
+	// PUBLIC_URL is optional unless reminder email is on; calendar feed links
+	// use it whenever it is set.
+	c.ReminderEmail.PublicURL = strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_URL")), "/")
+	if c.ReminderEmail.PublicURL != "" {
+		if err = validatePublicURL(c.ReminderEmail.PublicURL); err != nil {
+			return nil, err
+		}
+	}
 	if c.ReminderEmail.Enabled {
 		c.ReminderEmail.SMTPHost = strings.TrimSpace(os.Getenv("SMTP_HOST"))
 		c.ReminderEmail.SMTPUsername = strings.TrimSpace(os.Getenv("SMTP_USERNAME"))
@@ -104,7 +114,6 @@ func Load() (*Config, error) {
 		c.ReminderEmail.FromAddress = strings.TrimSpace(os.Getenv("SMTP_FROM_ADDRESS"))
 		c.ReminderEmail.FromName = strings.TrimSpace(os.Getenv("SMTP_FROM_NAME"))
 		c.ReminderEmail.TLSMode = strings.ToLower(strings.TrimSpace(os.Getenv("SMTP_TLS_MODE")))
-		c.ReminderEmail.PublicURL = strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_URL")), "/")
 		if err = validateReminderEmail(c.ReminderEmail); err != nil {
 			return nil, err
 		}
@@ -163,7 +172,11 @@ func validateReminderEmail(c ReminderEmail) error {
 	if err != nil || address.Address != c.FromAddress {
 		return fmt.Errorf("SMTP_FROM_ADDRESS must be a plain valid email address")
 	}
-	u, err := url.Parse(c.PublicURL)
+	return validatePublicURL(c.PublicURL)
+}
+
+func validatePublicURL(publicURL string) error {
+	u, err := url.Parse(publicURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return fmt.Errorf("PUBLIC_URL must be an HTTPS origin")
 	}
