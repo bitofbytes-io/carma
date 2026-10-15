@@ -46,7 +46,8 @@ through `SMTP_PASSWORD`.
 Reminder email is optional locally and requires PostgreSQL when enabled. Its
 non-secret contract is `REMINDER_EMAIL_ENABLED`, `SMTP_HOST`, `SMTP_USERNAME`,
 `SMTP_FROM_ADDRESS`, `SMTP_FROM_NAME`, `SMTP_TLS_MODE=implicit`, and `PUBLIC_URL`.
-It turns on both the overdue reminder emails and the weekly due-soon digest.
+It turns on both the overdue reminder emails and the weekly digest of due-soon
+reminders and new NHTSA recalls.
 Incomplete enabled configuration fails startup. TLS certificate and hostname
 verification must remain enabled.
 

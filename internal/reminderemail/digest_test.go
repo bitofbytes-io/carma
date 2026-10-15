@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -21,9 +22,12 @@ type fakeDigest struct {
 }
 
 type fakeDigestStore struct {
-	reminders     []model.Reminder
-	points        []model.MileagePoint
-	emails        []string
+	reminders []model.Reminder
+	points    []model.MileagePoint
+	emails    []string
+	recalls   []model.Recall
+	// notified maps each announced recall to the digest that claimed it.
+	notified      map[model.RecallKey]uuid.UUID
 	digests       []fakeDigest
 	lockAvailable bool
 	lockCalls     int
@@ -45,6 +49,15 @@ func (f *fakeDigestStore) ListMileagePoints(context.Context, []uuid.UUID, time.T
 func (f *fakeDigestStore) ListReminderRecipientEmails(context.Context) ([]string, error) {
 	return append([]string(nil), f.emails...), nil
 }
+func (f *fakeDigestStore) ListUnnotifiedRecalls(context.Context) ([]model.Recall, error) {
+	var recalls []model.Recall
+	for _, recall := range f.recalls {
+		if _, ok := f.notified[model.RecallKey{VehicleID: recall.VehicleID, CampaignNumber: recall.CampaignNumber}]; !ok {
+			recalls = append(recalls, recall)
+		}
+	}
+	return recalls, nil
+}
 func (f *fakeDigestStore) ReminderDigestClaimed(_ context.Context, weekStart time.Time) (bool, error) {
 	for _, digest := range f.digests {
 		if digest.WeekStart.Equal(weekStart) {
@@ -61,6 +74,14 @@ func (f *fakeDigestStore) ReserveReminderDigest(ctx context.Context, digest mode
 		return false, nil
 	}
 	f.digests = append(f.digests, fakeDigest{ReminderDigest: digest})
+	for _, key := range digest.Recalls {
+		if f.notified == nil {
+			f.notified = map[model.RecallKey]uuid.UUID{}
+		}
+		if _, ok := f.notified[key]; !ok {
+			f.notified[key] = digest.ID
+		}
+	}
 	return true, nil
 }
 func (f *fakeDigestStore) CompleteReminderDigest(ctx context.Context, id uuid.UUID, messageID string, _ time.Time) error {
@@ -80,7 +101,11 @@ func (f *fakeDigestStore) CompleteReminderDigest(ctx context.Context, id uuid.UU
 }
 func (f *fakeDigestStore) ReleaseReminderDigest(ctx context.Context, id uuid.UUID) error {
 	f.releaseDeadline, _ = ctx.Deadline()
+	before := len(f.digests)
 	f.digests = slices.DeleteFunc(f.digests, func(digest fakeDigest) bool { return digest.ID == id && digest.MessageID == "" })
+	if len(f.digests) < before {
+		maps.DeleteFunc(f.notified, func(_ model.RecallKey, digestID uuid.UUID) bool { return digestID == id })
+	}
 	return nil
 }
 func (f *fakeDigestStore) TryReminderDigestLock(context.Context) (func(context.Context) error, bool, error) {
@@ -325,5 +350,114 @@ func TestWeekStartIsMonday(t *testing.T) {
 		if want := time.Date(2026, time.March, 16, 0, 0, 0, 0, time.UTC); !got.Equal(want) {
 			t.Fatalf("WeekStart(March %d) = %v, want %v", day, got, want)
 		}
+	}
+}
+
+// recallFixture returns new recalls on two vehicles: two on the Roadster,
+// whose VIN is valid, and one on the Truck, whose VIN is not.
+func recallFixture(roadster, truck uuid.UUID) []model.Recall {
+	received := time.Date(2026, time.March, 5, 0, 0, 0, 0, time.UTC)
+	return []model.Recall{
+		{VehicleID: roadster, VehicleName: "Roadster", VehicleVIN: "1hgcm-82633a004352", CampaignNumber: "26V101000", Component: "FUEL SYSTEM, GASOLINE", Summary: "The fuel pump may fail.", ReportReceivedOn: &received, ParkIt: true},
+		{VehicleID: roadster, VehicleName: "Roadster", VehicleVIN: "1hgcm-82633a004352", CampaignNumber: "26V102000", Summary: strings.Repeat("word ", 100)},
+		{VehicleID: truck, VehicleName: "Truck", VehicleVIN: "UNKNOWN", CampaignNumber: "26V103000", Component: "AIR BAGS", ParkOutside: true},
+	}
+}
+
+func TestDigestAnnouncesEachNewRecallOnce(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	roadster, truck := uuid.New(), uuid.New()
+	store := &fakeDigestStore{lockAvailable: true, emails: []string{"user@example.com"}, recalls: recallFixture(roadster, truck)}
+	sender := &fakeSender{}
+	runner := newTestDigestRunner(store, sender, now)
+
+	report, err := runner.Run(context.Background(), DigestOptions{})
+	if err != nil || !report.Sent || report.NewRecalls != 3 || report.Overdue != 0 || report.DueSoon != 0 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if len(sender.messages) != 1 || len(store.digests) != 1 || len(store.digests[0].Recalls) != 3 || len(store.notified) != 3 {
+		t.Fatalf("messages=%d digests=%+v notified=%v", len(sender.messages), store.digests, store.notified)
+	}
+	message := sender.messages[0]
+	if message.Subject != "Carma weekly digest: 3 new recalls" {
+		t.Fatalf("subject = %q", message.Subject)
+	}
+	body := message.Body
+	roadsterPage := "https://carma.bitofbytes.io/vehicles/" + roadster.String() + "#recalls"
+	for _, want := range []string{
+		"New safety recalls\n\nRoadster\n  - FUEL SYSTEM, GASOLINE (campaign 26V101000, reported Mar 5, 2026)\n",
+		"    Do not drive this vehicle until the recall repair is done.\n    The fuel pump may fail.\n",
+		"    Check this VIN: https://www.nhtsa.gov/recalls?vymm=1HGCM82633A004352\n    Review or dismiss: " + roadsterPage + "\n",
+		"  - Recall (campaign 26V102000)\n",
+		"Truck\n  - AIR BAGS (campaign 26V103000)\n    Park outside and away from buildings until the recall repair is done.\n    Review or dismiss: https://carma.bitofbytes.io/vehicles/" + truck.String() + "#recalls\n",
+		"may not apply to your VIN",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("digest missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Count(body, "vymm=") != 2 || strings.Contains(body, "Maintenance") || strings.Contains(body, "Log a service record") {
+		t.Fatalf("digest should link only the valid VIN and have no maintenance section:\n%s", body)
+	}
+	if strings.Contains(body, strings.Repeat("word ", 70)) || !strings.Contains(body, "word...") {
+		t.Fatalf("long summary not truncated:\n%s", body)
+	}
+
+	// Announced recalls alone do not send next week's digest.
+	runner.now = func() time.Time { return now.AddDate(0, 0, 7) }
+	report, err = runner.Run(context.Background(), DigestOptions{})
+	if err != nil || report.Sent || report.NewRecalls != 0 || len(sender.messages) != 1 {
+		t.Fatalf("next week: report=%+v err=%v messages=%d", report, err, len(sender.messages))
+	}
+	// A recall found later is announced in the following digest on its own.
+	store.recalls = append(store.recalls, model.Recall{VehicleID: truck, VehicleName: "Truck", CampaignNumber: "26V200000", Component: "BRAKES"})
+	report, err = runner.Run(context.Background(), DigestOptions{})
+	if err != nil || !report.Sent || report.NewRecalls != 1 || len(sender.messages) != 2 {
+		t.Fatalf("new recall: report=%+v err=%v messages=%d", report, err, len(sender.messages))
+	}
+	if body := sender.messages[1].Body; sender.messages[1].Subject != "Carma weekly digest: 1 new recall" || !strings.Contains(body, "BRAKES") || strings.Contains(body, "AIR BAGS") {
+		t.Fatalf("second digest = %+v", sender.messages[1])
+	}
+}
+
+func TestDigestListsRecallsBeforeMaintenance(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, roadster, truck := digestFixture(now)
+	store.recalls = recallFixture(roadster, truck)[:1]
+	sender := &fakeSender{}
+	report, err := newTestDigestRunner(store, sender, now).Run(context.Background(), DigestOptions{})
+	if err != nil || !report.Sent || report.NewRecalls != 1 || report.Overdue != 1 || report.DueSoon != 2 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	message := sender.messages[0]
+	if message.Subject != "Carma weekly digest: 1 new recall, 1 overdue, 2 due soon" {
+		t.Fatalf("subject = %q", message.Subject)
+	}
+	recalls, maintenance, oil := strings.Index(message.Body, "New safety recalls"), strings.Index(message.Body, "\nMaintenance\n"), strings.Index(message.Body, "OVERDUE: Oil change")
+	if recalls < 0 || maintenance < recalls || oil < maintenance || !strings.Contains(message.Body, "Log a service record") {
+		t.Fatalf("digest order:\n%s", message.Body)
+	}
+}
+
+func TestDigestSendFailureLeavesRecallsNew(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store := &fakeDigestStore{lockAvailable: true, emails: []string{"user@example.com"}, recalls: recallFixture(uuid.New(), uuid.New())}
+	sender := &fakeSender{err: errors.New("smtp down")}
+	runner := newTestDigestRunner(store, sender, now)
+	if report, err := runner.Run(context.Background(), DigestOptions{}); err == nil || report.Sent || len(store.notified) != 0 {
+		t.Fatalf("report=%+v err=%v notified=%v", report, err, store.notified)
+	}
+	sender.err = nil
+	if report, err := runner.Run(context.Background(), DigestOptions{}); err != nil || !report.Sent || report.NewRecalls != 3 || len(store.notified) != 3 {
+		t.Fatalf("retry: report=%+v err=%v notified=%v", report, err, store.notified)
+	}
+}
+
+func TestDigestDryRunDoesNotMarkRecalls(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store := &fakeDigestStore{lockAvailable: true, emails: []string{"user@example.com"}, recalls: recallFixture(uuid.New(), uuid.New())}
+	report, err := newTestDigestRunner(store, &fakeSender{}, now).Run(context.Background(), DigestOptions{DryRun: true})
+	if err != nil || report.Message == nil || report.NewRecalls != 3 || len(store.notified) != 0 || len(store.digests) != 0 {
+		t.Fatalf("report=%+v err=%v notified=%v", report, err, store.notified)
 	}
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/bitofbytes-io/carma/internal/mailer"
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/bitofbytes-io/carma/internal/nhtsa"
 	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/google/uuid"
@@ -37,14 +38,17 @@ type DigestReport struct {
 	LockContended, AlreadySent, TooEarly bool
 	WeekStart                            time.Time
 	Overdue, DueSoon                     int
-	RecipientCount                       int
-	Sent                                 bool
+	// NewRecalls counts the recall campaigns announced for the first time.
+	NewRecalls     int
+	RecipientCount int
+	Sent           bool
 	// Message is the rendered digest, set whenever there was something to send.
 	Message *mailer.Message
 }
 
 // DigestRunner emails one weekly summary of overdue and due-soon reminders
-// across all vehicles. Recipients and time zone follow Runner.
+// and newly found NHTSA recalls across all vehicles. Recipients and time zone
+// follow Runner.
 type DigestRunner struct {
 	store     repository.ReminderDigestStore
 	sender    mailer.Sender
@@ -70,9 +74,11 @@ func WeekStart(today time.Time) time.Time {
 	return today.AddDate(0, 0, -((int(today.Weekday()) + 6) % 7))
 }
 
-// Run sends this week's digest unless it was already sent, nothing is overdue
-// or due soon, or it is still before DigestSendHour on Monday. An empty week is
-// not recorded, so a later run that week still sends once something comes due.
+// Run sends this week's digest unless it was already sent, nothing is overdue,
+// due soon, or a new recall, or it is still before DigestSendHour on Monday. An
+// empty week is not recorded, so a later run that week still sends once
+// something comes due or a recall is found. Each recall is announced once:
+// open, undismissed campaigns no earlier digest included.
 func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report DigestReport, runErr error) {
 	now := r.now()
 	today := reminder.Today(now, r.location)
@@ -126,7 +132,12 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 		}
 		items = append(items, result)
 	}
-	if len(items) == 0 {
+	recalls, err := r.store.ListUnnotifiedRecalls(ctx)
+	if err != nil {
+		return report, fmt.Errorf("list new recalls: %w", err)
+	}
+	report.NewRecalls = len(recalls)
+	if len(items) == 0 && len(recalls) == 0 {
 		return report, nil
 	}
 
@@ -142,7 +153,7 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 	if len(recipients) == 0 {
 		return report, errors.New("no valid reminder email recipients")
 	}
-	message := RenderDigest(items, report.WeekStart, r.publicURL, recipients)
+	message := RenderDigest(items, recalls, report.WeekStart, r.publicURL, recipients)
 	report.Message = &message
 	if options.DryRun {
 		return report, nil
@@ -152,6 +163,9 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 	digest := model.ReminderDigest{
 		ID: uuid.New(), WeekStart: report.WeekStart, ReservedAt: r.now().UTC(),
 		Recipients: append([]string(nil), recipients...),
+	}
+	for _, recall := range recalls {
+		digest.Recalls = append(digest.Recalls, model.RecallKey{VehicleID: recall.VehicleID, CampaignNumber: recall.CampaignNumber})
 	}
 	reserved, err := r.store.ReserveReminderDigest(ctx, digest)
 	if err != nil {
@@ -180,7 +194,7 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 		r.logger.Error("reminder digest audit failed", "week_start", report.WeekStart.Format(time.DateOnly), "message_id", messageID, "error", err)
 		return report, fmt.Errorf("audit reminder digest: %w", err)
 	}
-	r.logger.Info("reminder digest sent", "week_start", report.WeekStart.Format(time.DateOnly), "overdue", report.Overdue, "due_soon", report.DueSoon, "recipient_count", len(recipients), "message_id", messageID)
+	r.logger.Info("reminder digest sent", "week_start", report.WeekStart.Format(time.DateOnly), "overdue", report.Overdue, "due_soon", report.DueSoon, "new_recalls", report.NewRecalls, "recipient_count", len(recipients), "message_id", messageID)
 	return report, nil
 }
 
@@ -188,10 +202,17 @@ func (r *DigestRunner) Run(ctx context.Context, options DigestOptions) (report D
 // after the send attempt.
 const digestRecordTimeout = 5 * time.Second
 
-// RenderDigest lists items by vehicle in the order given, overdue before due
-// soon within each vehicle.
-func RenderDigest(items []reminder.Result, weekStart time.Time, publicURL string, recipients []string) mailer.Message {
+// RenderDigest lists new recalls and then reminder items by vehicle in the
+// order given, overdue before due soon within each vehicle.
+func RenderDigest(items []reminder.Result, recalls []model.Recall, weekStart time.Time, publicURL string, recipients []string) mailer.Message {
 	publicURL = strings.TrimRight(publicURL, "/")
+	lines := []string{"Carma digest for the week of " + weekStart.Format("January 2, 2006") + ".", ""}
+	if len(recalls) > 0 {
+		lines = append(lines, recallLines(recalls, publicURL)...)
+		if len(items) > 0 {
+			lines = append(lines, "Maintenance", "")
+		}
+	}
 	var vehicles []uuid.UUID
 	byVehicle := map[uuid.UUID][]reminder.Result{}
 	overdue, soon := 0, 0
@@ -207,7 +228,6 @@ func RenderDigest(items []reminder.Result, weekStart time.Time, publicURL string
 			soon++
 		}
 	}
-	lines := []string{"Vehicle maintenance for the week of " + weekStart.Format("January 2, 2006") + ".", ""}
 	for _, id := range vehicles {
 		vehicleItems := byVehicle[id]
 		slices.SortStableFunc(vehicleItems, func(a, b reminder.Result) int {
@@ -219,8 +239,15 @@ func RenderDigest(items []reminder.Result, weekStart time.Time, publicURL string
 		}
 		lines = append(lines, "  "+publicURL+"/vehicles/"+url.PathEscape(id.String()), "")
 	}
-	lines = append(lines, "Log a service record to reset a reminder. Manage reminders on each vehicle's Reminders page.")
+	if len(items) > 0 {
+		lines = append(lines, "Log a service record to reset a reminder. Manage reminders on each vehicle's Reminders page.")
+	}
 	var counts []string
+	if len(recalls) == 1 {
+		counts = append(counts, "1 new recall")
+	} else if len(recalls) > 1 {
+		counts = append(counts, fmt.Sprintf("%d new recalls", len(recalls)))
+	}
 	if overdue > 0 {
 		counts = append(counts, fmt.Sprintf("%d overdue", overdue))
 	}
@@ -232,6 +259,61 @@ func RenderDigest(items []reminder.Result, weekStart time.Time, publicURL string
 		Subject:    "Carma weekly digest: " + strings.Join(counts, ", "),
 		Body:       strings.Join(lines, "\n"),
 	}
+}
+
+// recallLines lists recalls by vehicle in the order given. NHTSA lists
+// recalls per model year, so each links to NHTSA's lookup for the vehicle's
+// VIN, when it is valid, and to the vehicle page where it can be dismissed.
+func recallLines(recalls []model.Recall, publicURL string) []string {
+	lines := []string{"New safety recalls", ""}
+	for i, recall := range recalls {
+		if i == 0 || recall.VehicleID != recalls[i-1].VehicleID {
+			lines = append(lines, cleanBodyValue(recall.VehicleName))
+		}
+		component := cleanBodyValue(recall.Component)
+		if component == "" {
+			component = "Recall"
+		}
+		line := "  - " + component + " (campaign " + cleanBodyValue(recall.CampaignNumber)
+		if recall.ReportReceivedOn != nil {
+			line += ", reported " + recall.ReportReceivedOn.Format("Jan 2, 2006")
+		}
+		lines = append(lines, line+")")
+		if recall.ParkIt {
+			lines = append(lines, "    Do not drive this vehicle until the recall repair is done.")
+		}
+		if recall.ParkOutside {
+			lines = append(lines, "    Park outside and away from buildings until the recall repair is done.")
+		}
+		if summary := truncate(cleanBodyValue(recall.Summary), recallSummaryLimit); summary != "" {
+			lines = append(lines, "    "+summary)
+		}
+		if vin := nhtsa.LookupVIN(recall.VehicleVIN); vin != "" {
+			lines = append(lines, "    Check this VIN: https://www.nhtsa.gov/recalls?vymm="+url.QueryEscape(vin))
+		}
+		lines = append(lines, "    Review or dismiss: "+publicURL+"/vehicles/"+url.PathEscape(recall.VehicleID.String())+"#recalls")
+		if i == len(recalls)-1 || recall.VehicleID != recalls[i+1].VehicleID {
+			lines = append(lines, "")
+		}
+	}
+	return append(lines, "NHTSA lists recalls for a whole model year, so one may not apply to your VIN or may already be fixed. Dismiss it on the vehicle page once it is done or does not apply.", "")
+}
+
+// recallSummaryLimit caps how much of NHTSA's summary the digest quotes; the
+// vehicle page has the rest.
+const recallSummaryLimit = 300
+
+// truncate shortens value to at most limit runes, cutting at a word boundary.
+func truncate(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	cut := string(runes[:limit])
+	if space := strings.LastIndex(cut, " "); space > 0 {
+		cut = cut[:space]
+	}
+	return strings.TrimRight(cut, " ,;:.") + "..."
 }
 
 func statusRank(status reminder.Status) int {

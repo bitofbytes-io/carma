@@ -218,3 +218,39 @@ func TestVehicleOdometerDateMigrationBackfill(t *testing.T) {
 		}
 	}
 }
+
+func TestRecallNotificationsMigrationIsAdditiveWithBackfill(t *testing.T) {
+	up, err := fs.ReadFile(FS, "008_recall_notifications.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"alter table vehicle_recalls add column notified_at timestamptz",
+		"alter table vehicle_recalls add column notified_digest_id uuid",
+		"update vehicle_recalls set notified_at = first_seen_at",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("recall notifications migration missing %q", declaration)
+		}
+	}
+	for _, statement := range []string{"drop ", "delete from", "set not null", "timestamptz not null"} {
+		if strings.Contains(sql, statement) {
+			t.Fatalf("recall notifications migration must only add nullable columns, found %q", statement)
+		}
+	}
+	down, err := fs.ReadFile(FS, "008_recall_notifications.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '008_recall_notifications'",
+		"drop column if exists notified_at",
+		"drop column if exists notified_digest_id",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("recall notifications down migration missing %q", declaration)
+		}
+	}
+}

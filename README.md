@@ -49,19 +49,26 @@ For production proofs, add `--require-recipient-count <n>` to a targeted run; it
 compares only the normalized recipient count and refuses to send or audit on a
 mismatch. Recipient addresses cannot be supplied or overridden through the CLI.
 
-Reminder email also sends a weekly due-soon digest over the same SMTP settings: from
+Reminder email also sends a weekly digest over the same SMTP settings: from
 Monday 08:00 household time, one summary per week of every overdue and due-soon
-reminder grouped by vehicle. Weeks with nothing due send nothing. Preview it without
+reminder grouped by vehicle, led by any NHTSA recalls found since the last digest.
+Each recall is announced once and never once dismissed; it links to NHTSA's lookup
+for the vehicle's VIN (when the VIN is valid) and to the vehicle page, where it can
+be dismissed. Weeks with nothing to report send nothing. Preview it without
 sending using `/app/carma-reminders --digest --dry-run`; `--digest` alone sends this
 week's digest now unless it has already gone out, nothing is due, or it is still
 before Monday 08:00 household time (each of these is a no-op, not a failure).
+`/app/carma-reminders --check-recalls` runs the recall check once for every vehicle
+due one, without sending email.
 
 NHTSA lookups are always on. The vehicle form has a "Decode VIN" button that fills
 in year, make, and model from NHTSA's free vPIC API, and a recall check, under its
 own advisory lock, fetches NHTSA safety recalls for each active vehicle's year, make,
 and model about once a week (and again right after any of them is edited). Open
 recalls appear in "Needs attention" and on the vehicle page, where they can be
-dismissed once fixed or not applicable. Both APIs are keyless; the containers only
+dismissed once fixed or not applicable. A vehicle's first check (and the first after
+its year, make, or model changes) only sets a baseline; campaigns NHTSA adds after
+that are emailed in the weekly digest when reminder email is on. Both APIs are keyless; the containers only
 need outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
