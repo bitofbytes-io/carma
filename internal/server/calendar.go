@@ -26,8 +26,14 @@ func (s *Server) calendarPage(response http.ResponseWriter, request *http.Reques
 }
 
 // createCalendarFeed creates the household's calendar link, replacing any
-// earlier one, and shows it this once: only its hash is stored.
+// earlier one, and shows it this once: only its hash is stored. The page is
+// loaded first so nothing can fail between replacing the token and showing it.
 func (s *Server) createCalendarFeed(response http.ResponseWriter, request *http.Request) {
+	data, err := s.base(request, "Calendar feed")
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		s.fail(response, err)
@@ -43,11 +49,7 @@ func (s *Server) createCalendarFeed(response http.ResponseWriter, request *http.
 		s.fail(response, err)
 		return
 	}
-	data, err := s.calendarData(request)
-	if err != nil {
-		s.fail(response, err)
-		return
-	}
+	data.CalendarFeed = s.localFeed(&feed)
 	data.CalendarURL = s.publicOrigin(request) + "/calendar/" + token + "/reminders.ics"
 	// The page holds the only copy of the link.
 	response.Header().Set("Cache-Control", "no-store")
@@ -67,10 +69,17 @@ func (s *Server) calendarData(request *http.Request) (pageData, error) {
 	if err != nil {
 		return data, err
 	}
-	if data.CalendarFeed, err = s.store.GetCalendarFeed(request.Context()); err == nil && data.CalendarFeed != nil && s.cfg.Location != nil {
-		data.CalendarFeed.CreatedAt = data.CalendarFeed.CreatedAt.In(s.cfg.Location)
-	}
+	feed, err := s.store.GetCalendarFeed(request.Context())
+	data.CalendarFeed = s.localFeed(feed)
 	return data, err
+}
+
+// localFeed shows feed's creation time in the household time zone.
+func (s *Server) localFeed(feed *model.CalendarFeed) *model.CalendarFeed {
+	if feed != nil && s.cfg.Location != nil {
+		feed.CreatedAt = feed.CreatedAt.In(s.cfg.Location)
+	}
+	return feed
 }
 
 // calendarFeed serves the reminder calendar to anyone holding the current

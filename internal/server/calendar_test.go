@@ -1,12 +1,17 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/bitofbytes-io/carma/internal/repository"
 )
 
 var calendarLinkPattern = regexp.MustCompile(`http://example\.com/calendar/[A-Za-z0-9_-]{43}/reminders\.ics`)
@@ -122,5 +127,26 @@ func TestCalendarFeedUsesPublicURLAndRequiresSignInToManage(t *testing.T) {
 	}
 	if feed, err := f.store.GetCalendarFeed(t.Context()); err != nil || feed == nil {
 		t.Fatalf("feed=%v err=%v", feed, err)
+	}
+}
+
+type listVehiclesErrorStore struct {
+	repository.Store
+}
+
+func (listVehiclesErrorStore) ListVehicles(context.Context, bool) ([]model.Vehicle, error) {
+	return nil, errors.New("database unavailable")
+}
+
+func TestCreateCalendarLinkKeepsOldLinkWhenPageCannotLoad(t *testing.T) {
+	f := setup(t)
+	link := f.createCalendarLink(t)
+	f.s.store = listVehiclesErrorStore{f.store}
+	if w := f.do(t, http.MethodPost, "/calendar", nil, ""); w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d", w.Code)
+	}
+	f.s.store = f.store
+	if w := f.fetchFeed(t, http.MethodGet, link); w.Code != http.StatusOK {
+		t.Fatalf("a failed reset replaced the link: %d", w.Code)
 	}
 }
