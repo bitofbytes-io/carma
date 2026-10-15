@@ -207,12 +207,18 @@ func TestPublicURLLoadsWithoutReminderEmail(t *testing.T) {
 	t.Setenv("REMINDER_EMAIL_ENABLED", "")
 	t.Setenv("PUBLIC_URL", "https://carma.bitofbytes.io/")
 	cfg, err := Load()
-	if err != nil || cfg.ReminderEmail.PublicURL != "https://carma.bitofbytes.io" {
-		t.Fatalf("PUBLIC_URL=%q err=%v", cfg.ReminderEmail.PublicURL, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReminderEmail.PublicURL != "https://carma.bitofbytes.io" {
+		t.Fatalf("PUBLIC_URL=%q", cfg.ReminderEmail.PublicURL)
 	}
 	t.Setenv("PUBLIC_URL", "")
-	if cfg, err = Load(); err != nil || cfg.ReminderEmail.PublicURL != "" {
-		t.Fatalf("unset PUBLIC_URL=%q err=%v", cfg.ReminderEmail.PublicURL, err)
+	if cfg, err = Load(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReminderEmail.PublicURL != "" {
+		t.Fatalf("unset PUBLIC_URL=%q", cfg.ReminderEmail.PublicURL)
 	}
 	t.Setenv("PUBLIC_URL", "http://carma.bitofbytes.io")
 	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "PUBLIC_URL") {
