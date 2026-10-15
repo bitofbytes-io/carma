@@ -70,12 +70,13 @@ func description(r model.Reminder) string {
 	return r.ServiceTypeName + " for " + r.VehicleName + ", every " + strings.Join(intervals, " or ") + "."
 }
 
-// revised is when r's due date last changed in Carma: when the reminder was
-// saved or its baseline service record was logged or edited. A feed without a
+// revised is when r's event last changed in Carma: when the reminder was
+// saved, its vehicle was edited, or its baseline service record was logged or
+// edited. A feed without a
 // METHOD uses it as each event's DTSTAMP (RFC 5545 section 3.8.7.2), so
 // unchanged events keep their stamp from one fetch to the next.
 func revised(r model.Reminder) time.Time {
-	times := []time.Time{r.CreatedAt, r.UpdatedAt}
+	times := []time.Time{r.CreatedAt, r.UpdatedAt, r.VehicleUpdatedAt}
 	if r.Baseline != nil {
 		times = append(times, r.Baseline.CreatedAt, r.Baseline.UpdatedAt)
 	}

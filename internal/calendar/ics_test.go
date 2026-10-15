@@ -24,6 +24,11 @@ func TestFeedListsDatedEnabledRemindersAsAllDayEvents(t *testing.T) {
 		{Reminder: model.Reminder{ID: uuid.New(), VehicleName: "Van", ServiceTypeName: "Wipers", IntervalMonths: &months}, DueDate: &due},
 	}
 	feed := string(Feed(results, "https://carma.example"))
+	renamed := results[0]
+	renamed.Reminder.VehicleUpdatedAt = saved.Add(2 * time.Hour)
+	if stamped := string(Feed([]reminder.Result{renamed}, "")); !strings.Contains(stamped, "DTSTAMP:20261015T050509Z") {
+		t.Fatalf("a vehicle edit did not advance DTSTAMP:\n%s", stamped)
+	}
 	unfolded := strings.ReplaceAll(feed, "\r\n ", "")
 	for _, want := range []string{
 		"BEGIN:VCALENDAR\r\nVERSION:2.0\r\n",

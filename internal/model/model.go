@@ -56,8 +56,10 @@ type Reminder struct {
 	StartingOdometerPending      bool
 	Enabled                      bool
 	CreatedAt, UpdatedAt         time.Time
-	Baseline                     *Record
-	LatestOdometer               *int64
+	// VehicleUpdatedAt is when the reminder's vehicle was last edited.
+	VehicleUpdatedAt time.Time
+	Baseline         *Record
+	LatestOdometer   *int64
 	// MilesPerDay is the vehicle's estimated driving rate, used to project when
 	// a mileage interval comes due. Nil when there is too little history.
 	MilesPerDay *float64

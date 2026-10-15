@@ -24,7 +24,7 @@ const upsertReminderSQL = `INSERT INTO reminders(id,vehicle_id,service_type_id,i
 
 func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disabled bool) ([]model.Reminder, error) {
 	rows, err := p.pool.Query(ctx, `SELECT rm.id,rm.vehicle_id,rm.service_type_id,v.nickname,st.name,rm.interval_months,rm.interval_miles,
-			rm.starting_odometer_miles,rm.starting_odometer_pending,rm.enabled,rm.created_at,rm.updated_at,b.id,
+			rm.starting_odometer_miles,rm.starting_odometer_pending,rm.enabled,rm.created_at,rm.updated_at,v.updated_at,b.id,
 			b.occurred_on,b.odometer_miles,b.created_at,b.updated_at,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records x WHERE x.vehicle_id=rm.vehicle_id))
 		FROM reminders rm
 		JOIN vehicles v ON v.id=rm.vehicle_id
@@ -55,7 +55,7 @@ func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disa
 			&reminder.ID, &reminder.VehicleID, &reminder.ServiceTypeID,
 			&reminder.VehicleName, &reminder.ServiceTypeName, &reminder.IntervalMonths,
 			&reminder.IntervalMiles, &reminder.StartingOdometer, &reminder.StartingOdometerPending,
-			&reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt,
+			&reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt, &reminder.VehicleUpdatedAt,
 			&baselineID, &baselineDate, &baselineOdometer,
 			&baselineCreatedAt, &baselineUpdatedAt, &reminder.LatestOdometer,
 		); err != nil {
