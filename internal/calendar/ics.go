@@ -27,7 +27,6 @@ func Feed(results []reminder.Result, now time.Time, baseURL string) []byte {
 	line("VERSION:2.0")
 	line("PRODID:-//bitofbytes//Carma//EN")
 	line("CALSCALE:GREGORIAN")
-	line("METHOD:PUBLISH")
 	line("X-WR-CALNAME:Carma reminders")
 	line("X-WR-CALDESC:Vehicle service due dates from Carma")
 	line("REFRESH-INTERVAL;VALUE=DURATION:" + RefreshInterval)

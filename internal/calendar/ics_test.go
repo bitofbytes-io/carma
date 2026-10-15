@@ -35,6 +35,10 @@ func TestFeedListsDatedEnabledRemindersAsAllDayEvents(t *testing.T) {
 			t.Fatalf("feed missing %q:\n%s", want, feed)
 		}
 	}
+	// METHOD:PUBLISH would need an ORGANIZER on every event (RFC 5546).
+	if strings.Contains(feed, "METHOD:") {
+		t.Fatalf("feed declares an iTIP method:\n%s", feed)
+	}
 	if strings.Count(feed, "BEGIN:VEVENT") != 1 {
 		t.Fatalf("want only the enabled reminder with a due date:\n%s", feed)
 	}
