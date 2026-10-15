@@ -173,6 +173,39 @@ func TestVehicleMileageFeedsProjection(t *testing.T) {
 	}
 }
 
+func TestVehicleSaveDatesMileageCopiedFromRecord(t *testing.T) {
+	f := setup(t)
+	saveVehicle := func(path, mileage string) {
+		t.Helper()
+		b, ct := formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": mileage}, "", nil)
+		if response := f.do(t, http.MethodPost, path, b, ct); response.Code != http.StatusSeeOther {
+			t.Fatalf("save vehicle status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	saveVehicle("/vehicles", "1000")
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	today := f.s.today()
+	types, _ := f.store.ListServiceTypes(t.Context())
+	recordMiles := int64(1500)
+	recordOn := today.AddDate(0, 0, 20)
+	if _, err := f.store.CreateRecord(t.Context(), model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: f.user.ID, OccurredOn: recordOn, OdometerMiles: &recordMiles, CreatedAt: time.Now()}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The edit form shows the record's higher mileage; saving it a week later
+	// must date it by the record, not keep the 1000 mi date or use today.
+	now := f.s.now
+	f.s.now = func() time.Time { return now().AddDate(0, 0, 27) }
+	saveVehicle("/vehicles/"+v.ID.String(), "1500")
+	points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || !points[0].On.Equal(recordOn) || points[0].Miles != 1500 {
+		t.Fatalf("points=%+v, want only the record's 1500 mi on %s", points, recordOn.Format("Jan 2"))
+	}
+}
+
 func TestOdometerUpdateRejectsLowerReadingUntilConfirmed(t *testing.T) {
 	f := setup(t)
 	v := createVehicle(t, f)

@@ -147,18 +147,21 @@ func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Lock the row and read the photo it held before this write, so a concurrent
 	// replacement is never overwritten or reported as the wrong old key.
-	// The mileage is redated only when it differs from the effective latest
-	// mileage the edit form showed, so saving other fields keeps its date.
+	// An unchanged mileage keeps its date. The edit form shows the effective
+	// latest mileage, so resubmitting a higher one from a service record takes
+	// that record's date; any other new mileage is dated $12.
 	var previousPhotoKey string
 	err = tx.QueryRow(
 		ctx, `UPDATE vehicles v SET nickname=$2,year=$3,make=$4,model=$5,vin=$6,license_plate=$7,
 			photo_key=COALESCE(NULLIF($8,''),v.photo_key),notes=$9,current_odometer_miles=$10,updated_at=$11,
 			current_odometer_on=CASE
 				WHEN $10::bigint IS NULL THEN NULL
-				WHEN $10::bigint IS DISTINCT FROM previous.latest_odometer_miles THEN $12::date
-				ELSE v.current_odometer_on
+				WHEN $10::bigint IS NOT DISTINCT FROM previous.current_odometer_miles THEN v.current_odometer_on
+				WHEN $10::bigint=previous.record_odometer_miles THEN
+					(SELECT max(occurred_on) FROM records WHERE vehicle_id=$1 AND odometer_miles=$10::bigint)
+				ELSE $12::date
 			END
-		FROM (SELECT id,photo_key,GREATEST(current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=$1)) AS latest_odometer_miles
+		FROM (SELECT id,photo_key,current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=$1) AS record_odometer_miles
 			FROM vehicles WHERE id=$1 FOR UPDATE) previous
 		WHERE v.id=previous.id
 		RETURNING previous.photo_key`, vehicle.ID,
