@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bitofbytes-io/carma/internal/middleware"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
@@ -140,6 +141,7 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 	vehicle.ID = old.ID
 	vehicle.CreatedAt = old.CreatedAt
 	vehicle.UpdatedAt = s.now()
+	vehicle.UpdatedBy = middleware.User(request).ID
 	today := s.today()
 	vehicle.CurrentOdometerOn = &today
 	photoKey, validation := s.savePhoto(request, validation)

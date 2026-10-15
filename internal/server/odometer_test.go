@@ -156,20 +156,57 @@ func TestVehicleMileageFeedsProjection(t *testing.T) {
 	if len(points) != 2 || !points[1].On.Equal(today) || points[1].Miles != 1102 {
 		t.Fatalf("points after unchanged save=%+v", points)
 	}
-	// Changing it dates it on the day it was entered.
+	// Changing it dates it on the day it was entered and keeps the old point.
 	saveVehicle("/vehicles/"+v.ID.String(), "1402")
 	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
-	if len(points) != 2 || !points[1].On.Equal(today.AddDate(0, 0, 10)) || points[1].Miles != 1402 {
+	if len(points) != 3 || !points[1].On.Equal(today) || points[1].Miles != 1102 || !points[2].On.Equal(today.AddDate(0, 0, 10)) || points[2].Miles != 1402 {
 		t.Fatalf("points after mileage change=%+v", points)
 	}
 
-	// A reading that raises the mileage moves its date and is not counted twice.
+	// A reading that raises the mileage moves its date, keeps the old point,
+	// and is not counted twice.
 	if _, err := f.store.AddOdometerReading(t.Context(), model.OdometerReading{ID: uuid.New(), VehicleID: v.ID, ReadOn: today.AddDate(0, 0, 12), OdometerMiles: 1500, CreatedBy: f.user.ID, CreatedAt: time.Now()}, false); err != nil {
 		t.Fatal(err)
 	}
 	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
-	if len(points) != 2 || !points[1].On.Equal(today.AddDate(0, 0, 12)) || points[1].Miles != 1500 {
+	if len(points) != 4 || points[2].Miles != 1402 || !points[3].On.Equal(today.AddDate(0, 0, 12)) || points[3].Miles != 1500 {
 		t.Fatalf("points after reading=%+v", points)
+	}
+}
+
+func TestCheckInAfterVehicleMileageGivesProjection(t *testing.T) {
+	f := setup(t)
+	b, ct := formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": "1102"}, "", nil)
+	if response := f.do(t, http.MethodPost, "/vehicles", b, ct); response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	types, _ := f.store.ListServiceTypes(t.Context())
+	miles := int64(10000)
+	if _, err := f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometer: v.LatestOdometer, Enabled: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	created := f.s.today()
+
+	// Following the hint: check in 20 days later. 600 mi in 20 days is 30 mi
+	// a day, so the remaining 9,400 mi are about 313 days away.
+	now := f.s.now
+	f.s.now = func() time.Time { return now().AddDate(0, 0, 20) }
+	if response := postOdometer(t, f, v.ID, url.Values{"odometer_miles": {"1702"}}, false); response.Code != http.StatusSeeOther {
+		t.Fatalf("check-in status=%d body=%s", response.Code, response.Body.String())
+	}
+	points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, created.AddDate(-1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 || !points[0].On.Equal(created) || points[0].Miles != 1102 || points[1].Miles != 1702 {
+		t.Fatalf("points=%+v, want the vehicle's 1102 mi and the 1702 mi check-in", points)
+	}
+	today := f.s.today()
+	want := "~9,400 mi left, est. " + today.AddDate(0, 0, 313).Format("Jan 2, 2006")
+	if page := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String(); !strings.Contains(page, want) {
+		t.Fatalf("reminders page missing %q: %s", want, page)
 	}
 }
 
@@ -201,8 +238,8 @@ func TestVehicleSaveDatesMileageCopiedFromRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(points) != 1 || !points[0].On.Equal(recordOn) || points[0].Miles != 1500 {
-		t.Fatalf("points=%+v, want only the record's 1500 mi on %s", points, recordOn.Format("Jan 2"))
+	if len(points) != 2 || !points[0].On.Equal(today) || points[0].Miles != 1000 || !points[1].On.Equal(recordOn) || points[1].Miles != 1500 {
+		t.Fatalf("points=%+v, want 1000 mi on %s and the record's 1500 mi on %s", points, today.Format("Jan 2"), recordOn.Format("Jan 2"))
 	}
 }
 
