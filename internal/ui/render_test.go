@@ -491,6 +491,16 @@ func TestRecallTemplates(t *testing.T) {
 	if strings.Contains(body, "vymm=") || !strings.Contains(body, `href="https://www.nhtsa.gov/recalls" target="_blank"`) {
 		t.Fatalf("recalls section without a VIN should link to the plain NHTSA lookup: %s", body)
 	}
+	for _, invalid := range []string{"UNKNOWN", "1FTER4KP4TLE1726", "1FTER4KP4TLE1726O"} {
+		b.Reset()
+		section.Vehicle.VIN = invalid
+		if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {
+			t.Fatal(err)
+		}
+		if body = b.String(); strings.Contains(body, "vymm=") || strings.Contains(body, "Check this VIN") || !strings.Contains(body, `href="https://www.nhtsa.gov/recalls" target="_blank"`) {
+			t.Fatalf("invalid VIN %q should fall back to the plain NHTSA lookup: %s", invalid, body)
+		}
+	}
 	b.Reset()
 	section.Vehicle.VIN = "1fter-4kp4tle17265"
 	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {

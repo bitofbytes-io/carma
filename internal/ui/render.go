@@ -84,7 +84,7 @@ func New() (*Renderer, error) {
 				return template.HTMLAttr("selected")
 			}
 			return template.HTMLAttr("")
-		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower, "vin": nhtsa.NormalizeVIN, "odometerForm": func(v model.Vehicle, ret string) OdometerForm {
+		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower, "lookupVIN": nhtsa.LookupVIN, "odometerForm": func(v model.Vehicle, ret string) OdometerForm {
 			return OdometerForm{Vehicle: v, Return: ret}
 		}}).ParseFS(files, "templates/base.html", "templates/partials.html", "templates/"+n+".html")
 		if e != nil {

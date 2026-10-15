@@ -110,3 +110,11 @@ func TestDisplayName(t *testing.T) {
 		}
 	}
 }
+
+func TestLookupVIN(t *testing.T) {
+	for in, want := range map[string]string{" 1fter-4kp4tle17265 ": "1FTER4KP4TLE17265", "": "", "UNKNOWN": "", "1FTER4KP4TLE1726": "", "1FTER4KP4TLE1726O": ""} {
+		if got := LookupVIN(in); got != want {
+			t.Errorf("LookupVIN(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
