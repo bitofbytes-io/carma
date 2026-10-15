@@ -159,6 +159,7 @@ All timestamps `timestamptz`, money in integer cents, soft deletes via `archived
 | `reminder_notifications` | id, reminder_id FK, sent_at, recipients, message_id |
 | `reminder_digests` | id, week_start (unique date), sent_at, recipients, message_id |
 | `vehicle_recalls` | vehicle_id FK, campaign_number, component, summary, consequence, remedy, park_it, park_outside, first_seen_at, dismissed_at |
+| `recall_dismissals` | vehicle_id FK, campaign_number, dismissed_at (survives a campaign dropping out of a refresh) |
 | `recall_notifications` | vehicle_id FK, campaign_number, notified_at, digest_id (null for baseline campaigns) |
 
 Notes:

@@ -182,3 +182,109 @@ func TestRecallNotificationMigrationBackfill(t *testing.T) {
 		t.Fatalf("notified_at=%v digest=%v, want %v and no digest", notifiedAt, digestID, want)
 	}
 }
+
+func TestRecallDismissalSurvivesRelistingPostgresIntegration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	store := testdb.Store(t)
+	year := 2019
+	now := time.Date(2026, time.October, 14, 12, 0, 0, 0, time.UTC)
+	vehicle, err := store.CreateVehicle(ctx, model.Vehicle{ID: uuid.New(), Nickname: "Outback", Year: &year, Make: "Subaru", Model: "Outback", CreatedAt: now, UpdatedAt: now}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(at time.Time, campaigns ...string) {
+		t.Helper()
+		var recalls []model.Recall
+		for _, campaign := range campaigns {
+			recalls = append(recalls, model.Recall{CampaignNumber: campaign})
+		}
+		if _, err := store.SaveRecallCheck(ctx, vehicle, recalls, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unnotified := func() []string {
+		t.Helper()
+		recalls, err := store.ListUnnotifiedRecalls(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var campaigns []string
+		for _, recall := range recalls {
+			campaigns = append(campaigns, recall.CampaignNumber)
+		}
+		return campaigns
+	}
+	check(now, "19V493000")
+	check(now.Add(7*24*time.Hour), "19V493000", "26V100000")
+	dismissedAt := now.Add(8 * 24 * time.Hour)
+	if err = store.SetRecallDismissed(ctx, vehicle.ID, "26V100000", &dismissedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	// NHTSA drops the dismissed campaign and lists it again: it stays
+	// dismissed and is not emailed.
+	check(now.Add(14*24*time.Hour), "19V493000")
+	check(now.Add(21*24*time.Hour), "19V493000", "26V100000")
+	if got := unnotified(); len(got) != 0 {
+		t.Fatalf("relisted dismissed campaign is new: %v", got)
+	}
+	all, err := store.ListRecalls(ctx, &vehicle.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var relisted *model.Recall
+	for i := range all {
+		if all[i].CampaignNumber == "26V100000" {
+			relisted = &all[i]
+		}
+	}
+	if relisted == nil || relisted.DismissedAt == nil || !relisted.DismissedAt.Equal(dismissedAt) {
+		t.Fatalf("relisted campaign = %+v", relisted)
+	}
+
+	// Restoring it makes it eligible again, also after another relisting.
+	if err = store.SetRecallDismissed(ctx, vehicle.ID, "26V100000", nil); err != nil {
+		t.Fatal(err)
+	}
+	check(now.Add(28*24*time.Hour), "19V493000")
+	check(now.Add(35*24*time.Hour), "19V493000", "26V100000")
+	if got := unnotified(); len(got) != 1 || got[0] != "26V100000" {
+		t.Fatalf("restored campaign after relisting = %v", got)
+	}
+}
+
+func TestRecallDismissalMigrationBackfill(t *testing.T) {
+	ctx := context.Background()
+	connection, err := pgx.Connect(ctx, testdb.URL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close(context.Background()) }()
+	down, err := migrations.FS.ReadFile("009_recall_dismissals.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = connection.Exec(ctx, string(down)); err != nil {
+		t.Fatal(err)
+	}
+	var vehicleID string
+	if err = connection.QueryRow(ctx, `INSERT INTO vehicles(nickname) VALUES('Outback') RETURNING id::text`).Scan(&vehicleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = connection.Exec(ctx, `INSERT INTO vehicle_recalls(vehicle_id,campaign_number,dismissed_at) VALUES
+		($1,'19V493000','2026-10-01T00:00:00Z'),($1,'21V587000',NULL)`, vehicleID); err != nil {
+		t.Fatal(err)
+	}
+	if err = database.Migrate(ctx, connection, migrations.FS, time.UTC); err != nil {
+		t.Fatalf("reapply 009: %v", err)
+	}
+	var campaign string
+	var dismissedAt time.Time
+	if err = connection.QueryRow(ctx, `SELECT campaign_number,dismissed_at FROM recall_dismissals WHERE vehicle_id=$1`, vehicleID).Scan(&campaign, &dismissedAt); err != nil {
+		t.Fatalf("expected exactly the dismissed campaign: %v", err)
+	}
+	if want := time.Date(2026, time.October, 1, 0, 0, 0, 0, time.UTC); campaign != "19V493000" || !dismissedAt.Equal(want) {
+		t.Fatalf("backfilled %s at %v", campaign, dismissedAt)
+	}
+}

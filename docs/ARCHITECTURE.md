@@ -177,8 +177,9 @@ outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 - `internal/recallcheck.Runner` runs at startup and every 6 hours under its own
   advisory lock. It checks vehicles never checked, last checked over 7 days ago, or
   whose year, make, or model changed since (`vehicle_recall_checks`), and replaces
-  their `vehicle_recalls` rows, keeping dismissals and notifications of campaigns
-  still listed. A failed fetch is retried on the next run. A vehicle's first check
+  their `vehicle_recalls` rows. Dismissals (`recall_dismissals`) and notifications
+  (`recall_notifications`) are kept apart from those rows, so a campaign NHTSA drops
+  and lists again stays dismissed and is not announced twice. A failed fetch is retried on the next run. A vehicle's first check
   for a year, make, and model is its baseline: those campaigns are recorded as
   already notified (they show on the vehicle page right away), so the digest emails
   only campaigns NHTSA adds later. Migration 008 does the same for campaigns stored

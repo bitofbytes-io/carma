@@ -255,3 +255,40 @@ func TestRecallNotificationsMigrationIsAdditiveWithBackfill(t *testing.T) {
 		}
 	}
 }
+
+func TestRecallDismissalsMigrationIsAdditiveWithBackfill(t *testing.T) {
+	up, err := fs.ReadFile(FS, "009_recall_dismissals.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"create table recall_dismissals",
+		"vehicle_id uuid not null references vehicles(id) on delete cascade",
+		"primary key (vehicle_id, campaign_number)",
+		"select vehicle_id, campaign_number, dismissed_at from vehicle_recalls",
+		"where dismissed_at is not null",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("recall dismissals migration missing %q", declaration)
+		}
+	}
+	for _, statement := range []string{"alter table", "drop ", "delete from", "update "} {
+		if strings.Contains(sql, statement) {
+			t.Fatalf("recall dismissals migration must only add a table, found %q", statement)
+		}
+	}
+	down, err := fs.ReadFile(FS, "009_recall_dismissals.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '009_recall_dismissals'",
+		"drop table if exists recall_dismissals",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("recall dismissals down migration missing %q", declaration)
+		}
+	}
+}

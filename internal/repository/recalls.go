@@ -20,7 +20,8 @@ type RecallCheckStore interface {
 	// SaveRecallCheck replaces the vehicle's campaigns with recalls, checked for
 	// its year, make, and model. Campaigns still listed keep their first-seen
 	// time and dismissal. It returns how many campaigns are new.
-	// Notifications are kept separately and survive a campaign dropping out.
+	// Dismissals and notifications are kept separately, so a campaign that
+	// drops out and is listed again keeps both.
 	//
 	// The first check for a year, make, and model is the vehicle's baseline:
 	// its campaigns are shown on the vehicle page but count as already
@@ -76,8 +77,9 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 	for _, recall := range recalls {
 		var inserted bool
 		// xmax is 0 only for a row this statement inserted rather than updated.
-		if err = tx.QueryRow(ctx, `INSERT INTO vehicle_recalls(vehicle_id,campaign_number,component,summary,consequence,remedy,report_received_on,park_it,park_outside,first_seen_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		if err = tx.QueryRow(ctx, `INSERT INTO vehicle_recalls(vehicle_id,campaign_number,component,summary,consequence,remedy,report_received_on,park_it,park_outside,first_seen_at,dismissed_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+				(SELECT dismissed_at FROM recall_dismissals WHERE vehicle_id=$1 AND campaign_number=$2))
 			ON CONFLICT(vehicle_id,campaign_number) DO UPDATE SET
 				component=EXCLUDED.component,summary=EXCLUDED.summary,consequence=EXCLUDED.consequence,remedy=EXCLUDED.remedy,
 				report_received_on=EXCLUDED.report_received_on,park_it=EXCLUDED.park_it,park_outside=EXCLUDED.park_outside
@@ -160,10 +162,29 @@ func (p *Postgres) ListUnnotifiedRecalls(ctx context.Context) ([]model.Recall, e
 	})
 }
 
+// SetRecallDismissed records the dismissal in recall_dismissals too, so it
+// outlives the vehicle_recalls row when NHTSA drops and relists the campaign.
 func (p *Postgres) SetRecallDismissed(ctx context.Context, vehicleID uuid.UUID, campaignNumber string, dismissedAt *time.Time) error {
-	tag, err := p.pool.Exec(ctx, `UPDATE vehicle_recalls SET dismissed_at=$3 WHERE vehicle_id=$1 AND campaign_number=$2`, vehicleID, campaignNumber, dismissedAt)
-	if err == nil && tag.RowsAffected() == 0 {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `UPDATE vehicle_recalls SET dismissed_at=$3 WHERE vehicle_id=$1 AND campaign_number=$2`, vehicleID, campaignNumber, dismissedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return err
+	if dismissedAt != nil {
+		_, err = tx.Exec(ctx, `INSERT INTO recall_dismissals(vehicle_id,campaign_number,dismissed_at) VALUES($1,$2,$3)
+			ON CONFLICT(vehicle_id,campaign_number) DO UPDATE SET dismissed_at=EXCLUDED.dismissed_at`, vehicleID, campaignNumber, dismissedAt.UTC())
+	} else {
+		_, err = tx.Exec(ctx, `DELETE FROM recall_dismissals WHERE vehicle_id=$1 AND campaign_number=$2`, vehicleID, campaignNumber)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
