@@ -63,6 +63,15 @@ func NormalizeVIN(vin string) string {
 	return strings.NewReplacer(" ", "", "-", "").Replace(strings.ToUpper(strings.TrimSpace(vin)))
 }
 
+// LookupVIN returns vin normalized when it is a valid 17-character VIN, or ""
+// when it is not.
+func LookupVIN(vin string) string {
+	if vin = NormalizeVIN(vin); vinPattern.MatchString(vin) {
+		return vin
+	}
+	return ""
+}
+
 // DecodeVIN looks up the make, model, and model year for a 17-character VIN.
 func (c *Client) DecodeVIN(ctx context.Context, vin string) (Vehicle, error) {
 	vin = NormalizeVIN(vin)
