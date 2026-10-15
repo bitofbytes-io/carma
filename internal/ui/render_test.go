@@ -488,6 +488,17 @@ func TestRecallTemplates(t *testing.T) {
 			t.Fatalf("recalls section missing %q: %s", want, body)
 		}
 	}
+	if strings.Contains(body, "vymm=") || !strings.Contains(body, `href="https://www.nhtsa.gov/recalls" target="_blank"`) {
+		t.Fatalf("recalls section without a VIN should link to the plain NHTSA lookup: %s", body)
+	}
+	b.Reset()
+	section.Vehicle.VIN = "1fter-4kp4tle17265"
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {
+		t.Fatal(err)
+	}
+	if body = b.String(); strings.Count(body, `href="https://www.nhtsa.gov/recalls?vymm=1FTER4KP4TLE17265"`) != 2 || !strings.Contains(body, "look up this VIN on nhtsa.gov") || !strings.Contains(body, "Check this VIN ›") {
+		t.Fatalf("recalls section should deep link the VIN in the intro and on each open recall: %s", body)
+	}
 	b.Reset()
 	section.Recalls, section.DismissedRecalls = nil, nil
 	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil || strings.TrimSpace(b.String()) != "" {
