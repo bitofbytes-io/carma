@@ -80,7 +80,7 @@ func TestMileageProjectionOnDashboardAndReminders(t *testing.T) {
 	// The first reading starts the 5000 mi interval at 10000 mi.
 	addReading(today.AddDate(0, 0, -60), 10000)
 	page := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
-	if !strings.Contains(page, "~5,000 mi left · add a mileage reading to estimate") {
+	if !strings.Contains(page, "~5,000 mi left · log mileage again to estimate a date") {
 		t.Fatalf("reminders page missing estimate hint: %s", page)
 	}
 
@@ -101,6 +101,178 @@ func TestMileageProjectionOnDashboardAndReminders(t *testing.T) {
 	page = f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
 	if !strings.Contains(page, want) || !strings.Contains(page, "due-soon") {
 		t.Fatalf("reminders page missing projection %q: %s", want, page)
+	}
+}
+
+func TestVehicleMileageFeedsProjection(t *testing.T) {
+	f := setup(t)
+	saveVehicle := func(path, mileage string) {
+		t.Helper()
+		b, ct := formBody(t, map[string]string{"nickname": "Ranger", "year": "2026", "make": "Ford", "model": "Ranger", "current_odometer": mileage}, "", nil)
+		if response := f.do(t, http.MethodPost, path, b, ct); response.Code != http.StatusSeeOther {
+			t.Fatalf("save vehicle status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	saveVehicle("/vehicles", "1102")
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	types, _ := f.store.ListServiceTypes(t.Context())
+	miles := int64(10000)
+	if _, err := f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometer: v.LatestOdometer, Enabled: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	reminders := func() string {
+		t.Helper()
+		return f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String()
+	}
+	today := f.s.today()
+	// The vehicle's mileage is one dated point, so the hint says when a second
+	// one can give a driving rate.
+	want := "~10,000 mi left · log mileage again on or after " + today.AddDate(0, 0, 14).Format("Jan 2") + " to estimate a date"
+	if page := reminders(); !strings.Contains(page, want) {
+		t.Fatalf("reminders page missing %q: %s", want, page)
+	}
+
+	// An older service record pairs with the vehicle's mileage: 900 mi in 30
+	// days is 30 mi a day, so 10,000 mi are about 333 days away.
+	recordMiles := int64(202)
+	record := model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[1].ID, CreatedBy: f.user.ID, OccurredOn: today.AddDate(0, 0, -30), OdometerMiles: &recordMiles, CreatedAt: time.Now()}
+	if _, err := f.store.CreateRecord(t.Context(), record, nil); err != nil {
+		t.Fatal(err)
+	}
+	want = "~10,000 mi left, est. " + today.AddDate(0, 0, 333).Format("Jan 2, 2006")
+	if page := reminders(); !strings.Contains(page, want) {
+		t.Fatalf("reminders page missing %q: %s", want, page)
+	}
+
+	// Saving the vehicle later without changing its mileage keeps its date.
+	now := f.s.now
+	f.s.now = func() time.Time { return now().AddDate(0, 0, 10) }
+	saveVehicle("/vehicles/"+v.ID.String(), "1102")
+	points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 || !points[1].On.Equal(today) || points[1].Miles != 1102 {
+		t.Fatalf("points after unchanged save=%+v", points)
+	}
+	// Changing it on the form is a correction: it replaces the point and is
+	// dated on the day it was entered.
+	saveVehicle("/vehicles/"+v.ID.String(), "1402")
+	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if len(points) != 2 || !points[1].On.Equal(today.AddDate(0, 0, 10)) || points[1].Miles != 1402 {
+		t.Fatalf("points after mileage change=%+v", points)
+	}
+
+	// A check-in that raises the mileage moves its date, keeps the old point,
+	// and is not counted twice.
+	if _, err := f.store.AddOdometerReading(t.Context(), model.OdometerReading{ID: uuid.New(), VehicleID: v.ID, ReadOn: today.AddDate(0, 0, 12), OdometerMiles: 1500, CreatedBy: f.user.ID, CreatedAt: time.Now()}, false); err != nil {
+		t.Fatal(err)
+	}
+	points, _ = f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if len(points) != 3 || points[1].Miles != 1402 || !points[2].On.Equal(today.AddDate(0, 0, 12)) || points[2].Miles != 1500 {
+		t.Fatalf("points after reading=%+v", points)
+	}
+}
+
+func TestVehicleMileageCorrectionReplacesPoint(t *testing.T) {
+	for _, tc := range []struct{ name, entered, corrected string }{
+		{name: "lower", entered: "100000", corrected: "10000"},
+		{name: "higher", entered: "1000", corrected: "10000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setup(t)
+			b, ct := formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": tc.entered}, "", nil)
+			if response := f.do(t, http.MethodPost, "/vehicles", b, ct); response.Code != http.StatusSeeOther {
+				t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+			}
+			vehicles, _ := f.store.ListVehicles(t.Context(), false)
+			v := vehicles[0]
+			created := f.s.today()
+			now := f.s.now
+			f.s.now = func() time.Time { return now().AddDate(0, 0, 7) }
+			b, ct = formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": tc.corrected}, "", nil)
+			if response := f.do(t, http.MethodPost, "/vehicles/"+v.ID.String(), b, ct); response.Code != http.StatusSeeOther {
+				t.Fatalf("edit status=%d body=%s", response.Code, response.Body.String())
+			}
+			points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, created.AddDate(-1, 0, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The mistyped value must not stay in the history to skew the rate.
+			if len(points) != 1 || points[0].Miles != 10000 || !points[0].On.Equal(f.s.today()) {
+				t.Fatalf("points=%+v, want only the corrected 10000 mi", points)
+			}
+		})
+	}
+}
+
+func TestCheckInAfterVehicleMileageGivesProjection(t *testing.T) {
+	f := setup(t)
+	b, ct := formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": "1102"}, "", nil)
+	if response := f.do(t, http.MethodPost, "/vehicles", b, ct); response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	types, _ := f.store.ListServiceTypes(t.Context())
+	miles := int64(10000)
+	if _, err := f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMiles: &miles, StartingOdometer: v.LatestOdometer, Enabled: true, CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	created := f.s.today()
+
+	// Following the hint: check in 20 days later. 600 mi in 20 days is 30 mi
+	// a day, so the remaining 9,400 mi are about 313 days away.
+	now := f.s.now
+	f.s.now = func() time.Time { return now().AddDate(0, 0, 20) }
+	if response := postOdometer(t, f, v.ID, url.Values{"odometer_miles": {"1702"}}, false); response.Code != http.StatusSeeOther {
+		t.Fatalf("check-in status=%d body=%s", response.Code, response.Body.String())
+	}
+	points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, created.AddDate(-1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 || !points[0].On.Equal(created) || points[0].Miles != 1102 || points[1].Miles != 1702 {
+		t.Fatalf("points=%+v, want the vehicle's 1102 mi and the 1702 mi check-in", points)
+	}
+	today := f.s.today()
+	want := "~9,400 mi left, est. " + today.AddDate(0, 0, 313).Format("Jan 2, 2006")
+	if page := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/reminders", nil, "").Body.String(); !strings.Contains(page, want) {
+		t.Fatalf("reminders page missing %q: %s", want, page)
+	}
+}
+
+func TestVehicleSaveDatesMileageCopiedFromRecord(t *testing.T) {
+	f := setup(t)
+	saveVehicle := func(path, mileage string) {
+		t.Helper()
+		b, ct := formBody(t, map[string]string{"nickname": "Ranger", "current_odometer": mileage}, "", nil)
+		if response := f.do(t, http.MethodPost, path, b, ct); response.Code != http.StatusSeeOther {
+			t.Fatalf("save vehicle status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	saveVehicle("/vehicles", "1000")
+	vehicles, _ := f.store.ListVehicles(t.Context(), false)
+	v := vehicles[0]
+	today := f.s.today()
+	types, _ := f.store.ListServiceTypes(t.Context())
+	recordMiles := int64(1500)
+	recordOn := today.AddDate(0, 0, 20)
+	if _, err := f.store.CreateRecord(t.Context(), model.Record{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, CreatedBy: f.user.ID, OccurredOn: recordOn, OdometerMiles: &recordMiles, CreatedAt: time.Now()}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The edit form shows the record's higher mileage; saving it a week later
+	// must date it by the record, not keep the 1000 mi date or use today.
+	now := f.s.now
+	f.s.now = func() time.Time { return now().AddDate(0, 0, 27) }
+	saveVehicle("/vehicles/"+v.ID.String(), "1500")
+	points, err := f.store.ListMileagePoints(t.Context(), []uuid.UUID{v.ID}, today.AddDate(-1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || !points[0].On.Equal(recordOn) || points[0].Miles != 1500 {
+		t.Fatalf("points=%+v, want only the record's 1500 mi on %s", points, recordOn.Format("Jan 2"))
 	}
 }
 

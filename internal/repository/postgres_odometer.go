@@ -14,6 +14,19 @@ import (
 // vehicle's latest known mileage.
 var ErrOdometerBelowLatest = errors.New("odometer reading is below the latest mileage")
 
+// archiveVehicleMileageSQL keeps the vehicle's dated mileage ($1) in the
+// reading history, attributed to $2 at $3, before a check-in changes it to
+// $4, unless a reading or record already holds the same point.
+const archiveVehicleMileageSQL = `INSERT INTO odometer_readings(id,vehicle_id,read_on,odometer_miles,created_by,created_at)
+	SELECT gen_random_uuid(),v.id,v.current_odometer_on,v.current_odometer_miles,$2,$3
+	FROM vehicles v
+	WHERE v.id=$1 AND v.current_odometer_on IS NOT NULL AND v.current_odometer_miles IS NOT NULL
+		AND v.current_odometer_miles IS DISTINCT FROM $4::bigint
+		AND NOT EXISTS (SELECT 1 FROM odometer_readings o
+			WHERE o.vehicle_id=v.id AND o.read_on=v.current_odometer_on AND o.odometer_miles=v.current_odometer_miles)
+		AND NOT EXISTS (SELECT 1 FROM records r
+			WHERE r.vehicle_id=v.id AND r.occurred_on=v.current_odometer_on AND r.odometer_miles=v.current_odometer_miles)`
+
 func (p *Postgres) AddOdometerReading(ctx context.Context, reading model.OdometerReading, allowLower bool) (model.Vehicle, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
@@ -36,6 +49,13 @@ func (p *Postgres) AddOdometerReading(ctx context.Context, reading model.Odomete
 	if !allowLower && vehicle.LatestOdometer != nil && reading.OdometerMiles < *vehicle.LatestOdometer {
 		return vehicle, ErrOdometerBelowLatest
 	}
+	next := reading.OdometerMiles
+	if vehicle.CurrentOdometer != nil {
+		next = max(next, *vehicle.CurrentOdometer)
+	}
+	if _, err = tx.Exec(ctx, archiveVehicleMileageSQL, reading.VehicleID, reading.CreatedBy, reading.CreatedAt, next); err != nil {
+		return vehicle, err
+	}
 	if _, err = tx.Exec(
 		ctx, `INSERT INTO odometer_readings(id,vehicle_id,read_on,odometer_miles,created_by,created_at)
 		VALUES($1,$2,$3,$4,$5,$6)`, reading.ID,
@@ -45,12 +65,14 @@ func (p *Postgres) AddOdometerReading(ctx context.Context, reading model.Odomete
 		return vehicle, err
 	}
 	// A confirmed lower reading stays in the history but never lowers the
-	// vehicle's mileage.
+	// vehicle's mileage. A higher one also dates it.
 	var current int64
 	if err = tx.QueryRow(
-		ctx, `UPDATE vehicles SET current_odometer_miles=GREATEST(current_odometer_miles,$2::bigint)
+		ctx, `UPDATE vehicles SET current_odometer_miles=GREATEST(current_odometer_miles,$2::bigint),
+			current_odometer_on=CASE WHEN current_odometer_miles IS NULL OR $2::bigint>current_odometer_miles
+				THEN $3::date ELSE current_odometer_on END
 		WHERE id=$1
-		RETURNING current_odometer_miles`, reading.VehicleID, reading.OdometerMiles,
+		RETURNING current_odometer_miles`, reading.VehicleID, reading.OdometerMiles, reading.ReadOn,
 	).Scan(&current); err != nil {
 		return vehicle, err
 	}
@@ -80,6 +102,13 @@ func (p *Postgres) ListMileagePoints(ctx context.Context, vehicleIDs []uuid.UUID
 		UNION ALL
 		SELECT vehicle_id,occurred_on,odometer_miles FROM records
 		WHERE vehicle_id=ANY($1::uuid[]) AND occurred_on>=$2::date AND odometer_miles IS NOT NULL
+		UNION ALL
+		SELECT v.id,v.current_odometer_on,v.current_odometer_miles FROM vehicles v
+		WHERE v.id=ANY($1::uuid[]) AND v.current_odometer_on>=$2::date AND v.current_odometer_miles IS NOT NULL
+			AND NOT EXISTS (SELECT 1 FROM odometer_readings o
+				WHERE o.vehicle_id=v.id AND o.read_on=v.current_odometer_on AND o.odometer_miles=v.current_odometer_miles)
+			AND NOT EXISTS (SELECT 1 FROM records r
+				WHERE r.vehicle_id=v.id AND r.occurred_on=v.current_odometer_on AND r.odometer_miles=v.current_odometer_miles)
 		ORDER BY 1,2`, ids, since)
 	if err != nil {
 		return nil, err

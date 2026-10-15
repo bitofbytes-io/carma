@@ -102,7 +102,11 @@ func Evaluate(r model.Reminder, today time.Time) Result {
 				}
 				res.Detail = "~" + groupThousands(left) + " mi left"
 				if r.MilesPerDay == nil || !(*r.MilesPerDay > 0) {
-					res.Detail += " · add a mileage reading to estimate"
+					hint := r.EstimateHint
+					if hint == "" {
+						hint = noHistoryHint
+					}
+					res.Detail += " · " + hint
 				} else if days := float64(left) / *r.MilesPerDay; days <= maxProjectionDays {
 					projected := today.AddDate(0, 0, int(math.Round(days)))
 					res.ProjectedDueDate = &projected
@@ -146,15 +150,43 @@ func EvaluateAll(reminders []model.Reminder, points []model.MileagePoint, today 
 		byVehicle[point.VehicleID] = append(byVehicle[point.VehicleID], point)
 	}
 	rates := map[uuid.UUID]*float64{}
+	hints := map[uuid.UUID]string{}
 	for _, id := range ProjectionVehicles(reminders) {
 		rates[id] = EstimateMilesPerDay(byVehicle[id], today)
+		hints[id] = EstimateHint(byVehicle[id], today)
 	}
 	results := make([]Result, 0, len(reminders))
 	for _, schedule := range reminders {
 		schedule.MilesPerDay = rates[schedule.VehicleID]
+		schedule.EstimateHint = hints[schedule.VehicleID]
 		results = append(results, Evaluate(schedule, today))
 	}
 	return results
+}
+
+// noHistoryHint explains what a vehicle with no recent mileage needs before its
+// due date can be estimated.
+var noHistoryHint = "log mileage on two dates " + strconv.Itoa(minEstimateSpanDays) + "+ days apart to estimate a date"
+
+// EstimateHint says what mileage history EstimateMilesPerDay still needs to
+// find a driving rate from points, or "" when it already has one.
+func EstimateHint(points []model.MileagePoint, today time.Time) string {
+	xs, _, first, last := windowPoints(points, today)
+	switch {
+	case len(xs) == 0:
+		return noHistoryHint
+	case len(xs) < 2 || last-first < minEstimateSpanDays:
+		// A reading on or after this date spans enough days from the first.
+		from := today.AddDate(0, -EstimateWindowMonths, 0)
+		next := time.Date(from.Year(), from.Month(), from.Day()+int(first)+minEstimateSpanDays, 0, 0, 0, 0, today.Location())
+		if !next.After(today) {
+			return "log mileage again to estimate a date"
+		}
+		return "log mileage again on or after " + shortDate(next, today) + " to estimate a date"
+	case EstimateMilesPerDay(points, today) == nil:
+		return "recent mileage isn't increasing, so no date estimate"
+	}
+	return ""
 }
 
 // EstimateMilesPerDay fits a least-squares line through the points dated in
@@ -162,18 +194,7 @@ func EvaluateAll(reminders []model.Reminder, points []model.MileagePoint, today 
 // when fewer than two points span at least minEstimateSpanDays, or when the
 // fitted mileage does not increase.
 func EstimateMilesPerDay(points []model.MileagePoint, today time.Time) *float64 {
-	from, to := dayNumber(today.AddDate(0, -EstimateWindowMonths, 0)), dayNumber(today)
-	var xs, ys []float64
-	first, last := to, from
-	for _, point := range points {
-		day := dayNumber(point.On)
-		if day < from || day > to {
-			continue
-		}
-		first, last = min(first, day), max(last, day)
-		xs = append(xs, float64(day-from))
-		ys = append(ys, float64(point.Miles))
-	}
+	xs, ys, first, last := windowPoints(points, today)
 	if len(xs) < 2 || last-first < minEstimateSpanDays {
 		return nil
 	}
@@ -194,6 +215,23 @@ func EstimateMilesPerDay(points []model.MileagePoint, today time.Time) *float64 
 		return nil
 	}
 	return &slope
+}
+
+// windowPoints returns the points dated in the EstimateWindowMonths up to
+// today as days into that window and miles, with the first and last day seen.
+func windowPoints(points []model.MileagePoint, today time.Time) (xs, ys []float64, first, last int64) {
+	from, to := dayNumber(today.AddDate(0, -EstimateWindowMonths, 0)), dayNumber(today)
+	first, last = to-from, 0
+	for _, point := range points {
+		day := dayNumber(point.On)
+		if day < from || day > to {
+			continue
+		}
+		first, last = min(first, day-from), max(last, day-from)
+		xs = append(xs, float64(day-from))
+		ys = append(ys, float64(point.Miles))
+	}
+	return xs, ys, first, last
 }
 
 // dayNumber counts calendar days since the Unix epoch for t's date in its own

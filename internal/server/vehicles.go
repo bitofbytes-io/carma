@@ -105,6 +105,8 @@ func (s *Server) createVehicle(response http.ResponseWriter, request *http.Reque
 	vehicle.ID = uuid.New()
 	vehicle.CreatedAt = s.now()
 	vehicle.UpdatedAt = vehicle.CreatedAt
+	today := s.today()
+	vehicle.CurrentOdometerOn = &today
 	reminders, err := s.presetReminders(request.Context(), vehicle, request.Form["reminder_preset"])
 	if err != nil {
 		s.fail(response, err)
@@ -138,6 +140,8 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 	vehicle.ID = old.ID
 	vehicle.CreatedAt = old.CreatedAt
 	vehicle.UpdatedAt = s.now()
+	today := s.today()
+	vehicle.CurrentOdometerOn = &today
 	photoKey, validation := s.savePhoto(request, validation)
 	if validation != "" {
 		vehicle.PhotoKey = old.PhotoKey

@@ -186,3 +186,35 @@ func TestVehicleRecallsMigrationIsAdditive(t *testing.T) {
 		}
 	}
 }
+
+func TestVehicleOdometerDateMigrationBackfill(t *testing.T) {
+	up, err := fs.ReadFile(FS, "007_vehicle_odometer_date.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"alter table vehicles add column current_odometer_on date",
+		"from odometer_readings o",
+		"from records r",
+		"(v.updated_at at time zone current_setting('carma.household_timezone'))::date",
+		"where v.current_odometer_miles is not null",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("vehicle odometer date migration missing %q", declaration)
+		}
+	}
+	down, err := fs.ReadFile(FS, "007_vehicle_odometer_date.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '007_vehicle_odometer_date'",
+		"drop column if exists current_odometer_on",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("vehicle odometer date down migration missing %q", declaration)
+		}
+	}
+}

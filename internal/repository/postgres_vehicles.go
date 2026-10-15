@@ -107,14 +107,14 @@ func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle, rem
 	defer func() { _ = tx.Rollback(ctx) }()
 	err = tx.QueryRow(
 		ctx, `INSERT INTO vehicles(id,nickname,year,make,model,vin,license_plate,photo_key,notes,current_odometer_miles,
-			created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			created_at,updated_at,current_odometer_on)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $10::bigint IS NOT NULL THEN $13::date END)
 		RETURNING id,nickname,year,make,model,vin,license_plate,photo_key,notes,archived_at,created_at,updated_at,
 			current_odometer_miles`, vehicle.ID,
 		vehicle.Nickname, vehicle.Year, vehicle.Make,
 		vehicle.Model, vehicle.VIN, vehicle.LicensePlate,
 		vehicle.PhotoKey, vehicle.Notes, vehicle.CurrentOdometer,
-		vehicle.CreatedAt, vehicle.UpdatedAt,
+		vehicle.CreatedAt, vehicle.UpdatedAt, vehicle.CurrentOdometerOn,
 	).Scan(
 		&vehicle.ID, &vehicle.Nickname, &vehicle.Year,
 		&vehicle.Make, &vehicle.Model, &vehicle.VIN,
@@ -147,17 +147,30 @@ func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Lock the row and read the photo it held before this write, so a concurrent
 	// replacement is never overwritten or reported as the wrong old key.
+	// Mileage saved here corrects the vehicle's point rather than adding a
+	// reading, so the old point is replaced; check-ins keep history instead.
+	// An unchanged mileage keeps its date. The edit form shows the effective
+	// latest mileage, so resubmitting a higher one from a service record takes
+	// that record's date; any other new mileage is dated $12.
 	var previousPhotoKey string
 	err = tx.QueryRow(
 		ctx, `UPDATE vehicles v SET nickname=$2,year=$3,make=$4,model=$5,vin=$6,license_plate=$7,
-			photo_key=COALESCE(NULLIF($8,''),v.photo_key),notes=$9,current_odometer_miles=$10,updated_at=$11
-		FROM (SELECT id,photo_key FROM vehicles WHERE id=$1 FOR UPDATE) previous
+			photo_key=COALESCE(NULLIF($8,''),v.photo_key),notes=$9,current_odometer_miles=$10,updated_at=$11,
+			current_odometer_on=CASE
+				WHEN $10::bigint IS NULL THEN NULL
+				WHEN $10::bigint IS NOT DISTINCT FROM previous.current_odometer_miles THEN v.current_odometer_on
+				WHEN $10::bigint=previous.record_odometer_miles THEN
+					(SELECT max(occurred_on) FROM records WHERE vehicle_id=$1 AND odometer_miles=$10::bigint)
+				ELSE $12::date
+			END
+		FROM (SELECT id,photo_key,current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=$1) AS record_odometer_miles
+			FROM vehicles WHERE id=$1 FOR UPDATE) previous
 		WHERE v.id=previous.id
 		RETURNING previous.photo_key`, vehicle.ID,
 		vehicle.Nickname, vehicle.Year, vehicle.Make,
 		vehicle.Model, vehicle.VIN, vehicle.LicensePlate,
 		vehicle.PhotoKey, vehicle.Notes, vehicle.CurrentOdometer,
-		vehicle.UpdatedAt,
+		vehicle.UpdatedAt, vehicle.CurrentOdometerOn,
 	).Scan(&previousPhotoKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vehicle, "", ErrNotFound

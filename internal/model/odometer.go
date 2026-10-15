@@ -14,7 +14,8 @@ type OdometerReading struct {
 	CreatedAt                time.Time
 }
 
-// MileagePoint is a dated odometer value from a reading or a service record.
+// MileagePoint is a dated odometer value from a reading, a service record, or
+// the vehicle's current mileage.
 type MileagePoint struct {
 	VehicleID uuid.UUID
 	On        time.Time

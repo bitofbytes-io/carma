@@ -22,7 +22,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = database.Migrate(context.Background(), migrationConnection, migrations.FS); err != nil {
+	if err = database.Migrate(context.Background(), migrationConnection, migrations.FS, time.UTC); err != nil {
 		t.Fatal(err)
 	}
 	downMigration, err := migrations.FS.ReadFile("003_reminder_notifications.down.sql")
@@ -43,7 +43,7 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if tableName != nil || versionPresent {
 		t.Fatalf("down migration left table=%v version=%t", tableName, versionPresent)
 	}
-	if err = database.Migrate(context.Background(), migrationConnection, migrations.FS); err != nil {
+	if err = database.Migrate(context.Background(), migrationConnection, migrations.FS, time.UTC); err != nil {
 		t.Fatalf("reapply after down migration: %v", err)
 	}
 	if err = migrationConnection.QueryRow(context.Background(), `SELECT to_regclass('reminder_notifications')::text`).Scan(&tableName); err != nil {

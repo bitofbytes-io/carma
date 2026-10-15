@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/google/uuid"
 )
 
 func ip(v int) *int       { return &v }
@@ -124,6 +125,75 @@ func TestEstimateMilesPerDay(t *testing.T) {
 	}
 }
 
+func TestEstimateHint(t *testing.T) {
+	today := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	point := func(daysAgo int, miles int64) model.MileagePoint {
+		return model.MileagePoint{On: today.AddDate(0, 0, -daysAgo), Miles: miles}
+	}
+	tests := []struct {
+		name   string
+		points []model.MileagePoint
+		want   string
+	}{
+		{name: "no points", want: "log mileage on two dates 14+ days apart to estimate a date"},
+		{name: "only old points", points: []model.MileagePoint{point(500, 0), point(400, 1000)}, want: "log mileage on two dates 14+ days apart to estimate a date"},
+		{name: "one point today", points: []model.MileagePoint{point(0, 8000)}, want: "log mileage again on or after Aug 14 to estimate a date"},
+		{name: "span under two weeks", points: []model.MileagePoint{point(10, 1000), point(0, 1500)}, want: "log mileage again on or after Aug 4 to estimate a date"},
+		{name: "one old enough point", points: []model.MileagePoint{point(30, 1000)}, want: "log mileage again to estimate a date"},
+		{name: "flat mileage", points: []model.MileagePoint{point(60, 1000), point(0, 1000)}, want: "recent mileage isn't increasing, so no date estimate"},
+		{name: "has a rate", points: []model.MileagePoint{point(14, 1000), point(0, 1420)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := EstimateHint(tc.points, today); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEstimateHintDateIsFourteenDaysAfterFirstPoint(t *testing.T) {
+	today := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		first time.Time
+		want  string
+	}{
+		{first: today, want: "log mileage again on or after Oct 28 to estimate a date"},
+		{first: today.AddDate(0, 0, -5), want: "log mileage again on or after Oct 23 to estimate a date"},
+		{first: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), want: "log mileage again on or after Oct 15 to estimate a date"},
+		{first: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC), want: "log mileage again to estimate a date"},
+	}
+	for _, tc := range tests {
+		points := []model.MileagePoint{{On: tc.first, Miles: 1000}}
+		if got := EstimateHint(points, today); got != tc.want {
+			t.Fatalf("first point %s: got %q want %q", tc.first.Format("Jan 2"), got, tc.want)
+		}
+		// A reading on the hinted date is enough for a rate.
+		next := tc.first.AddDate(0, 0, minEstimateSpanDays)
+		if EstimateMilesPerDay(append(points, model.MileagePoint{On: next, Miles: 1500}), next) == nil {
+			t.Fatalf("first point %s: no rate with a reading on %s", tc.first.Format("Jan 2"), next.Format("Jan 2"))
+		}
+	}
+}
+
+func TestEvaluateAllUsesVehicleMileageHint(t *testing.T) {
+	today := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	vehicleID := uuid.New()
+	r := model.Reminder{VehicleID: vehicleID, Enabled: true, IntervalMiles: i64p(10000), StartingOdometer: i64p(1102), LatestOdometer: i64p(2204)}
+	// The vehicle's current mileage, set today, is its only point.
+	points := []model.MileagePoint{{VehicleID: vehicleID, On: today, Miles: 2204}}
+	got := EvaluateAll([]model.Reminder{r}, points, today)[0]
+	if want := "~8,898 mi left · log mileage again on or after Aug 14 to estimate a date"; got.Detail != want {
+		t.Fatalf("detail=%q want %q", got.Detail, want)
+	}
+	// A later reading gives a driving rate of 30 mi a day.
+	points = append(points, model.MileagePoint{VehicleID: vehicleID, On: today.AddDate(0, 0, 20), Miles: 2804})
+	got = EvaluateAll([]model.Reminder{{VehicleID: vehicleID, Enabled: true, IntervalMiles: i64p(10000), StartingOdometer: i64p(1102), LatestOdometer: i64p(2804)}}, points, today.AddDate(0, 0, 20))[0]
+	if want := "~8,298 mi left, est. May 24, 2027"; got.Detail != want {
+		t.Fatalf("detail=%q want %q", got.Detail, want)
+	}
+}
+
 func deref(v *float64) any {
 	if v == nil {
 		return nil
@@ -150,8 +220,8 @@ func TestEvaluateProjectsMileageDueDate(t *testing.T) {
 		{name: "mileage soon before projection is", r: mileage(14600, f64p(1)), want: Soon, projectIn: 400, wantDetail: "~400 mi left, est. Sep 4, 2027"},
 		{name: "fractional days round", r: mileage(14000, f64p(110000.0/1950)), want: Soon, projectIn: 18, wantDetail: "~1,000 mi left, est. Aug 18"},
 		{name: "projection never makes overdue", r: mileage(14990, f64p(1000)), want: Soon, projectIn: 0, wantDetail: "~10 mi left, est. Jul 31"},
-		{name: "no estimate", r: mileage(14000, nil), want: OK, projectIn: -1, wantDetail: "~1,000 mi left · add a mileage reading to estimate"},
-		{name: "zero rate", r: mileage(14000, f64p(0)), want: OK, projectIn: -1, wantDetail: "~1,000 mi left · add a mileage reading to estimate"},
+		{name: "no estimate", r: mileage(14000, nil), want: OK, projectIn: -1, wantDetail: "~1,000 mi left · log mileage on two dates 14+ days apart to estimate a date"},
+		{name: "zero rate", r: mileage(14000, f64p(0)), want: OK, projectIn: -1, wantDetail: "~1,000 mi left · log mileage on two dates 14+ days apart to estimate a date"},
 		{name: "projection too far out", r: mileage(10000, f64p(.001)), want: OK, projectIn: -1, wantDetail: "~5,000 mi left"},
 		{name: "overdue by mileage", r: mileage(15200, f64p(30)), want: Due, projectIn: -1},
 	}
