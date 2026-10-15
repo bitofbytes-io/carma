@@ -152,6 +152,30 @@ func TestEstimateHint(t *testing.T) {
 	}
 }
 
+func TestEstimateHintDateIsFourteenDaysAfterFirstPoint(t *testing.T) {
+	today := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		first time.Time
+		want  string
+	}{
+		{first: today, want: "log mileage again on or after Oct 28 to estimate a date"},
+		{first: today.AddDate(0, 0, -5), want: "log mileage again on or after Oct 23 to estimate a date"},
+		{first: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), want: "log mileage again on or after Oct 15 to estimate a date"},
+		{first: time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC), want: "log mileage again to estimate a date"},
+	}
+	for _, tc := range tests {
+		points := []model.MileagePoint{{On: tc.first, Miles: 1000}}
+		if got := EstimateHint(points, today); got != tc.want {
+			t.Fatalf("first point %s: got %q want %q", tc.first.Format("Jan 2"), got, tc.want)
+		}
+		// A reading on the hinted date is enough for a rate.
+		next := tc.first.AddDate(0, 0, minEstimateSpanDays)
+		if EstimateMilesPerDay(append(points, model.MileagePoint{On: next, Miles: 1500}), next) == nil {
+			t.Fatalf("first point %s: no rate with a reading on %s", tc.first.Format("Jan 2"), next.Format("Jan 2"))
+		}
+	}
+}
+
 func TestEvaluateAllUsesVehicleMileageHint(t *testing.T) {
 	today := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
 	vehicleID := uuid.New()
