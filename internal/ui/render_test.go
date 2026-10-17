@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"math"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +78,33 @@ func TestBaseTemplateDeclaresSupportedColorSchemes(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), `<meta name="color-scheme" content="light dark">`) {
 		t.Fatal("base template does not advertise light and dark color schemes")
+	}
+}
+
+func TestBaseTemplateLinksStaticFilesThroughAssetURLs(t *testing.T) {
+	r, err := NewWithAssets(func(name string) string { return "/static/" + name + "?v=test" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b bytes.Buffer
+	type data struct {
+		Title, Error, Flash, Redirect string
+		Authenticated, Development    bool
+	}
+	if err := r.Render(&b, "login", data{}); err != nil {
+		t.Fatal(err)
+	}
+	body := b.String()
+	for _, name := range []string{"favicon.svg", "styles.css", "reminders.css", "htmx.min.js"} {
+		if !strings.Contains(body, `="/static/`+name+`?v=test"`) {
+			t.Errorf("base template does not link %s by its asset URL: %s", name, body)
+		}
+		if _, err := os.Stat(filepath.Join("..", "..", "static", name)); err != nil {
+			t.Errorf("linked static file: %v", err)
+		}
+	}
+	if links := strings.Count(body, `"/static/`); links != 4 {
+		t.Errorf("base template links %d static files, want 4 versioned links", links)
 	}
 }
 

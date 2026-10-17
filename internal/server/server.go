@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/assets"
@@ -25,13 +26,18 @@ type Server struct {
 	auth   *auth.Service
 	google auth.Google
 	ui     *ui.Renderer
+	static *staticAssets
 	now    func() time.Time
 	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
 }
 
 func New(cfg *config.Config, store repository.Store, assetStore assets.Store, authService *auth.Service, google auth.Google) (*Server, error) {
-	renderer, err := ui.New()
+	static, err := newStaticAssets(os.DirFS(staticDir))
+	if err != nil {
+		return nil, err
+	}
+	renderer, err := ui.NewWithAssets(static.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -42,6 +48,7 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 		auth:   authService,
 		google: google,
 		ui:     renderer,
+		static: static,
 		now:    time.Now,
 	}, nil
 }
@@ -80,7 +87,7 @@ type pageData struct {
 func (s *Server) Router() http.Handler {
 	router := chi.NewRouter()
 	router.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, middleware.SameOrigin)
-	router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
+	router.Handle("/static/*", s.static)
 	router.Get("/health", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		response.WriteHeader(http.StatusOK)
