@@ -60,7 +60,14 @@ func Dollars(cents int64) string {
 	return fmt.Sprintf("%s$%d.%02d", sign, magnitude/100, magnitude%100)
 }
 
+// New renders pages that link static files by their plain /static/ path.
 func New() (*Renderer, error) {
+	return NewWithAssets(func(name string) string { return "/static/" + name })
+}
+
+// NewWithAssets renders pages that link each static file, such as
+// "styles.css", at assetURL(name).
+func NewWithAssets(assetURL func(name string) string) (*Renderer, error) {
 	r := &Renderer{pages: map[string]*template.Template{}}
 	names := []string{"login", "dashboard", "vehicle-form", "vehicle", "record-form", "record", "reminders", "records", "archived", "odometer", "history"}
 	for _, n := range names {
@@ -84,7 +91,7 @@ func New() (*Renderer, error) {
 				return template.HTMLAttr("selected")
 			}
 			return template.HTMLAttr("")
-		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "lower": strings.ToLower, "lookupVIN": nhtsa.LookupVIN, "odometerForm": func(v model.Vehicle, ret string) OdometerForm {
+		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "asset": assetURL, "lower": strings.ToLower, "lookupVIN": nhtsa.LookupVIN, "odometerForm": func(v model.Vehicle, ret string) OdometerForm {
 			return OdometerForm{Vehicle: v, Return: ret}
 		}}).ParseFS(files, "templates/base.html", "templates/partials.html", "templates/"+n+".html")
 		if e != nil {
