@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Weekly dependency updates for carma: one grouped PR for non-major updates, separate PRs for majors, Docker base images pinned by digest.",
+  "extends": ["config:recommended"],
+  "schedule": ["* * * * 4"],
+  "packageRules": [
+    {
+      "description": "One weekly PR for every non-major update; majors stay separate PRs.",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "groupName": "all non-major dependencies"
+    },
+    {
+      "description": "One weekly PR for GitHub Actions updates.",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Pin Dockerfile base images by digest.",
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true
+    }
+  ]
+}
