@@ -28,6 +28,8 @@ type Server struct {
 	ui     *ui.Renderer
 	static *staticAssets
 	now    func() time.Time
+	// readyTimeout bounds /ready's dependency checks.
+	readyTimeout time.Duration
 	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
 }
@@ -50,6 +52,8 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 		ui:     renderer,
 		static: static,
 		now:    time.Now,
+
+		readyTimeout: readyTimeout,
 	}, nil
 }
 
@@ -93,6 +97,7 @@ func (s *Server) Router() http.Handler {
 		response.WriteHeader(http.StatusOK)
 		_, _ = response.Write([]byte("ok"))
 	})
+	router.Get("/ready", s.ready)
 	router.Get("/login", s.loginPage)
 	router.Post("/login", s.devLogin)
 	router.Get("/api/auth/google", s.oauthStart)

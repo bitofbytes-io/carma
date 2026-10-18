@@ -30,6 +30,9 @@ type Store interface {
 	Save(context.Context, io.Reader, int64) (Object, error)
 	Open(context.Context, string) (ReadSeekCloser, error)
 	Delete(context.Context, string) error
+	// Ping checks that stored objects are reachable, e.g. that the asset
+	// volume is still mounted.
+	Ping(context.Context) error
 }
 type LocalStore struct {
 	root   string
@@ -54,6 +57,19 @@ func NewLocalStore(root string) (*LocalStore, error) {
 		}
 	}
 	return &LocalStore{root: absolute, remove: os.Remove}, nil
+}
+
+// Ping stats the objects directory, which fails once the volume under the
+// asset root goes away (for example a stale NFS handle).
+func (s *LocalStore) Ping(context.Context) error {
+	info, err := os.Stat(filepath.Join(s.root, "objects"))
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("asset objects path is not a directory")
+	}
+	return nil
 }
 
 func (s *LocalStore) Save(_ context.Context, source io.Reader, max int64) (Object, error) {

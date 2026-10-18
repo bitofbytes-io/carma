@@ -22,6 +22,11 @@ func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 	return &Postgres{pool: pool}, nil
 }
 
+// Ping checks that the database accepts connections.
+func (p *Postgres) Ping(ctx context.Context) error {
+	return p.pool.Ping(ctx)
+}
+
 func (p *Postgres) Close() {
 	p.pool.Close()
 }
