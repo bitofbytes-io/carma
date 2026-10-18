@@ -30,6 +30,8 @@ type Config struct {
 	// Location is the household time zone (APP_TIMEZONE) that decides "today"
 	// for due dates and new-record defaults.
 	Location *time.Location
+	// MetricsAddr is the internal Prometheus listener (METRICS_ADDR), or "off".
+	MetricsAddr string
 }
 
 type ReminderEmail struct {
@@ -44,7 +46,7 @@ type ReminderEmail struct {
 }
 
 func Load() (*Config, error) {
-	c := &Config{AppEnv: env("APP_ENV", "development"), Port: env("PORT", "4700"), AuthMode: env("AUTH_MODE", AuthGoogle), GoogleRedirectURL: env("AUTH_GOOGLE_REDIRECT_URL", "http://localhost:4700/api/auth/google/callback"), AssetRoot: env("ASSET_ROOT", ".local/carma-assets")}
+	c := &Config{AppEnv: env("APP_ENV", "development"), Port: env("PORT", "4700"), AuthMode: env("AUTH_MODE", AuthGoogle), GoogleRedirectURL: env("AUTH_GOOGLE_REDIRECT_URL", "http://localhost:4700/api/auth/google/callback"), AssetRoot: env("ASSET_ROOT", ".local/carma-assets"), MetricsAddr: strings.TrimSpace(env("METRICS_ADDR", ":9464"))}
 	var err error
 	if c.DatabaseURL, err = envOrFile("DATABASE_URL", "/run/secrets/carma_database_url"); err != nil {
 		return nil, err

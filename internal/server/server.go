@@ -10,6 +10,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
 	carmaexport "github.com/bitofbytes-io/carma/internal/export"
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/middleware"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
@@ -33,6 +34,14 @@ type Server struct {
 	dbCheck, assetCheck singleCheck
 	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
+	// metrics is nil until EnableMetrics; a nil *metrics.Metrics records nothing.
+	metrics *metrics.Metrics
+}
+
+// EnableMetrics records request, sign-in, and upload metrics into m. Call it
+// before Router.
+func (s *Server) EnableMetrics(m *metrics.Metrics) {
+	s.metrics = m
 }
 
 func New(cfg *config.Config, store repository.Store, assetStore assets.Store, authService *auth.Service, google auth.Google) (*Server, error) {
@@ -91,7 +100,8 @@ type pageData struct {
 
 func (s *Server) Router() http.Handler {
 	router := chi.NewRouter()
-	router.Use(chimw.RequestID, chimw.RealIP, chimw.Recoverer, middleware.SameOrigin)
+	// Metrics wraps Recoverer so recovered panics are counted as 500s.
+	router.Use(chimw.RequestID, chimw.RealIP, s.metrics.Middleware, chimw.Recoverer, middleware.SameOrigin)
 	router.Handle("/static/*", s.static)
 	router.Get("/health", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")

@@ -16,6 +16,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/auth"
 	"github.com/bitofbytes-io/carma/internal/config"
 	"github.com/bitofbytes-io/carma/internal/mailer"
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/nhtsa"
 	"github.com/bitofbytes-io/carma/internal/recallcheck"
 	"github.com/bitofbytes-io/carma/internal/reminderemail"
@@ -31,6 +32,7 @@ const (
 	serverUploadTimeout      = 5 * time.Minute
 	serverIdleTimeout        = 2 * time.Minute
 	schedulerShutdownTimeout = 15 * time.Second
+	metricsShutdownTimeout   = 5 * time.Second
 )
 
 var errSchedulerShutdownTimeout = errors.New("background scheduler shutdown timed out")
@@ -75,6 +77,9 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	appMetrics := metrics.New()
+	appMetrics.RegisterPool(store.PoolStat)
+	app.EnableMetrics(appMetrics)
 	nhtsaClient := nhtsa.NewClient()
 	app.EnableVINDecode(nhtsaClient)
 	recallRunner := recallcheck.NewRunner(store, nhtsaClient, slog.Default())
@@ -91,48 +96,62 @@ func run() error {
 	httpServer := newHTTPServer(cfg.Port, app.Router())
 	errs := make(chan error, 1)
 	var scheduler sync.WaitGroup
-	every := func(interval time.Duration, job func(context.Context)) {
+	every := func(name string, interval time.Duration, job func(context.Context) error) {
 		scheduler.Add(1)
 		go func() {
 			defer scheduler.Done()
-			schedule.Every(ctx, interval, job)
+			schedule.Every(ctx, interval, func(ctx context.Context) {
+				err := job(ctx)
+				if ctx.Err() == nil { // Runs cut short by shutdown are not outcomes.
+					appMetrics.Job(name, err)
+				}
+			})
 		}()
 	}
-	every(auth.SessionCleanupInterval, func(ctx context.Context) {
-		if deleted, err := authService.DeleteExpiredSessions(ctx); err != nil {
+	every("session_cleanup", auth.SessionCleanupInterval, func(ctx context.Context) error {
+		deleted, err := authService.DeleteExpiredSessions(ctx)
+		if err != nil {
 			if ctx.Err() == nil {
 				slog.Error("expired session cleanup failed", "error", err)
 			}
 		} else if deleted > 0 {
 			slog.Info("expired sessions deleted", "count", deleted)
 		}
+		return err
 	})
 	assetCleanup := assetcleanup.NewRunner(store, assetStore, slog.Default())
 	trigger := assetcleanup.TriggerStartup
-	every(assetcleanup.DefaultInterval, func(ctx context.Context) {
-		_, _ = assetCleanup.Run(ctx, trigger) // Run logs its own outcome.
+	every("asset_cleanup", assetcleanup.DefaultInterval, func(ctx context.Context) error {
+		_, err := assetCleanup.Run(ctx, trigger) // Run logs its own outcome.
 		trigger = assetcleanup.TriggerScheduled
+		return err
 	})
 	if reminderRunner != nil {
-		every(reminderemail.DefaultInterval, func(ctx context.Context) {
+		every("reminder_email", reminderemail.DefaultInterval, func(ctx context.Context) error {
 			report, err := reminderRunner.Run(ctx, reminderemail.Options{})
 			if err != nil && ctx.Err() == nil {
 				slog.Error("reminder email run failed", "evaluated", report.Evaluated, "sent", report.Sent, "failed", report.Failed, "error", err)
 			}
+			return err
 		})
 	}
 	if digestRunner != nil {
-		every(reminderemail.DefaultDigestInterval, func(ctx context.Context) {
-			if _, err := digestRunner.Run(ctx, reminderemail.DigestOptions{}); err != nil && ctx.Err() == nil {
+		every("reminder_digest", reminderemail.DefaultDigestInterval, func(ctx context.Context) error {
+			_, err := digestRunner.Run(ctx, reminderemail.DigestOptions{})
+			if err != nil && ctx.Err() == nil {
 				slog.Error("reminder digest run failed", "error", err)
 			}
+			return err
 		})
 	}
-	every(recallcheck.DefaultInterval, func(ctx context.Context) {
-		if report, err := recallRunner.Run(ctx); err != nil && ctx.Err() == nil {
+	every("recall_check", recallcheck.DefaultInterval, func(ctx context.Context) error {
+		report, err := recallRunner.Run(ctx)
+		if err != nil && ctx.Err() == nil {
 			slog.Error("recall check failed", "checked", report.Checked, "failed", report.Failed, "error", err)
 		}
+		return err
 	})
+	metricsServer := metrics.Start(cfg.MetricsAddr, appMetrics.Handler(), slog.Default())
 	go func() {
 		slog.Info("carma listening", "port", cfg.Port, "auth", cfg.AuthMode)
 		errs <- httpServer.ListenAndServe()
@@ -147,6 +166,11 @@ func run() error {
 		shutdown, c := context.WithTimeout(context.Background(), 15*time.Second)
 		defer c()
 		result = httpServer.Shutdown(shutdown)
+	}
+	metricsShutdown, cancelMetrics := context.WithTimeout(context.Background(), metricsShutdownTimeout)
+	defer cancelMetrics()
+	if e := metricsServer.Shutdown(metricsShutdown); e != nil {
+		slog.Error("metrics listener shutdown failed", "error", e)
 	}
 	cancel()
 	closeStoreOnReturn = false

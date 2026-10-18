@@ -27,6 +27,11 @@ func (p *Postgres) Ping(ctx context.Context) error {
 	return p.pool.Ping(ctx)
 }
 
+// PoolStat snapshots the connection pool for metrics.
+func (p *Postgres) PoolStat() *pgxpool.Stat {
+	return p.pool.Stat()
+}
+
 func (p *Postgres) Close() {
 	p.pool.Close()
 }

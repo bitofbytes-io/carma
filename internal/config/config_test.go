@@ -147,6 +147,17 @@ func TestAppTimezoneDefaultsToNewYorkAndIsValidated(t *testing.T) {
 	}
 }
 
+func TestMetricsAddrDefaultsToInternalPort(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("AUTH_MODE", "development")
+	for value, want := range map[string]string{"": ":9464", "127.0.0.1:9100": "127.0.0.1:9100", " off ": "off"} {
+		t.Setenv("METRICS_ADDR", value)
+		if cfg, err := Load(); err != nil || cfg.MetricsAddr != want {
+			t.Fatalf("METRICS_ADDR=%q: cfg=%+v err=%v", value, cfg, err)
+		}
+	}
+}
+
 func TestLoadLocationNeedsOnlyAppTimezone(t *testing.T) {
 	// carma-migrate loads the zone without the server's other settings.
 	t.Setenv("DATABASE_URL", "")
