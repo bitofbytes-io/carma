@@ -53,15 +53,25 @@ func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field st
 	}
 	var attachments []model.Attachment
 	var keys []string
+	// Receipts are counted once the batch's outcome is known: on an error the
+	// caller deletes those already saved, so they are refused, not stored.
+	count := func(result string) {
+		for range keys {
+			s.metrics.Upload(uploadReceipt, result)
+		}
+	}
 	for _, header := range request.MultipartForm.File[field] {
 		file, err := header.Open()
 		if err != nil {
+			s.metrics.Upload(uploadReceipt, metrics.ResultFailure)
+			count(metrics.ResultRejected)
 			return attachments, keys, err
 		}
 		object, err := s.assets.Save(request.Context(), file, s.cfg.MaxUploadBytes)
 		_ = file.Close()
-		s.metrics.Upload(uploadReceipt, uploadResult(err))
 		if err != nil {
+			s.metrics.Upload(uploadReceipt, uploadResult(err))
+			count(metrics.ResultRejected)
 			return attachments, keys, fmt.Errorf("%s: %w", safeFilename(header.Filename), err)
 		}
 		keys = append(keys, object.Key)
@@ -75,6 +85,7 @@ func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field st
 			CreatedAt:        s.now(),
 		})
 	}
+	count(metrics.ResultSuccess)
 	return attachments, keys, nil
 }
 

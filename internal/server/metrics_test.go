@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,6 +80,11 @@ func TestUploadsAreCountedByKindAndResult(t *testing.T) {
 	if w := f.do(t, http.MethodPost, "/vehicles", b, ct); w.Code != http.StatusSeeOther {
 		t.Fatalf("create vehicle status=%d body=%s", w.Code, w.Body.String())
 	}
+	// A valid photo discarded with an invalid form is not stored.
+	b, ct = multipartFormBody(t, map[string]string{"nickname": "Outback", "year": "1800"}, "photo", "car.jpg", photo)
+	if w := f.do(t, http.MethodPost, "/vehicles", b, ct); w.Code != http.StatusBadRequest {
+		t.Fatalf("invalid vehicle form status=%d", w.Code)
+	}
 	vehicles, err := f.store.ListVehicles(t.Context(), false)
 	if err != nil || len(vehicles) != 1 {
 		t.Fatalf("vehicles=%v err=%v", vehicles, err)
@@ -86,20 +93,36 @@ func TestUploadsAreCountedByKindAndResult(t *testing.T) {
 	if err != nil || len(types) == 0 {
 		t.Fatalf("service types=%v err=%v", types, err)
 	}
-	fields := map[string]string{"occurred_on": "2026-07-30", "service_type_id": types[0].ID.String(), "odometer": "1000"}
-	b, ct = formBody(t, fields, "notes.txt", []byte("plain text"))
-	if w := f.do(t, http.MethodPost, "/vehicles/"+vehicles[0].ID.String()+"/records", b, ct); w.Code != http.StatusBadRequest {
+	// The PDF saved before the unsupported file is cleaned up with it.
+	var batch bytes.Buffer
+	mw := multipart.NewWriter(&batch)
+	for k, v := range map[string]string{"occurred_on": "2026-07-30", "service_type_id": types[0].ID.String(), "odometer": "1000"} {
+		_ = mw.WriteField(k, v)
+	}
+	for _, file := range []struct{ name, content string }{{"receipt.pdf", "%PDF-1.7\nreceipt"}, {"notes.txt", "plain text"}} {
+		part, err := mw.CreateFormFile("receipts", file.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = part.Write([]byte(file.content))
+	}
+	_ = mw.Close()
+	if w := f.do(t, http.MethodPost, "/vehicles/"+vehicles[0].ID.String()+"/records", &batch, mw.FormDataContentType()); w.Code != http.StatusBadRequest {
 		t.Fatalf("unsupported receipt status=%d", w.Code)
 	}
 
 	body := scrapeMetrics(t, m)
 	for _, series := range []string{
 		`carma_uploads_total{kind="vehicle_photo",result="success"} 1`,
-		`carma_uploads_total{kind="receipt",result="rejected"} 1`,
+		`carma_uploads_total{kind="vehicle_photo",result="rejected"} 1`,
+		`carma_uploads_total{kind="receipt",result="rejected"} 2`,
 		`http_requests_total{code="303",method="POST",route="/vehicles"} 1`,
 	} {
 		if !strings.Contains(body, series) {
 			t.Errorf("missing series %q in\n%s", series, body)
 		}
+	}
+	if strings.Contains(body, `carma_uploads_total{kind="receipt",result="success"}`) {
+		t.Errorf("discarded receipt counted as stored in\n%s", body)
 	}
 }

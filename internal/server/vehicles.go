@@ -179,15 +179,15 @@ func (s *Server) savePhoto(request *http.Request, validation string) (string, st
 		return "", "Photo must be JPEG, PNG, WebP, or HEIC and within the upload limit."
 	}
 	if !strings.HasPrefix(object.ContentType, "image/") {
-		s.metrics.Upload(uploadVehiclePhoto, metrics.ResultRejected)
 		validation = "Vehicle photo must be an image."
-	} else {
-		s.metrics.Upload(uploadVehiclePhoto, metrics.ResultSuccess)
 	}
 	if validation != "" {
+		// A photo discarded with an invalid form is refused, not stored.
+		s.metrics.Upload(uploadVehiclePhoto, metrics.ResultRejected)
 		_ = s.assets.Delete(request.Context(), object.Key)
 		return "", validation
 	}
+	s.metrics.Upload(uploadVehiclePhoto, metrics.ResultSuccess)
 	return object.Key, ""
 }
 
