@@ -185,3 +185,27 @@ func TestLocalStoreRejectsUnsafeKey(t *testing.T) {
 		t.Fatal("unsafe key accepted")
 	}
 }
+
+func TestLocalStorePingFailsWhenObjectsDirectoryIsGone(t *testing.T) {
+	root := t.TempDir()
+	s, e := NewLocalStore(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = s.Ping(context.Background()); e != nil {
+		t.Fatalf("ping on fresh store: %v", e)
+	}
+	objects := filepath.Join(root, "objects")
+	if e = os.RemoveAll(objects); e != nil {
+		t.Fatal(e)
+	}
+	if e = s.Ping(context.Background()); e == nil {
+		t.Fatal("ping succeeded without objects directory")
+	}
+	if e = os.WriteFile(objects, nil, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e = s.Ping(context.Background()); e == nil {
+		t.Fatal("ping succeeded when objects is a file")
+	}
+}

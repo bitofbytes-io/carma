@@ -68,6 +68,8 @@ type Store interface {
 	// SetRecallDismissed hides a vehicle's recall campaign, or shows it again
 	// when dismissedAt is nil.
 	SetRecallDismissed(ctx context.Context, vehicleID uuid.UUID, campaignNumber string, dismissedAt *time.Time) error
+	// Ping checks that the database accepts connections.
+	Ping(context.Context) error
 	Close()
 }
 

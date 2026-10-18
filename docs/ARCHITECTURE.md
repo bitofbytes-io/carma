@@ -44,8 +44,13 @@ flowchart LR
 - **Traefik:** file-provider router (no Swarm labels), `Host(carma.bitofbytes.io)`,
   `websecure` entrypoint, `le` cert resolver, `secure-headers` +
   `private-app-limit` middlewares. See [INFRA.md](INFRA.md).
-- **Health:** `GET /health` returns 200 with no auth; used by the Dockerfile
-  HEALTHCHECK and the deploy hook.
+- **Health:** `GET /health` returns 200 `ok` with no auth (process up); used by the
+  Dockerfile HEALTHCHECK and the deploy hook.
+- **Readiness:** `GET /ready`, also unauthenticated, pings Postgres and stats
+  `ASSET_ROOT/objects` within 2 s. It returns 200
+  `{"status":"ok","db":"ok","assets":"ok"}`, or 503 with `"status":"degraded"` and
+  `"error"` on each failed check. Failure causes are logged, never returned. Stack
+  healthchecks and Uptime Kuma move to `/ready` in `home_swarm` (BOB-13).
 
 ## Repository layout (planned)
 
