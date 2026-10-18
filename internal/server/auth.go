@@ -23,6 +23,9 @@ const (
 	loginErrorOAuth      = "oauth"
 	loginErrorNotInvited = "not-invited"
 	loginErrorConflict   = "account-conflict"
+
+	oauthProviderGoogle = "google"
+	loginFailureError   = "error"
 )
 
 func (s *Server) loginPage(response http.ResponseWriter, request *http.Request) {
@@ -43,6 +46,7 @@ func (s *Server) devLogin(response http.ResponseWriter, request *http.Request) {
 	}
 	_, token, err := s.auth.DevLogin(request.Context())
 	if err != nil {
+		s.metrics.LoginFailure(loginFailureError)
 		s.fail(response, err)
 		return
 	}
@@ -83,6 +87,7 @@ func (s *Server) oauthCallback(response http.ResponseWriter, request *http.Reque
 	state := request.URL.Query().Get("state")
 	target, validState := parseOAuthState(state, s.cfg.GoogleClientSecret)
 	if err != nil || cookie.Value == "" || !hmac.Equal([]byte(state), []byte(cookie.Value)) || !validState {
+		s.metrics.OAuthFailure(oauthProviderGoogle, "state")
 		http.Redirect(response, request, loginErrorLocation(loginErrorExpired), http.StatusSeeOther)
 		return
 	}
@@ -96,20 +101,24 @@ func (s *Server) oauthCallback(response http.ResponseWriter, request *http.Reque
 	})
 	claims, err := s.google.Exchange(request.Context(), request.URL.Query().Get("code"))
 	if err != nil {
+		s.metrics.OAuthFailure(oauthProviderGoogle, "exchange")
 		http.Redirect(response, request, loginErrorLocation(loginErrorOAuth), http.StatusSeeOther)
 		return
 	}
 	if !claims.EmailVerified || !s.google.Allowed(claims.Email) {
+		s.metrics.LoginFailure("not_invited")
 		http.Redirect(response, request, loginErrorLocation(loginErrorNotInvited), http.StatusSeeOther)
 		return
 	}
 	_, token, err := s.auth.Login(request.Context(), claims)
 	if errors.Is(err, repository.ErrConflict) {
 		slog.Warn("google sign-in conflicts with another user", "error", err)
+		s.metrics.LoginFailure("account_conflict")
 		http.Redirect(response, request, loginErrorLocation(loginErrorConflict), http.StatusSeeOther)
 		return
 	}
 	if err != nil {
+		s.metrics.LoginFailure(loginFailureError)
 		s.fail(response, err)
 		return
 	}

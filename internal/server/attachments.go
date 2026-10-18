@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/assets"
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -57,6 +60,7 @@ func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field st
 		}
 		object, err := s.assets.Save(request.Context(), file, s.cfg.MaxUploadBytes)
 		_ = file.Close()
+		s.metrics.Upload(uploadReceipt, uploadResult(err))
 		if err != nil {
 			return attachments, keys, fmt.Errorf("%s: %w", safeFilename(header.Filename), err)
 		}
@@ -72,6 +76,23 @@ func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field st
 		})
 	}
 	return attachments, keys, nil
+}
+
+const (
+	uploadReceipt      = "receipt"
+	uploadVehiclePhoto = "vehicle_photo"
+)
+
+// uploadResult classifies an assets.Save outcome for the uploads metric.
+func uploadResult(err error) string {
+	switch {
+	case err == nil:
+		return metrics.ResultSuccess
+	case errors.Is(err, assets.ErrTooLarge), errors.Is(err, assets.ErrUnsupported):
+		return metrics.ResultRejected
+	default:
+		return metrics.ResultFailure
+	}
 }
 
 func (s *Server) attachment(response http.ResponseWriter, request *http.Request) {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/reminder"
 	"github.com/bitofbytes-io/carma/internal/repository"
@@ -174,10 +175,14 @@ func (s *Server) savePhoto(request *http.Request, validation string) (string, st
 	defer file.Close()
 	object, err := s.assets.Save(request.Context(), file, s.cfg.MaxUploadBytes)
 	if err != nil {
+		s.metrics.Upload(uploadVehiclePhoto, uploadResult(err))
 		return "", "Photo must be JPEG, PNG, WebP, or HEIC and within the upload limit."
 	}
 	if !strings.HasPrefix(object.ContentType, "image/") {
+		s.metrics.Upload(uploadVehiclePhoto, metrics.ResultRejected)
 		validation = "Vehicle photo must be an image."
+	} else {
+		s.metrics.Upload(uploadVehiclePhoto, metrics.ResultSuccess)
 	}
 	if validation != "" {
 		_ = s.assets.Delete(request.Context(), object.Key)
