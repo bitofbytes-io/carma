@@ -96,6 +96,29 @@ deployment):
 
 In Grafana, run it newest-first with a line limit of one to confirm the latest run.
 
+Prometheus metrics are served at `GET /metrics` on a separate internal listener,
+never on the public port, so the public Traefik routers cannot expose them.
+`METRICS_ADDR` sets its address (optional, default `:9464`; `off` disables it).
+If the address cannot be bound the error is logged and Carma keeps serving. The
+port is not in the Dockerfile's `EXPOSE`; Prometheus scrapes it over the overlay
+network. The listener exports:
+
+- `http_requests_total` and `http_request_duration_seconds` by `method`, `route`
+  (the chi route pattern such as `/vehicles/{vehicleID}`, or `unmatched`), and
+  `code`. `/health`, `/ready`, and `/metrics` are not recorded.
+- `pgxpool_*` connection pool stats: acquired, idle, total, max, and constructing
+  connections, plus acquire counts and wait time.
+- `carma_oauth_failures_total{provider,reason}`: Google callbacks with an invalid
+  or expired `state`, or a failed code `exchange`.
+- `carma_login_failures_total{reason}`: sign-ins refused after Google, by
+  `not_invited`, `account_conflict`, or `error`.
+- `carma_uploads_total{kind,result}`: `receipt` and `vehicle_photo` files stored
+  (`success`), refused as too large or an unsupported type (`rejected`), or failed
+  (`failure`).
+- `carma_jobs_total{job,result}`: background runs of `session_cleanup`,
+  `asset_cleanup`, `reminder_email`, `reminder_digest`, and `recall_check`.
+- The Go runtime (`go_*`) and process (`process_*`) collectors.
+
 ## What it will do
 
 - **Vehicles** - manage the whole household garage; every allowlisted user sees
