@@ -28,8 +28,9 @@ type Server struct {
 	ui     *ui.Renderer
 	static *staticAssets
 	now    func() time.Time
-	// readyTimeout bounds /ready's dependency checks.
-	readyTimeout time.Duration
+	// readyTimeout bounds /ready's dependency checks, which run one at a time.
+	readyTimeout        time.Duration
+	dbCheck, assetCheck singleCheck
 	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
 }

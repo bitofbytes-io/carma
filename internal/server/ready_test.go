@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,6 +100,54 @@ func TestReadyDegradedWhenAssetVolumeIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertReady(t, getReady(t, srv), http.StatusServiceUnavailable, `{"status":"degraded","db":"ok","assets":"error"}`)
+}
+
+// stalledAssetStore counts Ping calls, each blocking until release closes, like
+// a stat on a hung NFS mount.
+type stalledAssetStore struct {
+	assets.Store
+	pings   *atomic.Int32
+	release chan struct{}
+}
+
+func (s stalledAssetStore) Ping(context.Context) error {
+	s.pings.Add(1)
+	<-s.release
+	return nil
+}
+
+func TestReadyRunsOneAssetCheckWhileItIsStalled(t *testing.T) {
+	srv, _ := readyServer(t, pingStore{})
+	srv.readyTimeout = 20 * time.Millisecond
+	var pings atomic.Int32
+	release := make(chan struct{})
+	srv.assets = stalledAssetStore{Store: srv.assets, pings: &pings, release: release}
+	for range 5 {
+		assertReady(t, getReady(t, srv), http.StatusServiceUnavailable, `{"status":"degraded","db":"ok","assets":"error"}`)
+	}
+	if got := pings.Load(); got != 1 {
+		t.Fatalf("stalled mount got %d concurrent stats, want 1", got)
+	}
+
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for {
+		srv.assetCheck.mu.Lock()
+		running := srv.assetCheck.running
+		srv.assetCheck.mu.Unlock()
+		if running == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stalled check never finished after release")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	srv.readyTimeout = time.Second
+	assertReady(t, getReady(t, srv), http.StatusOK, `{"status":"ok","db":"ok","assets":"ok"}`)
+	if got := pings.Load(); got != 2 {
+		t.Fatalf("recovered mount got %d stats, want a fresh one (2)", got)
+	}
 }
 
 func TestReadyAgainstPostgres(t *testing.T) {
