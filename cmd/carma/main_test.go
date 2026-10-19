@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -70,4 +71,50 @@ func TestCloseStoreAfterSchedulersTimeoutSkipsClose(t *testing.T) {
 	}
 	// Release the helper's waiter goroutine after proving the timeout decision.
 	schedulers.Done()
+}
+
+func TestRunJobEndsABlockedRunAtTheDeadline(t *testing.T) {
+	finished := make(chan struct{})
+	var timedOut bool
+	var err error
+	go func() {
+		defer close(finished)
+		// Stands in for a job waiting on a pool connection that never frees.
+		timedOut, err = runJob(context.Background(), 20*time.Millisecond, func(ctx context.Context) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("job blocked past its deadline")
+	}
+	if !timedOut || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timed out=%t error=%v", timedOut, err)
+	}
+}
+
+func TestRunJobShutdownIsNotATimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	timedOut, err := runJob(ctx, time.Minute, func(ctx context.Context) error { return ctx.Err() })
+	if timedOut || !errors.Is(err, context.Canceled) {
+		t.Fatalf("timed out=%t error=%v", timedOut, err)
+	}
+}
+
+func TestRunJobPassesThroughAFinishedRun(t *testing.T) {
+	failure := errors.New("job failed")
+	var deadline time.Time
+	timedOut, err := runJob(context.Background(), time.Minute, func(ctx context.Context) error {
+		deadline, _ = ctx.Deadline()
+		return failure
+	})
+	if timedOut || !errors.Is(err, failure) {
+		t.Fatalf("timed out=%t error=%v", timedOut, err)
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > time.Minute {
+		t.Fatalf("job deadline in %v, want within a minute", remaining)
+	}
 }
