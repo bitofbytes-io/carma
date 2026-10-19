@@ -190,12 +190,17 @@ func run() error {
 
 // runJob runs job under a deadline of timeout and reports whether the deadline
 // cut it short. The jobs log their own errors only while their context is live,
-// so the caller logs a timeout.
+// so the caller logs a timeout. A run that hit the deadline is a failure even
+// if the job returned nil, since it may have stopped early.
 func runJob(ctx context.Context, timeout time.Duration, job func(context.Context) error) (timedOut bool, err error) {
 	jobCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	err = job(jobCtx)
-	return ctx.Err() == nil && errors.Is(jobCtx.Err(), context.DeadlineExceeded), err
+	timedOut = ctx.Err() == nil && errors.Is(jobCtx.Err(), context.DeadlineExceeded)
+	if timedOut && err == nil {
+		err = jobCtx.Err()
+	}
+	return timedOut, err
 }
 
 func closeStoreAfterSchedulers(schedulers *sync.WaitGroup, timeout time.Duration, closeStore func()) error {

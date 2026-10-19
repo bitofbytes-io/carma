@@ -95,6 +95,17 @@ func TestRunJobEndsABlockedRunAtTheDeadline(t *testing.T) {
 	}
 }
 
+func TestRunJobCountsADeadlineAsAFailure(t *testing.T) {
+	// The job stops early at the deadline but reports no error.
+	timedOut, err := runJob(context.Background(), time.Millisecond, func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
+	if !timedOut || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timed out=%t error=%v", timedOut, err)
+	}
+}
+
 func TestRunJobShutdownIsNotATimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
