@@ -33,6 +33,10 @@ const (
 	serverIdleTimeout        = 2 * time.Minute
 	schedulerShutdownTimeout = 15 * time.Second
 	metricsShutdownTimeout   = 5 * time.Second
+	// backgroundJobTimeout bounds each scheduled run, so a run stuck on the
+	// database or a remote service ends and frees its leader lock instead of
+	// holding it until the process restarts.
+	backgroundJobTimeout = 30 * time.Minute
 )
 
 var errSchedulerShutdownTimeout = errors.New("background scheduler shutdown timed out")
@@ -101,7 +105,10 @@ func run() error {
 		go func() {
 			defer scheduler.Done()
 			schedule.Every(ctx, interval, func(ctx context.Context) {
-				err := job(ctx)
+				timedOut, err := runJob(ctx, backgroundJobTimeout, job)
+				if timedOut {
+					slog.Error("background job timed out", "job", name, "timeout", backgroundJobTimeout, "error", err)
+				}
 				if ctx.Err() == nil { // Runs cut short by shutdown are not outcomes.
 					appMetrics.Job(name, err)
 				}
@@ -179,6 +186,21 @@ func run() error {
 		return errors.Join(result, e)
 	}
 	return result
+}
+
+// runJob runs job under a deadline of timeout and reports whether the deadline
+// cut it short. The jobs log their own errors only while their context is live,
+// so the caller logs a timeout. A run that hit the deadline is a failure even
+// if the job returned nil, since it may have stopped early.
+func runJob(ctx context.Context, timeout time.Duration, job func(context.Context) error) (timedOut bool, err error) {
+	jobCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	err = job(jobCtx)
+	timedOut = ctx.Err() == nil && errors.Is(jobCtx.Err(), context.DeadlineExceeded)
+	if timedOut && err == nil {
+		err = jobCtx.Err()
+	}
+	return timedOut, err
 }
 
 func closeStoreAfterSchedulers(schedulers *sync.WaitGroup, timeout time.Duration, closeStore func()) error {

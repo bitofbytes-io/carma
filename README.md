@@ -96,6 +96,16 @@ deployment):
 
 In Grafana, run it newest-first with a line limit of one to confirm the latest run.
 
+The leader jobs (asset cleanup, reminder email, the weekly digest, and the recall
+check) each hold their advisory lock on a connection of their own, outside the
+`DATABASE_URL` pool, for the whole run, while their queries go through the pool.
+A replica that wins every lock therefore opens up to four extra database
+connections, which the `pgxpool_*` metrics do not count, and the pool needs no
+slots set aside for locks: pgx's default size (`pool_max_conns`, the larger of 4
+and the CPU count) still serves HTTP while all four jobs run. Each scheduled run
+is cut off after 30 minutes, which logs `background job timed out` and releases
+its lock.
+
 Prometheus metrics are served at `GET /metrics` on a separate internal listener,
 never on the public port, so the public Traefik routers cannot expose them.
 `METRICS_ADDR` sets its address (optional, default `:9464`; `off` disables it).

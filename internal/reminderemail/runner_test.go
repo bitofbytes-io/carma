@@ -40,7 +40,10 @@ func (f *fakeStore) ReminderNotificationSince(_ context.Context, reminderID uuid
 	}
 	return false, nil
 }
-func (f *fakeStore) CreateReminderNotification(_ context.Context, notification model.ReminderNotification) error {
+func (f *fakeStore) CreateReminderNotification(ctx context.Context, notification model.ReminderNotification) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if f.auditErr != nil {
 		return f.auditErr
 	}
@@ -102,6 +105,28 @@ func TestRunnerSendsOnlyDueAndAuditsAfterSuccess(t *testing.T) {
 	}
 	if store.lockCalls != 1 || store.unlockCalls != 1 {
 		t.Fatalf("lock calls=%d unlock=%d", store.lockCalls, store.unlockCalls)
+	}
+}
+
+func TestRunnerAuditsSendAcceptedAsTheRunEnds(t *testing.T) {
+	now := time.Date(2026, time.March, 15, 12, 0, 0, 0, time.UTC)
+	month := 1
+	reminderID := uuid.New()
+	store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{
+		{ID: reminderID, VehicleID: uuid.New(), VehicleName: "Roadster", ServiceTypeName: "Oil change", IntervalMonths: &month, Enabled: true, CreatedAt: now.AddDate(0, -2, 0)},
+	}}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// The run's deadline passes while SMTP is accepting the message.
+	sender := &cancelingSender{cancel: cancel}
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner.now = func() time.Time { return now }
+	report, err := runner.Run(ctx, Options{})
+	if err != nil || report.Sent != 1 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if len(store.notifications) != 1 || store.notifications[0].ReminderID != reminderID {
+		t.Fatalf("accepted send not recorded: %+v", store.notifications)
 	}
 }
 

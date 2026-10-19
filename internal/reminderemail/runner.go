@@ -24,6 +24,9 @@ const (
 	DefaultInterval = 24 * time.Hour
 )
 
+// notificationRecordTimeout bounds the write that records an accepted send.
+const notificationRecordTimeout = 5 * time.Second
+
 var ErrRecipientCountMismatch = errors.New("reminder recipient count mismatch")
 
 type Options struct {
@@ -175,7 +178,12 @@ func (r *Runner) Run(ctx context.Context, options Options) (report Report, runEr
 			ID: uuid.New(), ReminderID: candidate.ID, SentAt: r.now().UTC(),
 			Recipients: append([]string(nil), recipients...), MessageID: messageID,
 		}
-		if err = r.store.CreateReminderNotification(ctx, notification); err != nil {
+		// Record an accepted send even when ctx ended during it (the run's
+		// deadline or shutdown), so the next run does not send it again.
+		recordContext, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), notificationRecordTimeout)
+		err = r.store.CreateReminderNotification(recordContext, notification)
+		cancelRecord()
+		if err != nil {
 			report.Failed++
 			r.logger.Error("reminder email audit failed", "reminder_id", candidate.ID, "message_id", messageID, "error", err)
 			sendErrors = append(sendErrors, fmt.Errorf("audit reminder %s: %w", candidate.ID, err))
