@@ -207,15 +207,22 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err != nil || !acquired {
 		t.Fatalf("limited-pool lock acquired=%t err=%v", acquired, err)
 	}
-	shortContext, cancelShort := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	// The lock has its own connection, so the only pool slot stays free.
+	if _, err = limitedStore.ListReminders(context.Background(), nil, false); err != nil {
+		t.Fatalf("pool unusable while the lock is held: %v", err)
+	}
+	if _, acquired, err = limitedStore.TryReminderEmailLock(context.Background()); err != nil || acquired {
+		t.Fatalf("limited-pool contending lock acquired=%t err=%v", acquired, err)
+	}
+	expiredContext, cancelExpired := context.WithCancel(context.Background())
+	cancelExpired()
 	started := time.Now()
-	_, _, err = limitedStore.TryReminderEmailLock(shortContext)
-	cancelShort()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("limited-pool acquire error = %v", err)
+	_, _, err = limitedStore.TryReminderEmailLock(expiredContext)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled acquire error = %v", err)
 	}
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
-		t.Fatalf("caller acquire deadline took %v", elapsed)
+		t.Fatalf("canceled acquire took %v", elapsed)
 	}
 	if err = unlockLimited(context.Background()); err != nil {
 		t.Fatal(err)
@@ -223,8 +230,8 @@ func TestReminderEmailPostgresIntegration(t *testing.T) {
 	if err = unlockLimited(context.Background()); err != nil {
 		t.Fatalf("repeated unlock error = %v", err)
 	}
-	// Unlocking closes the lock's connection, which frees the only pool slot
-	// and ends the session that held the lock.
+	// Unlocking closes the lock's connection, which ends the session that held
+	// the lock.
 	relockLimited, acquired, err := eventuallyLock(limitedStore.TryReminderEmailLock)
 	if err != nil || !acquired {
 		t.Fatalf("limited-pool relock acquired=%t err=%v", acquired, err)
