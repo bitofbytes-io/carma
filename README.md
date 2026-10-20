@@ -11,7 +11,11 @@ container build, and CI workflow described by the project plan.
 
 ## Local development
 
-Requirements: Go 1.26.x and Docker. Carma always runs on PostgreSQL: start the
+Requirements: Go 1.26.x and Docker. Race-enabled tests also require
+`CGO_ENABLED=1`, a [supported OS/architecture](https://go.dev/doc/articles/race_detector#Requirements),
+and an installed C compiler on non-macOS systems.
+
+Carma always runs on PostgreSQL: start the
 local database with `make db-up` and apply migrations with `make migrate` before
 `make run`. Then open `http://localhost:4700` and use the clearly labeled local
 developer login. Uploads are written below `.local/carma-assets`; configuration
@@ -72,6 +76,8 @@ that are emailed in the weekly digest when reminder email is on. Both APIs are k
 need outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
+Both `make test` (also used in CI) and `make test-integration` run the Go race
+detector; a detected race fails the test run.
 The lint target lists unformatted Go files without rewriting them, then runs
 `go vet` and pinned `staticcheck@v0.8.2` using the project's Go toolchain. Run
 `gofmt -w` on the listed files to fix formatting; the first staticcheck run may
