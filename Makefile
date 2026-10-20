@@ -22,11 +22,11 @@ check-entrypoints:
 	done
 
 test: check-entrypoints
-	GOCACHE=$(GOCACHE) $(GO) test ./...
+	GOCACHE=$(GOCACHE) $(GO) test -race ./...
 
 test-integration:
 	docker compose -f compose.local.yml up -d --wait postgres
-	CARMA_TEST_DATABASE_URL='$(DATABASE_URL)' GOCACHE=$(GOCACHE) $(GO) test -count=1 ./...
+	CARMA_TEST_DATABASE_URL='$(DATABASE_URL)' GOCACHE=$(GOCACHE) $(GO) test -race -count=1 ./...
 
 lint:
 	@unformatted="$$("$$($(GO) env GOROOT)/bin/gofmt" -l .)" || exit $$?; \

@@ -72,6 +72,8 @@ that are emailed in the weekly digest when reminder email is on. Both APIs are k
 need outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
+Both `make test` (also used in CI) and `make test-integration` run the Go race
+detector; a detected race fails the test run.
 The lint target lists unformatted Go files without rewriting them, then runs
 `go vet` and pinned `staticcheck@v0.8.2` using the project's Go toolchain. Run
 `gofmt -w` on the listed files to fix formatting; the first staticcheck run may
