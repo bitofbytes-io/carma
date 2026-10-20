@@ -38,6 +38,18 @@ jobs:
         run: make test lint build
       - name: Scan Go vulnerabilities
         run: make vuln
+      - name: Build and inspect PR image
+        if: github.event_name == 'pull_request'
+        run: |
+          docker build --tag carma-pr-check:local .
+          docker run --rm --network none --entrypoint /bin/sh carma-pr-check:local -ec '
+            test -x /app/carma
+            test -x /app/carma-migrate
+            test -x /app/carma-reminders
+            test -f /app/static/styles.css
+            test -f /app/static/app.js
+            test "$(id -u)" -ne 0
+          '
   build-and-trigger:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
