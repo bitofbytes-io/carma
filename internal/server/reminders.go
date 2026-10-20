@@ -83,7 +83,7 @@ func (s *Server) upsertReminder(response http.ResponseWriter, request *http.Requ
 		s.renderReminderList(response, request, vehicle)
 		return
 	}
-	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String()+"/reminders", 303)
+	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String()+"/reminders", http.StatusSeeOther)
 }
 
 func (s *Server) deleteReminder(response http.ResponseWriter, request *http.Request) {

@@ -101,7 +101,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
 	if c.AuthMode == AuthGoogle && (c.GoogleClientID == "" || c.GoogleClientSecret == "" || (len(c.AllowedEmails) == 0 && len(c.AllowedDomains) == 0)) {
-		return nil, fmt.Errorf("Google credentials and an email/domain allowlist are required")
+		return nil, fmt.Errorf("google credentials and an email/domain allowlist are required")
 	}
 	return c, nil
 }

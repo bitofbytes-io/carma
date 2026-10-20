@@ -124,7 +124,7 @@ func (s *Server) createVehicle(response http.ResponseWriter, request *http.Reque
 		s.fail(response, err)
 		return
 	}
-	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), 303)
+	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), http.StatusSeeOther)
 }
 
 func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Request) {
@@ -161,7 +161,7 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 	if replacedKey != "" {
 		_ = s.assets.Delete(request.Context(), replacedKey)
 	}
-	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), 303)
+	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), http.StatusSeeOther)
 }
 
 // savePhoto stores an uploaded vehicle photo and returns its key, or "" when
