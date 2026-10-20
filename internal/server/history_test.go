@@ -33,7 +33,7 @@ func TestVehicleHistoryListsRecordsOldestFirstWithTotals(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, body)
 	}
-	for _, want := range []string{"2019 Subaru Outback", "Prepared Jul 31, 2026", "Total spent", "$539.50", "Receipts on file</dt><dd>1<", "Service records</dt><dd>3 · Nov 14, 2025 – May 2, 2026", "onclick=\"window.print()\"", "&lt;b&gt;synthetic&lt;/b&gt;"} {
+	for _, want := range []string{"2019 Subaru Outback", "Prepared Jul 31, 2026", "Total spent", "$539.50", "Receipts on file</dt><dd>1<", "Service records</dt><dd>3 · Nov 14, 2025 – May 2, 2026", "data-print-history", "&lt;b&gt;synthetic&lt;/b&gt;"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("history missing %q: %s", want, body)
 		}

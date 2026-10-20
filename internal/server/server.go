@@ -101,7 +101,7 @@ type pageData struct {
 func (s *Server) Router() http.Handler {
 	router := chi.NewRouter()
 	// Metrics wraps Recoverer so recovered panics are counted as 500s.
-	router.Use(chimw.RequestID, chimw.RealIP, s.metrics.Middleware, chimw.Recoverer, middleware.SameOrigin)
+	router.Use(middleware.SecurityHeaders, chimw.RequestID, chimw.RealIP, s.metrics.Middleware, chimw.Recoverer, middleware.SameOrigin)
 	router.Handle("/static/*", s.static)
 	router.Get("/health", func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "text/plain; charset=utf-8")

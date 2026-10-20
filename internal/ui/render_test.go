@@ -95,7 +95,7 @@ func TestBaseTemplateLinksStaticFilesThroughAssetURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := b.String()
-	for _, name := range []string{"favicon.svg", "styles.css", "reminders.css", "htmx.min.js"} {
+	for _, name := range []string{"favicon.svg", "styles.css", "reminders.css", "htmx.min.js", "app.js"} {
 		if !strings.Contains(body, `="/static/`+name+`?v=test"`) {
 			t.Errorf("base template does not link %s by its asset URL: %s", name, body)
 		}
@@ -103,8 +103,8 @@ func TestBaseTemplateLinksStaticFilesThroughAssetURLs(t *testing.T) {
 			t.Errorf("linked static file: %v", err)
 		}
 	}
-	if links := strings.Count(body, `"/static/`); links != 4 {
-		t.Errorf("base template links %d static files, want 4 versioned links", links)
+	if links := strings.Count(body, `"/static/`); links != 5 {
+		t.Errorf("base template links %d static files, want 5 versioned links", links)
 	}
 }
 

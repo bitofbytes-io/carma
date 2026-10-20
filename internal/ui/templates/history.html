@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="history-toolbar no-print"><a href="/vehicles/{{.Vehicle.ID}}">‹ Back to {{.Vehicle.Nickname}}</a><button class="primary" type="button" onclick="window.print()">Print or save as PDF</button></div>
+<div class="history-toolbar no-print"><a href="/vehicles/{{.Vehicle.ID}}">‹ Back to {{.Vehicle.Nickname}}</a><button class="primary" type="button" data-print-history>Print or save as PDF</button></div>
 <article class="card history">
   <header class="history-head"><div><p class="muted">Service history</p><h1>{{if .Vehicle.Year}}{{.Vehicle.Year}} {{end}}{{.Vehicle.Make}} {{.Vehicle.Model}}{{if not (or .Vehicle.Make .Vehicle.Model)}}{{.Vehicle.Nickname}}{{end}}</h1></div><p class="muted">Prepared {{date .Generated}} with Carma</p></header>
   <dl class="history-facts">
