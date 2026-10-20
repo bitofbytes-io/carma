@@ -11,7 +11,11 @@ container build, and CI workflow described by the project plan.
 
 ## Local development
 
-Requirements: Go 1.26.x and Docker. Carma always runs on PostgreSQL: start the
+Requirements: Go 1.26.x and Docker. Race-enabled tests also require
+`CGO_ENABLED=1`, a [supported OS/architecture](https://go.dev/doc/articles/race_detector#Requirements),
+and an installed C compiler on non-macOS systems.
+
+Carma always runs on PostgreSQL: start the
 local database with `make db-up` and apply migrations with `make migrate` before
 `make run`. Then open `http://localhost:4700` and use the clearly labeled local
 developer login. Uploads are written below `.local/carma-assets`; configuration
