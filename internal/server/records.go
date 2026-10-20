@@ -147,7 +147,7 @@ func (s *Server) createRecord(response http.ResponseWriter, request *http.Reques
 		s.fail(response, err)
 		return
 	}
-	http.Redirect(response, request, "/records/"+record.ID.String(), 303)
+	http.Redirect(response, request, "/records/"+record.ID.String(), http.StatusSeeOther)
 }
 
 func (s *Server) updateRecord(response http.ResponseWriter, request *http.Request) {
@@ -179,7 +179,7 @@ func (s *Server) updateRecord(response http.ResponseWriter, request *http.Reques
 		s.fail(response, err)
 		return
 	}
-	http.Redirect(response, request, "/records/"+record.ID.String(), 303)
+	http.Redirect(response, request, "/records/"+record.ID.String(), http.StatusSeeOther)
 }
 
 func recordFromForm(request *http.Request) (model.Record, string) {
@@ -293,7 +293,7 @@ func (s *Server) createServiceType(response http.ResponseWriter, request *http.R
 	}
 	_, err := s.store.CreateServiceType(request.Context(), model.ServiceType{ID: uuid.New(), Name: name, CreatedAt: s.now()})
 	if errors.Is(err, repository.ErrConflict) {
-		http.Error(response, "A service type with that name already exists", 409)
+		http.Error(response, "A service type with that name already exists", http.StatusConflict)
 		return
 	}
 	if err != nil {
@@ -301,7 +301,7 @@ func (s *Server) createServiceType(response http.ResponseWriter, request *http.R
 		return
 	}
 	dest, _ := safeRedirectTarget(request.FormValue("return_to"))
-	http.Redirect(response, request, dest, 303)
+	http.Redirect(response, request, dest, http.StatusSeeOther)
 }
 
 func (s *Server) getRecord(request *http.Request) (model.Record, []model.Attachment, error) {

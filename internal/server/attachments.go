@@ -44,7 +44,7 @@ func (s *Server) addAttachments(response http.ResponseWriter, request *http.Requ
 		s.fail(response, err)
 		return
 	}
-	http.Redirect(response, request, "/records/"+record.ID.String(), 303)
+	http.Redirect(response, request, "/records/"+record.ID.String(), http.StatusSeeOther)
 }
 
 func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field string) ([]model.Attachment, []string, error) {
