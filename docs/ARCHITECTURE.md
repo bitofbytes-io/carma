@@ -196,24 +196,75 @@ outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
 
 ## Configuration
 
-Same `getEnvOrFile` convention as dined/noted - every secret readable from env or
-`/run/secrets/<name>` via `*_FILE`:
+The reference below follows [`internal/config/config.go`](../internal/config/config.go).
+Defaults are the loader's defaults, not production stack values. The
+[`Dockerfile`](../Dockerfile) supplies `PORT=4700` and `ASSET_ROOT=/data/assets`;
+`make run` supplies `APP_ENV=development` and `AUTH_MODE=development` for local
+use. Production settings and secret mounts belong to `home_swarm/carma-stack.yml`,
+as described in [INFRA.md](INFRA.md), rather than this table.
 
-| Variable | Prod source | Purpose |
-|---|---|---|
-| `APP_ENV` | stack env (`production`) | prod behaviors (secure cookies, no development auth) |
-| `PORT` | stack env (`4700`) | listen port |
-| `DATABASE_URL` | secret `carma_database_url` | Postgres DSN |
-| `AUTH_GOOGLE_CLIENT_ID` / `_SECRET` | secrets `carma_google_client_id` / `_secret` | OIDC |
-| `AUTH_GOOGLE_REDIRECT_URL` | stack env | `https://carma.bitofbytes.io/api/auth/google/callback`; an `https` URL also makes cookies `Secure` |
-| `AUTH_GOOGLE_ALLOWED_EMAILS` | stack env | comma-separated allowlist |
-| `SESSION_TTL` | default `2160h` | session lifetime |
-| `APP_TIMEZONE` | default `America/New_York` | IANA zone that decides "today" for due dates, reminder emails, and new-record defaults; tzdata is embedded in the binary |
-| `ASSET_ROOT` | stack env (`/data/assets`) | receipt/photo storage root |
-| `MAX_UPLOAD_BYTES` | stack env (`26214400`) | 25 MiB upload cap |
-| `MAX_MULTIPART_BYTES` | stack env (default `134217728`) | 128 MiB total multipart request cap; supports four maximum-size receipts plus overhead |
-| `REMINDER_EMAIL_ENABLED` | stack env (`true`), default `false` | overdue reminder emails and the weekly digest (due-soon reminders and new recalls) |
-| `SMTP_PASSWORD` | secret `carma_smtp_password` via `SMTP_PASSWORD_FILE` | email reminders |
+### Loading and secret precedence
+
+The **Loader** column distinguishes four behaviors. A `_FILE` variable contains a
+file path, not the setting's value. Only `env` and `envOrFile` rows support the
+matching `_FILE` companion shown in the table; direct reads do not.
+
+- **`env`**: a nonempty `NAME_FILE` path is tried first. A successful read wins,
+  with surrounding whitespace removed from the contents, even if the result is
+  empty. Any read error is ignored, falling back to nonempty `NAME`, then the
+  code default. Direct environment values are not trimmed by this helper.
+- **`envOrFile`**: nonempty `NAME` wins, without trimming. Otherwise the loader
+  reads `NAME_FILE`, or the row's default secret path when no path is set. A
+  missing file returns an empty value; it does not retry the default path after
+  an explicit path fails. Other read errors and empty/whitespace-only file
+  contents fail loading. Successful file contents are trimmed. `Load()` requires
+  a database URL, and Google mode additionally requires both OAuth values.
+- **Direct**: only the named environment variable is read with `os.Getenv`.
+  There is no `_FILE` alternative or implicit secret path. Per-setting trimming
+  and validation are described below.
+- **Required file**: `SMTP_PASSWORD_FILE` is a mandatory explicit path when email
+  is enabled. The path and contents are trimmed; a missing path, any read error,
+  or an empty secret fails loading. It has no default secret path or direct
+  password fallback.
+
+| Variable (and supported file companion) | Code default / fallback | Loader | Purpose and requirements |
+|---|---|---|---|
+| `APP_ENV`, `APP_ENV_FILE` | `development` | `env` | `production` (case-insensitive) always enables Secure cookies and forbids development auth. |
+| `PORT`, `PORT_FILE` | `4700` | `env` | HTTP listen port. |
+| `AUTH_MODE`, `AUTH_MODE_FILE` | `google` | `env` | Must be exactly `google` or `development`; development mode is rejected in production. |
+| `DATABASE_URL`, `DATABASE_URL_FILE` | No value; default file `/run/secrets/carma_database_url` | `envOrFile` | PostgreSQL DSN; required. |
+| `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_ID_FILE` | No value; default file `/run/secrets/carma_google_client_id` | `envOrFile` | OAuth client ID; required in Google mode. |
+| `AUTH_GOOGLE_CLIENT_SECRET`, `AUTH_GOOGLE_CLIENT_SECRET_FILE` | No value; default file `/run/secrets/carma_google_client_secret` | `envOrFile` | OAuth client secret; required in Google mode. |
+| `AUTH_GOOGLE_REDIRECT_URL`, `AUTH_GOOGLE_REDIRECT_URL_FILE` | `http://localhost:4700/api/auth/google/callback` | `env` | OAuth callback URL; an HTTPS scheme also enables Secure cookies outside production. |
+| `AUTH_GOOGLE_ALLOWED_EMAILS` | Empty list | Direct | Comma-separated addresses; entries are trimmed, lowercased, and empty entries discarded. Google mode requires at least one email or domain entry. |
+| `AUTH_GOOGLE_ALLOWED_DOMAINS` | Empty list | Direct | Comma-separated domains, normalized like the email list; either or both allowlists may be populated. |
+| `SESSION_TTL`, `SESSION_TTL_FILE` | `2160h` (90 days) | `env` | Session lifetime; must parse as a positive Go duration. |
+| `APP_TIMEZONE`, `APP_TIMEZONE_FILE` | `America/New_York` | `env` | Household IANA time zone for dates, reminder scheduling, and migration dates. Invalid zones and `Local` (case-insensitive) are rejected; tzdata is embedded. |
+| `ASSET_ROOT`, `ASSET_ROOT_FILE` | `.local/carma-assets` | `env` | Receipt and vehicle-photo storage root; the image overrides the default to `/data/assets`. |
+| `MAX_UPLOAD_BYTES`, `MAX_UPLOAD_BYTES_FILE` | `26214400` (25 MiB) | `env` | Per-file upload limit; must be a positive base-10 integer fitting `int64`. |
+| `MAX_MULTIPART_BYTES`, `MAX_MULTIPART_BYTES_FILE` | `134217728` (128 MiB) | `env` | Total multipart request limit; must fit `int64` and be strictly greater than `MAX_UPLOAD_BYTES`. |
+| `METRICS_ADDR`, `METRICS_ADDR_FILE` | `:9464` | `env` | Separate internal Prometheus listener address, trimmed after loading. `off` (case-insensitive) disables it. |
+| `REMINDER_EMAIL_ENABLED`, `REMINDER_EMAIL_ENABLED_FILE` | `false` | `env` | Go boolean; enables both overdue reminder emails and the weekly digest. Controls whether the SMTP and public-URL settings below are loaded and validated. |
+| `SMTP_HOST` | None | Direct | Required when email is enabled; trimmed `host:port`, with both host and port nonempty. No port is supplied automatically. |
+| `SMTP_USERNAME` | None | Direct | Required when email is enabled; trimmed SMTP authentication username. |
+| `SMTP_PASSWORD_FILE` | None | Required file | Required when email is enabled; path to a password-only file, such as a mounted `/run/secrets/carma_smtp_password`. This example path is not a default. |
+| `SMTP_PASSWORD` | Unsupported | Direct | Any nonempty value is rejected when email is enabled, even if `SMTP_PASSWORD_FILE` is also set. |
+| `SMTP_FROM_ADDRESS` | None | Direct | Required when email is enabled; trimmed, plain valid email address, without a display name. |
+| `SMTP_FROM_NAME` | None | Direct | Required when email is enabled; trimmed sender display name. |
+| `SMTP_TLS_MODE` | None | Direct | Required when email is enabled; trimmed and lowercased, then must equal `implicit`. STARTTLS and plaintext modes are not accepted. |
+| `PUBLIC_URL` | None | Direct | Required when email is enabled; trimmed and trailing slashes removed. Must be an HTTPS origin with a host, no user information, non-root path, query string, or fragment; used for links in emails. |
+
+When email is enabled, all seven SMTP/public-URL fields (including the loaded
+password) must be nonempty and contain no embedded CR or LF. When disabled, the
+loader does not read or validate those fields or reject `SMTP_PASSWORD`.
+`SMTP_PASSWORD_FILE` is the only supported password input for enabled email;
+it is not interchangeable with the `envOrFile` database/OAuth convention.
+
+The web server and reminder command use `Load()`. The migration command only
+loads `DATABASE_URL` and `APP_TIMEZONE` through `LoadDatabaseURL()` and
+`LoadLocation()`, so it does not require OAuth or SMTP configuration. The removed
+`NHTSA_ENABLED` and `REMINDER_DIGEST_ENABLED` flags are ignored: NHTSA features
+are always on, and the digest follows `REMINDER_EMAIL_ENABLED`.
 
 ## CI/CD pipeline
 
