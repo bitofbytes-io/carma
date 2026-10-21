@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/assets"
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/google/uuid"
@@ -86,7 +87,9 @@ func TestReceiptRetainedAfterPersistenceError(t *testing.T) {
 					f.s.assets = tracker
 					writeStore := &receiptWriteErrorStore{Store: f.store, persist: persist, err: errors.New("connection lost")}
 					f.s.store = writeStore
-					body, contentType := formBody(t, fields, "receipt.pdf", []byte("%PDF-1.7\nreceipt"))
+					m := metrics.New()
+					f.s.EnableMetrics(m)
+					body, contentType := multipartFormBodyFiles(t, fields, "receipts", []namedFile{{"first.pdf", []byte("%PDF-1.7\nfirst")}, {"second.pdf", []byte("%PDF-1.7\nsecond")}})
 					request := httptest.NewRequest(http.MethodPost, "http://example.com"+path, body)
 					request.AddCookie(f.cookie)
 					request.Header.Set("Origin", "http://example.com")
@@ -106,6 +109,7 @@ func TestReceiptRetainedAfterPersistenceError(t *testing.T) {
 					if tracker.savedKey == "" || tracker.deletedKey != "" {
 						t.Fatalf("saved=%q deleted=%q", tracker.savedKey, tracker.deletedKey)
 					}
+					assertUploadCounts(t, m, "receipt", 0, 2, 0)
 					assertPhotoExists(t, tracker, tracker.savedKey)
 
 					records, err := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &vehicle.ID})

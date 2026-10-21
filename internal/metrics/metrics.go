@@ -71,7 +71,7 @@ func New() *Metrics {
 		}, []string{"provider", "reason"}),
 		uploads: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "carma_uploads_total",
-			Help: "Uploaded files stored or refused, by kind and result.",
+			Help: "Uploaded files persisted, refused, or failed (including unconfirmed database writes), by kind and result.",
 		}, []string{"kind", "result"}),
 		jobs: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "carma_jobs_total",
@@ -192,7 +192,7 @@ type Server struct {
 // nil when addr is Off, and logs and returns nil when addr cannot be bound:
 // metrics never stop the app from serving.
 func Start(addr string, handler http.Handler, log *slog.Logger) *Server {
-	if strings.EqualFold(addr, Off) {
+	if strings.EqualFold(strings.TrimSpace(addr), Off) {
 		log.Info("metrics listener disabled")
 		return nil
 	}

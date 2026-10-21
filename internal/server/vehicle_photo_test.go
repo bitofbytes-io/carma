@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/assets"
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
 )
@@ -87,6 +88,8 @@ func TestVehiclePhotoRetainedAfterPersistenceError(t *testing.T) {
 					f.s.assets = tracker
 					writeStore := &vehicleWriteErrorStore{Store: f.store, persist: persist, err: errors.New("connection lost")}
 					f.s.store = writeStore
+					m := metrics.New()
+					f.s.EnableMetrics(m)
 					body, contentType := multipartFormBody(t, map[string]string{"nickname": "Updated"}, "photo", "new.png", []byte("\x89PNG\r\n\x1a\nnew"))
 					request := httptest.NewRequest(http.MethodPost, "http://example.com"+path, body)
 					request.AddCookie(f.cookie)
@@ -107,6 +110,7 @@ func TestVehiclePhotoRetainedAfterPersistenceError(t *testing.T) {
 					if tracker.savedKey == "" || tracker.deletedKey != "" {
 						t.Fatalf("saved=%q deleted=%q", tracker.savedKey, tracker.deletedKey)
 					}
+					assertUploadCounts(t, m, "vehicle_photo", 0, 1, 0)
 					assertPhotoExists(t, tracker, tracker.savedKey)
 					if editing {
 						assertPhotoExists(t, tracker, old.PhotoKey)
@@ -201,6 +205,8 @@ func (s *concurrentPhotoStore) UpdateVehicle(ctx context.Context, vehicle model.
 
 func TestVehicleEditWithoutUploadKeepsConcurrentlyReplacedPhoto(t *testing.T) {
 	f := setup(t)
+	m := metrics.New()
+	f.s.EnableMetrics(m)
 	vehicle := createVehicle(t, f)
 	original, err := f.s.assets.Save(t.Context(), strings.NewReader("\x89PNG\r\n\x1a\noriginal"), 1024)
 	if err != nil {
@@ -231,4 +237,5 @@ func TestVehicleEditWithoutUploadKeepsConcurrentlyReplacedPhoto(t *testing.T) {
 		t.Fatalf("edit without upload deleted %q", tracker.deletedKey)
 	}
 	assertPhotoExists(t, tracker, concurrent.Key)
+	assertUploadCounts(t, m, "vehicle_photo", 0, 0, 0)
 }

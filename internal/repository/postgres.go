@@ -2,12 +2,15 @@ package repository
 
 import (
 	"context"
+	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Postgres struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	leaderMu       sync.Mutex
+	leaderSessions map[int64]uint32
 }
 
 func NewPostgres(ctx context.Context, url string) (*Postgres, error) {

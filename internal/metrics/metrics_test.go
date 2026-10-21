@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -158,8 +159,10 @@ func TestStartServesOnlyMetricsAndShutsDown(t *testing.T) {
 
 func TestStartIsDisabledByOffAndSurvivesBindFailure(t *testing.T) {
 	log := slog.New(slog.DiscardHandler)
-	if server := Start("off", New().Handler(), log); server != nil {
-		t.Fatal("METRICS_ADDR=off started a listener")
+	for _, addr := range []string{"off", "OFF", " Off ", " oFf "} {
+		if server := Start(addr, New().Handler(), log); server != nil {
+			t.Fatalf("METRICS_ADDR=%q started a listener", addr)
+		}
 	}
 	taken, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -172,5 +175,28 @@ func TestStartIsDisabledByOffAndSurvivesBindFailure(t *testing.T) {
 	var disabled *Server
 	if err := disabled.Shutdown(t.Context()); err != nil {
 		t.Fatalf("nil server shutdown: %v", err)
+	}
+}
+
+func TestLeaderLockGaugeIsBoundedFreshAndOmittedOnQueryFailure(t *testing.T) {
+	m := New()
+	held := true
+	var queryErr error
+	m.RegisterLeaderLocks(func(ctx context.Context) (map[string]bool, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("snapshot query has no deadline")
+		}
+		return map[string]bool{"asset_cleanup": held, "reminder_email": false, "reminder_digest": false, "recall_check": false, "unexpected_pid": true}, queryErr
+	})
+	body := scrape(t, m)
+	assertSeries(t, body, `carma_leader_locks_held{purpose="asset_cleanup"} 1`, `carma_leader_locks_held{purpose="reminder_email"} 0`, `carma_leader_locks_held{purpose="reminder_digest"} 0`, `carma_leader_locks_held{purpose="recall_check"} 0`)
+	if strings.Contains(body, "unexpected_pid") {
+		t.Fatal("unbounded purpose exported")
+	}
+	held = false
+	assertSeries(t, scrape(t, m), `carma_leader_locks_held{purpose="asset_cleanup"} 0`)
+	queryErr = errors.New("database unavailable")
+	if strings.Contains(scrape(t, m), "carma_leader_locks_held") {
+		t.Fatal("query failure exported stale or false gauge")
 	}
 }

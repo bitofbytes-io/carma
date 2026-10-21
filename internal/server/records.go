@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/metrics"
 	"github.com/bitofbytes-io/carma/internal/middleware"
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
@@ -143,10 +144,12 @@ func (s *Server) createRecord(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	if _, err = s.store.CreateRecord(request.Context(), record, attachments); err != nil {
+		s.countUploads(uploadReceipt, metrics.ResultFailure, keys)
 		deferUploadCleanup(record.ID, keys, err)
 		s.fail(response, err)
 		return
 	}
+	s.countUploads(uploadReceipt, metrics.ResultSuccess, keys)
 	http.Redirect(response, request, "/records/"+record.ID.String(), http.StatusSeeOther)
 }
 
