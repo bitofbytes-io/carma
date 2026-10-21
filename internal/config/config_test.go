@@ -202,3 +202,33 @@ func TestDatabaseURLIsRequired(t *testing.T) {
 		t.Fatalf("missing database URL error = %v", err)
 	}
 }
+
+func TestMetricsAddrValidation(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("AUTH_MODE", "development")
+	t.Setenv("METRICS_ADDR_FILE", "")
+	for _, tc := range []struct {
+		addr, want string
+		invalid    bool
+	}{
+		{"", ":9464", false}, {" off ", "off", false}, {"OFF", "off", false}, {" Off ", "off", false},
+		{":0", ":0", false}, {":65535", ":65535", false}, {" 127.0.0.1:9464 ", "127.0.0.1:9464", false},
+		{"[::1]:9464", "[::1]:9464", false}, {"[fe80::1%lo0]:9464", "[fe80::1%lo0]:9464", false},
+		{"unresolved.invalid:9464", "unresolved.invalid:9464", false},
+		{" ", "", true}, {"9464", "", true}, {"localhost", "", true}, {"::1:9464", "", true},
+		{"localhost:", "", true}, {":http", "", true}, {":-1", "", true}, {":+1", "", true},
+		{":65536", "", true}, {":999999999999999999999999999", "", true}, {"[::1:9464", "", true},
+	} {
+		t.Run(tc.addr, func(t *testing.T) {
+			t.Setenv("METRICS_ADDR", tc.addr)
+			cfg, err := Load()
+			if tc.invalid {
+				if err == nil || !strings.Contains(err.Error(), "METRICS_ADDR") {
+					t.Fatalf("invalid address accepted: %v", err)
+				}
+			} else if err != nil || cfg.MetricsAddr != tc.want {
+				t.Fatalf("address=%q cfg=%v err=%v", tc.addr, cfg, err)
+			}
+		})
+	}
+}

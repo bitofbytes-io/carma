@@ -120,10 +120,12 @@ func (s *Server) createVehicle(response http.ResponseWriter, request *http.Reque
 	}
 	vehicle.PhotoKey = photoKey
 	if _, err := s.store.CreateVehicle(request.Context(), vehicle, reminders); err != nil {
+		s.countUploads(uploadVehiclePhoto, metrics.ResultFailure, []string{photoKey})
 		deferPhotoCleanup(vehicle.ID, photoKey, err)
 		s.fail(response, err)
 		return
 	}
+	s.countUploads(uploadVehiclePhoto, metrics.ResultSuccess, []string{photoKey})
 	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), http.StatusSeeOther)
 }
 
@@ -154,6 +156,7 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 	vehicle.PhotoKey = photoKey
 	_, replacedKey, err := s.store.UpdateVehicle(request.Context(), vehicle)
 	if err != nil {
+		s.countUploads(uploadVehiclePhoto, metrics.ResultFailure, []string{photoKey})
 		deferPhotoCleanup(vehicle.ID, photoKey, err)
 		s.fail(response, err)
 		return
@@ -161,6 +164,7 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 	if replacedKey != "" {
 		_ = s.assets.Delete(request.Context(), replacedKey)
 	}
+	s.countUploads(uploadVehiclePhoto, metrics.ResultSuccess, []string{photoKey})
 	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), http.StatusSeeOther)
 }
 
@@ -187,7 +191,6 @@ func (s *Server) savePhoto(request *http.Request, validation string) (string, st
 		_ = s.assets.Delete(request.Context(), object.Key)
 		return "", validation
 	}
-	s.metrics.Upload(uploadVehiclePhoto, metrics.ResultSuccess)
 	return object.Key, ""
 }
 

@@ -83,6 +83,7 @@ func run() error {
 	}
 	appMetrics := metrics.New()
 	appMetrics.RegisterPool(store.PoolStat)
+	appMetrics.RegisterLeaderLocks(store.LeaderLocksHeld)
 	app.EnableMetrics(appMetrics)
 	nhtsaClient := nhtsa.NewClient()
 	app.EnableVINDecode(nhtsaClient)

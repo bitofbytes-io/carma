@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -125,4 +126,62 @@ func TestUploadsAreCountedByKindAndResult(t *testing.T) {
 	if strings.Contains(body, `carma_uploads_total{kind="receipt",result="success"}`) {
 		t.Errorf("discarded receipt counted as stored in\n%s", body)
 	}
+}
+
+func assertUploadCounts(t *testing.T, m *metrics.Metrics, kind string, success, failure, rejected int) {
+	t.Helper()
+	body := scrapeMetrics(t, m)
+	for result, want := range map[string]int{"success": success, "failure": failure, "rejected": rejected} {
+		prefix := fmt.Sprintf(`carma_uploads_total{kind="%s",result="%s"} `, kind, result)
+		found := false
+		for _, line := range strings.Split(body, "\n") {
+			if strings.HasPrefix(line, prefix) {
+				found = true
+				if line != fmt.Sprintf("%s%d", prefix, want) {
+					t.Errorf("metric=%s, want %d", line, want)
+				}
+			}
+		}
+		if !found && want != 0 {
+			t.Errorf("missing %s%d", prefix, want)
+		}
+	}
+}
+
+func TestUploadsCountOnceAfterEachSuccessfulDatabaseWrite(t *testing.T) {
+	f := setup(t)
+	m := metrics.New()
+	f.s.EnableMetrics(m)
+	photo := []byte("\x89PNG\r\n\x1a\nphoto")
+	b, ct := multipartFormBody(t, map[string]string{"nickname": "Outback"}, "photo", "car.png", photo)
+	if w := f.do(t, http.MethodPost, "/vehicles", b, ct); w.Code != http.StatusSeeOther {
+		t.Fatal(w.Body.String())
+	}
+	assertUploadCounts(t, m, "vehicle_photo", 1, 0, 0)
+	vehicles, err := f.store.ListVehicles(t.Context(), false)
+	if err != nil || len(vehicles) != 1 {
+		t.Fatalf("vehicles=%v err=%v", vehicles, err)
+	}
+	path := "/vehicles/" + vehicles[0].ID.String()
+	b, ct = multipartFormBody(t, map[string]string{"nickname": "Updated"}, "photo", "new.png", photo)
+	if w := f.do(t, http.MethodPost, path, b, ct); w.Code != http.StatusSeeOther {
+		t.Fatal(w.Body.String())
+	}
+	assertUploadCounts(t, m, "vehicle_photo", 2, 0, 0)
+	types, err := f.store.ListServiceTypes(t.Context())
+	if err != nil || len(types) == 0 {
+		t.Fatalf("types=%v err=%v", types, err)
+	}
+	files := []namedFile{{"first.pdf", []byte("%PDF-1.7\nfirst")}, {"second.pdf", []byte("%PDF-1.7\nsecond")}}
+	b, ct = multipartFormBodyFiles(t, map[string]string{"occurred_on": "2026-07-30", "service_type_id": types[0].ID.String()}, "receipts", files)
+	w := f.do(t, http.MethodPost, path+"/records", b, ct)
+	if w.Code != http.StatusSeeOther {
+		t.Fatal(w.Body.String())
+	}
+	assertUploadCounts(t, m, "receipt", 2, 0, 0)
+	b, ct = multipartFormBodyFiles(t, nil, "receipts", files)
+	if w = f.do(t, http.MethodPost, w.Header().Get("Location")+"/attachments", b, ct); w.Code != http.StatusSeeOther {
+		t.Fatal(w.Body.String())
+	}
+	assertUploadCounts(t, m, "receipt", 4, 0, 0)
 }

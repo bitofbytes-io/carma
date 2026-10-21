@@ -48,6 +48,9 @@ type ReminderEmail struct {
 func Load() (*Config, error) {
 	c := &Config{AppEnv: env("APP_ENV", "development"), Port: env("PORT", "4700"), AuthMode: env("AUTH_MODE", AuthGoogle), GoogleRedirectURL: env("AUTH_GOOGLE_REDIRECT_URL", "http://localhost:4700/api/auth/google/callback"), AssetRoot: env("ASSET_ROOT", ".local/carma-assets"), MetricsAddr: strings.TrimSpace(env("METRICS_ADDR", ":9464"))}
 	var err error
+	if c.MetricsAddr, err = validateMetricsAddr(c.MetricsAddr); err != nil {
+		return nil, err
+	}
 	if c.DatabaseURL, err = envOrFile("DATABASE_URL", "/run/secrets/carma_database_url"); err != nil {
 		return nil, err
 	}
@@ -224,4 +227,25 @@ func csv(s string) []string {
 		}
 	}
 	return out
+}
+
+// validateMetricsAddr checks syntax without DNS lookups or binding a socket.
+func validateMetricsAddr(addr string) (string, error) {
+	addr = strings.TrimSpace(addr)
+	if strings.EqualFold(addr, "off") {
+		return "off", nil
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return "", fmt.Errorf("METRICS_ADDR must be host:port or off")
+	}
+	for _, digit := range port {
+		if digit < '0' || digit > '9' {
+			return "", fmt.Errorf("METRICS_ADDR port must be numeric (0-65535)")
+		}
+	}
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return "", fmt.Errorf("METRICS_ADDR port must be numeric (0-65535)")
+	}
+	return addr, nil
 }

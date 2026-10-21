@@ -116,26 +116,51 @@ and the CPU count) still serves HTTP while all four jobs run. Each scheduled run
 is cut off after 30 minutes, which logs `background job timed out` and releases
 its lock.
 
+A dropped dedicated connection releases its PostgreSQL lock immediately while
+its job may continue using the pool. Another replica can then start the same
+job. These locks are best-effort exclusion, not an exactly-once guarantee;
+notification or external-service side effects can overlap after a connection
+loss. The held-lock gauge below detects current ownership but does not cancel
+or fence an in-flight job. Keep the dedicated connections outside the pool to
+avoid the pool-exhaustion deadlock fixed in BOB-171.
+
+The Dockerfile's `/health` probe is process liveness. The home_swarm stack
+supplies its deployment healthcheck, with `/ready` used for the initial rollout
+gate before switching to `/health` (BOB-172). Dependency outages after startup
+therefore do not cause container restart storms; readiness remains the probe
+for dependency monitoring.
+
 Prometheus metrics are served at `GET /metrics` on a separate internal listener,
 never on the public port, so the public Traefik routers cannot expose them.
-`METRICS_ADDR` sets its address (optional, default `:9464`; `off` disables it).
-If the address cannot be bound the error is logged and Carma keeps serving. The
-port is not in the Dockerfile's `EXPOSE`; Prometheus scrapes it over the overlay
-network. The listener exports:
+`METRICS_ADDR` sets its address (optional, default `:9464`; `off`, ignoring
+case and surrounding whitespace, disables it). Configuration rejects malformed
+host:port values and requires a numeric port in 0–65535; IPv6 must be bracketed.
+Validation performs no DNS lookup or bind. If a valid address cannot be bound at
+runtime, the error is logged and Carma keeps serving. The default listens on all
+interfaces without authentication: **never publish port 9464** in Docker/Swarm
+or add a public Traefik route to it. The port is not in the Dockerfile's `EXPOSE`;
+Prometheus scrapes it over the private overlay network. The listener exports:
 
 - `http_requests_total` and `http_request_duration_seconds` by `method`, `route`
   (the chi route pattern such as `/vehicles/{vehicleID}`, or `unmatched`), and
   `code`. `/health`, `/ready`, and `/metrics` are not recorded.
 - `pgxpool_*` connection pool stats: acquired, idle, total, max, and constructing
   connections, plus acquire counts and wait time.
+- `carma_leader_locks_held{purpose}`: 0 or 1 for each of `asset_cleanup`,
+  `reminder_email`, `reminder_digest`, and `recall_check`, based on this replica's
+  dedicated backend IDs and actual `pg_locks` rows at scrape time. The query has
+  a two-second deadline including pool acquisition; failed queries omit the
+  series instead of reporting zero. Backend IDs are never metric labels.
 - `carma_oauth_failures_total{provider,reason}`: Google callbacks with an invalid
   or expired `state`, or a failed code `exchange`.
 - `carma_login_failures_total{reason}`: sign-ins refused after Google, by
   `not_invited`, `account_conflict`, or `error`.
-- `carma_uploads_total{kind,result}`: `receipt` and `vehicle_photo` files stored
-  (`success`); refused (`rejected`) because they were too large or an unsupported
+- `carma_uploads_total{kind,result}`: `receipt` and `vehicle_photo` files stored and confirmed by the database write
+  (`success`, once per new file); refused (`rejected`) because they were too large or an unsupported
   type, or were discarded with an invalid form or a refused receipt in the same
-  upload; or failed (`failure`).
+  upload; or failed (`failure`). A database error counts pending files as failed,
+  including an unconfirmed commit. Such assets remain for reference-aware orphan
+  cleanup; a lost database response cannot safely justify deleting them.
 - `carma_jobs_total{job,result}`: background runs of `session_cleanup`,
   `asset_cleanup`, `reminder_email`, `reminder_digest`, and `recall_check`.
 - The Go runtime (`go_*`) and process (`process_*`) collectors.

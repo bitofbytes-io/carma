@@ -40,10 +40,12 @@ func (s *Server) addAttachments(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	if err = s.store.AddAttachments(request.Context(), record.ID, attachments); err != nil {
+		s.countUploads(uploadReceipt, metrics.ResultFailure, keys)
 		deferUploadCleanup(record.ID, keys, err)
 		s.fail(response, err)
 		return
 	}
+	s.countUploads(uploadReceipt, metrics.ResultSuccess, keys)
 	http.Redirect(response, request, "/records/"+record.ID.String(), http.StatusSeeOther)
 }
 
@@ -53,12 +55,10 @@ func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field st
 	}
 	var attachments []model.Attachment
 	var keys []string
-	// Receipts are counted once the batch's outcome is known: on an error the
-	// caller deletes those already saved, so they are refused, not stored.
+	// On an asset error the caller deletes files already saved, so those are
+	// refused. Successful batches are counted by the caller after persistence.
 	count := func(result string) {
-		for range keys {
-			s.metrics.Upload(uploadReceipt, result)
-		}
+		s.countUploads(uploadReceipt, result, keys)
 	}
 	for _, header := range request.MultipartForm.File[field] {
 		file, err := header.Open()
@@ -85,7 +85,6 @@ func (s *Server) saveUploads(request *http.Request, recordID uuid.UUID, field st
 			CreatedAt:        s.now(),
 		})
 	}
-	count(metrics.ResultSuccess)
 	return attachments, keys, nil
 }
 
@@ -202,5 +201,14 @@ func contentTypeForKey(key string) string {
 		return "image/heic"
 	default:
 		return "application/octet-stream"
+	}
+}
+
+// countUploads counts only new files, never an absent upload on an edit.
+func (s *Server) countUploads(kind, result string, keys []string) {
+	for _, key := range keys {
+		if key != "" {
+			s.metrics.Upload(kind, result)
+		}
 	}
 }
