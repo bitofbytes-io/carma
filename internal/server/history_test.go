@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func TestVehicleHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 	for _, fields := range []map[string]string{
 		{"occurred_on": "2026-05-02", "odometer": "61000", "cost": "450.50", "vendor": "Tire Barn", "notes": "four new tires", "service_type_id": typeID["Repair"]},
 		{"occurred_on": "2025-11-14", "odometer": "55000", "cost": "89.00", "vendor": "Jiffy Lube", "notes": "<b>synthetic</b>", "service_type_id": typeID["Oil change"]},
-		{"occurred_on": "2026-01-20", "vendor": "Driveway", "notes": "rotated in the driveway", "service_type_id": typeID["Tire rotation"]},
+		{"occurred_on": "2026-01-20", "vendor": "Driveway", "notes": "rotated in the driveway\nfront tires only", "service_type_id": typeID["Tire rotation"]},
 	} {
 		filename, file := "", []byte(nil)
 		if fields["vendor"] == "Jiffy Lube" {
@@ -113,7 +114,7 @@ func TestVehicleHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 		for _, want := range []string{
 			"2019 Subaru Outback", "4S4BSANC5K3245678", "61000 mi", "Prepared Jul 31, 2026",
 			"Service records</dt><dd>3 · Nov 14, 2025 – May 2, 2026", "Receipts on file</dt><dd>1<",
-			"Jiffy Lube", "Driveway", "Tire Barn", "55000", "rotated in the driveway",
+			"Jiffy Lube", "Driveway", "Tire Barn", "55000", "rotated in the driveway\nfront tires only",
 			"&lt;b&gt;synthetic&lt;/b&gt;", "data-label=\"Mileage\">—",
 			"AIR BAGS", "Campaign 19V493000", "reported Jun 27, 2019", "Do not drive this vehicle until the recall repair is done.",
 			"The inflator may rupture.", "Replace the inflator.",
@@ -168,6 +169,22 @@ func TestVehicleHistoryPrintWithoutRecords(t *testing.T) {
 	body = w.Body.String()
 	if w.Code != http.StatusOK || !strings.Contains(body, "Total spent</dt><dd>—") || !strings.Contains(body, "VIN</dt><dd>—") {
 		t.Fatalf("status=%d body=%s", w.Code, body)
+	}
+}
+
+func TestHistorySheetNotesKeepLineBreaksInPrintAndNarrowLayouts(t *testing.T) {
+	t.Chdir("../..")
+	css, err := os.ReadFile("static/styles.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(css)
+	const notes = `.history-sheet .history-table td.history-notes{white-space:pre-line}`
+	narrow := strings.Index(body, `.history-sheet .history-table td{border:0;padding:2px 0;text-align:left;white-space:normal}`)
+	printed := strings.Index(body, `.history-sheet .history-table th,.history-sheet .history-table td{display:table-cell;width:auto;white-space:normal;overflow-wrap:break-word;`)
+	override := strings.LastIndex(body, notes)
+	if narrow < 0 || printed < 0 || override < 0 || override < narrow || override < printed {
+		t.Fatalf("notes line breaks are not preserved after the sheet cell white-space rules")
 	}
 }
 

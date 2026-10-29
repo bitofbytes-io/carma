@@ -588,7 +588,7 @@ func TestHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 	reported := time.Date(2019, 6, 27, 0, 0, 0, 0, time.UTC)
 	records := []model.Record{
 		{OccurredOn: time.Date(2025, 11, 14, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Oil change", OdometerMiles: &earlier, CostCents: &oil, Vendor: "Jiffy Lube", Notes: "<b>synthetic</b>", AttachmentCount: 1},
-		{OccurredOn: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Tire rotation", Vendor: "Driveway", Notes: "rotated in the driveway"},
+		{OccurredOn: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Tire rotation", Vendor: "Driveway", Notes: "rotated in the driveway\nfront tires only"},
 		{OccurredOn: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Repair", OdometerMiles: &miles, CostCents: &tires, Vendor: "Tire Barn", Notes: "four new tires"},
 	}
 	type data struct {
@@ -622,7 +622,7 @@ func TestHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 		html := body.String()
 		for _, want := range []string{
 			"2019 Subaru Outback", "4S4BSANC5K3245678", "61000 mi", "Prepared Jul 31, 2026",
-			"Jiffy Lube", "Driveway", "Tire Barn", "data-label=\"Mileage\">—",
+			"Jiffy Lube", "Driveway", "Tire Barn", "rotated in the driveway\nfront tires only", "data-label=\"Mileage\">—",
 			"&lt;b&gt;synthetic&lt;/b&gt;", "AIR BAGS", "Campaign 19V493000",
 			"Do not drive this vehicle until the recall repair is done.",
 			`class="history-toolbar history-print-toolbar no-print"`, `class="topbar"`,
