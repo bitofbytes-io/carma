@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/google/uuid"
@@ -108,6 +109,163 @@ func TestXLSXEmptyWorkbookAndDuplicateSheetNames(t *testing.T) {
 	}
 }
 
+func TestSheetTitle(t *testing.T) {
+	emoji := "😀"
+	cases := []struct {
+		name    string
+		vehicle string
+		want    string
+	}{
+		{name: "leading apostrophe", vehicle: "'Outback", want: "Outback"},
+		{name: "trailing apostrophe", vehicle: "Outback'", want: "Outback"},
+		{name: "both edges", vehicle: "'Outback'", want: "Outback"},
+		{name: "apostrophe inside the name", vehicle: "Dan's Outback", want: "Dan's Outback"},
+		{name: "typographic apostrophe stays", vehicle: "’Outback’", want: "’Outback’"},
+		{name: "single apostrophe", vehicle: "'", want: "Vehicle"},
+		{name: "only apostrophes", vehicle: "''''", want: "Vehicle"},
+		{name: "long run of apostrophes", vehicle: strings.Repeat("'", 40), want: "Vehicle"},
+		{name: "apostrophes and spaces", vehicle: "  '   '  ", want: "Vehicle"},
+		{name: "apostrophes and invalid characters", vehicle: "':/\\?*[]'", want: "Vehicle"},
+		{name: "invalid characters", vehicle: "Tacoma/North?", want: "Tacoma North"},
+		{name: "every invalid character", vehicle: `a:b\c/d?e*f[g]h`, want: "a b c d e f g h"},
+		{name: "rune length over the limit", vehicle: strings.Repeat("A", 40), want: strings.Repeat("A", 31)},
+		{name: "quotes around a long name", vehicle: "'" + strings.Repeat("A", 40) + "'", want: strings.Repeat("A", 31)},
+		{name: "truncation exposes a trailing apostrophe", vehicle: strings.Repeat("A", 30) + "'B", want: strings.Repeat("A", 30)},
+		{name: "space then apostrophe at the cut", vehicle: strings.Repeat("A", 29) + " '" + "BCDE", want: strings.Repeat("A", 29)},
+		{
+			name:    "quotes, invalid characters, and the cut",
+			vehicle: "'" + strings.Repeat("A", 30) + "'B/?'",
+			want:    strings.Repeat("A", 30),
+		},
+		{
+			name:    "leading quote and an invalid character inside the limit",
+			vehicle: "'Hello/World " + strings.Repeat("A", 20) + "'B",
+			want:    "Hello World " + strings.Repeat("A", 19),
+		},
+		{name: "utf-16 length", vehicle: strings.Repeat(emoji, 16), want: strings.Repeat(emoji, 15)},
+		{name: "utf-16 cut exposes an apostrophe", vehicle: strings.Repeat(emoji, 15) + "'Z", want: strings.Repeat(emoji, 15)},
+		{name: "quotes around a long emoji name", vehicle: "'" + strings.Repeat(emoji, 20) + "'/?", want: strings.Repeat(emoji, 15)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sheetTitle(tc.vehicle)
+			if got != tc.want {
+				t.Fatalf("sheetTitle(%q)=%q want %q", tc.vehicle, got, tc.want)
+			}
+			assertValidSheetName(t, got)
+		})
+	}
+}
+
+func TestUniqueSheetNameCombinesRules(t *testing.T) {
+	used := map[string]struct{}{}
+	cut := strings.Repeat("A", 30) + "'B"
+	first := uniqueSheetName(cut, used)
+	second := uniqueSheetName(cut, used)
+	plain := uniqueSheetName(strings.Repeat("A", 30), used)
+	if first != strings.Repeat("A", 30) || second != strings.Repeat("A", 27)+" (2)" || plain != strings.Repeat("A", 27)+" (3)" {
+		t.Fatalf("cut names %q %q %q", first, second, plain)
+	}
+
+	boundary := strings.Repeat("A", 26) + "'" + strings.Repeat("B", 10)
+	left := uniqueSheetName(boundary, used)
+	right := uniqueSheetName(boundary, used)
+	if left != strings.Repeat("A", 26)+"'"+strings.Repeat("B", 4) || right != strings.Repeat("A", 26)+" (2)" {
+		t.Fatalf("boundary %q %q", left, right)
+	}
+
+	only := uniqueSheetName(strings.Repeat("'", 8), used)
+	named := uniqueSheetName("Vehicle", used)
+	folded := uniqueSheetName("vehicle", used)
+	if only != "Vehicle" || named != "Vehicle (2)" || folded != "vehicle (3)" {
+		t.Fatalf("fallback %q %q %q", only, named, folded)
+	}
+
+	emojiCut := strings.Repeat("😀", 15) + "'Z"
+	emoji := uniqueSheetName(emojiCut, used)
+	emojiDup := uniqueSheetName(emojiCut, used)
+	if emoji != strings.Repeat("😀", 15) || emojiDup != strings.Repeat("😀", 13)+" (2)" {
+		t.Fatalf("emoji %q %q", emoji, emojiDup)
+	}
+
+	combo := "'" + strings.Repeat("C", 30) + "'D/?'"
+	var grown []string
+	for range 12 {
+		grown = append(grown, uniqueSheetName(combo, used))
+	}
+	if grown[0] != strings.Repeat("C", 30) || grown[1] != strings.Repeat("C", 27)+" (2)" || grown[9] != strings.Repeat("C", 26)+" (10)" {
+		t.Fatalf("grown %q", grown)
+	}
+
+	seen := map[string]struct{}{}
+	for _, sheet := range append([]string{first, second, plain, left, right, only, named, folded, emoji, emojiDup}, grown...) {
+		assertValidSheetName(t, sheet)
+		key := strings.ToLower(sheet)
+		if _, ok := seen[key]; ok {
+			t.Fatalf("duplicate sheet %q", sheet)
+		}
+		seen[key] = struct{}{}
+	}
+}
+
+func TestXLSXAwkwardVehicleNames(t *testing.T) {
+	cut := strings.Repeat("A", 30) + "'B"
+	names := []string{
+		"'",
+		"''''",
+		cut,
+		cut,
+		"'" + strings.Repeat("C", 30) + "'D/?'",
+		"Dan's Outback",
+		"'Outback'",
+		"  ' : '  ",
+	}
+	wants := []string{
+		"Vehicle",
+		"Vehicle (2)",
+		strings.Repeat("A", 30),
+		strings.Repeat("A", 27) + " (2)",
+		strings.Repeat("C", 30),
+		"Dan's Outback",
+		"Outback",
+		"Vehicle (3)",
+	}
+	records := make([]model.Record, len(names))
+	for i, name := range names {
+		records[i] = model.Record{
+			VehicleID:   uuid.New(),
+			VehicleName: name,
+			OccurredOn:  time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
+		}
+	}
+	var buf bytes.Buffer
+	if err := XLSX(&buf, records); err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = book.Close() })
+	sheets := book.GetSheetList()
+	if strings.Join(sheets, "\n") != strings.Join(wants, "\n") {
+		t.Fatalf("sheets=%q", sheets)
+	}
+	seen := map[string]struct{}{}
+	for _, sheet := range sheets {
+		assertValidSheetName(t, sheet)
+		key := strings.ToLower(sheet)
+		if _, ok := seen[key]; ok {
+			t.Fatalf("duplicate sheet %q", sheet)
+		}
+		seen[key] = struct{}{}
+		rows, err := book.GetRows(sheet)
+		if err != nil || len(rows) != 3 || rows[2][0] != "Total" {
+			t.Fatalf("sheet %q rows=%v err=%v", sheet, rows, err)
+		}
+	}
+}
+
 func TestXLSXPropagatesWriteError(t *testing.T) {
 	want := errWrite
 	if err := XLSX(failingWriter{err: want}, nil); err == nil {
@@ -181,6 +339,22 @@ func assertText(t *testing.T, book *excelize.File, sheet, cell, want string) {
 	got, err := book.GetCellValue(sheet, cell)
 	if err != nil || got != want {
 		t.Fatalf("%s %s text=%q err=%v want=%q", sheet, cell, got, err, want)
+	}
+}
+
+func assertValidSheetName(t *testing.T, name string) {
+	t.Helper()
+	if strings.Trim(name, "' ") == "" {
+		t.Fatalf("blank sheet name %q", name)
+	}
+	if strings.HasPrefix(name, "'") || strings.HasSuffix(name, "'") {
+		t.Fatalf("sheet name %q starts or ends with an apostrophe", name)
+	}
+	if strings.ContainsAny(name, `:\/?*[]`) {
+		t.Fatalf("sheet name %q contains invalid characters", name)
+	}
+	if len(utf16.Encode([]rune(name))) > xlsxSheetLimit {
+		t.Fatalf("sheet name %q is longer than %d UTF-16 units", name, xlsxSheetLimit)
 	}
 }
 

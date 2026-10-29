@@ -220,7 +220,10 @@ func uniqueSheetName(name string, used map[string]struct{}) string {
 			return candidate
 		}
 		suffix := fmt.Sprintf(" (%d)", n)
-		candidate = truncateUTF16(base, xlsxSheetLimit-len(utf16.Encode([]rune(suffix)))) + suffix
+		room := xlsxSheetLimit - len(utf16.Encode([]rune(suffix)))
+		// Shortening the base to fit the suffix can expose an apostrophe again.
+		prefix := trimSheetEdges(truncateUTF16(base, room))
+		candidate = prefix + suffix
 	}
 }
 
@@ -234,12 +237,24 @@ func sheetTitle(name string) string {
 			builder.WriteRune(character)
 		}
 	}
-	cleaned := strings.Join(strings.Fields(builder.String()), " ")
-	cleaned = strings.Trim(cleaned, "'")
+	cleaned := trimSheetEdges(strings.Join(strings.Fields(builder.String()), " "))
 	if cleaned == "" {
-		cleaned = "Vehicle"
+		return "Vehicle"
 	}
-	return truncateUTF16(cleaned, xlsxSheetLimit)
+	if len(utf16.Encode([]rune(cleaned))) <= xlsxSheetLimit {
+		return cleaned
+	}
+	// The cut can land on an apostrophe or a space. Trim again so the name still
+	// does not start or end with "'", and is not blank.
+	cleaned = trimSheetEdges(truncateUTF16(cleaned, xlsxSheetLimit))
+	if cleaned == "" {
+		return "Vehicle"
+	}
+	return cleaned
+}
+
+func trimSheetEdges(name string) string {
+	return strings.Trim(name, "' ")
 }
 
 func truncateUTF16(value string, limit int) string {
