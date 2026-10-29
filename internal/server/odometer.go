@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/bitofbytes-io/carma/internal/middleware"
@@ -32,8 +31,8 @@ func (s *Server) addOdometerReading(response http.ResponseWriter, request *http.
 	if request.FormValue("return") == "vehicle" {
 		form.Return = "vehicle"
 	}
-	miles, err := strconv.ParseInt(form.Value, 10, 64)
-	if err != nil || miles < 0 {
+	miles, err := model.ParseOdometerMiles(form.Value)
+	if err != nil {
 		if form.Vehicle, err = s.store.GetVehicle(request.Context(), id); err != nil {
 			s.notFound(response, err)
 			return
