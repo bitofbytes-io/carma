@@ -3,10 +3,10 @@ module github.com/bitofbytes-io/carma
 go 1.26.10
 
 require (
-	github.com/coreos/go-oidc/v3 v3.18.0
-	github.com/go-chi/chi/v5 v5.3.0
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/prometheus/client_golang v1.25.0
 	golang.org/x/oauth2 v0.37.0
 )
