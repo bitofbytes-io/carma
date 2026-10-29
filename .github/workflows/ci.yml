@@ -127,7 +127,7 @@ jobs:
           [[ "$(getent ahostsv4 "${registry_host}" | awk '{print $1; exit}')" == "${registry_ip}" ]]
           printf 'host=%s\nip=%s\n' "${registry_host}" "${registry_ip}" >> "${GITHUB_OUTPUT}"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
         with:
           name: carma-builder
           driver-opts: network=host
@@ -146,7 +146,7 @@ jobs:
           pinned_ip="$(docker exec "${builder_container}" cat /etc/hosts | awk -v host="${REGISTRY_HOST}" '$2 == host {print $1; exit}')"
           [[ "${pinned_ip}" == "${REGISTRY_IP}" ]]
       - name: Log in to registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           registry: ${{ env.IMAGE_REG }}
           username: ${{ secrets.REGISTRY_USERNAME }}
