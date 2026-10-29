@@ -815,7 +815,7 @@ func TestHTMXRecordPartialAndFilterAttributes(t *testing.T) {
 			t.Fatalf("global records missing accessible name %q", name)
 		}
 	}
-	for _, want := range []string{`<h1>All records</h1>`, `hx-get="/records"`, `href="/records/export.csv?"`} {
+	for _, want := range []string{`<h1>All records</h1>`, `hx-get="/records"`, `href="/records/export.csv?"`, `href="/records/export.xlsx?"`} {
 		if !strings.Contains(global, want) {
 			t.Fatalf("global records missing %s", want)
 		}
@@ -826,7 +826,7 @@ func TestHTMXRecordPartialAndFilterAttributes(t *testing.T) {
 	w := httptest.NewRecorder()
 	f.router.ServeHTTP(w, req)
 	body = w.Body.String()
-	if strings.Contains(body, "<html") || !strings.Contains(body, `id="records-list"`) || !strings.Contains(body, types[1].Name) || strings.Count(body, `class="record-row" href=`) != 1 || strings.Contains(body, "ZgotmplZ") || !strings.Contains(body, "export.csv?q=Beta") {
+	if strings.Contains(body, "<html") || !strings.Contains(body, `id="records-list"`) || !strings.Contains(body, types[1].Name) || strings.Count(body, `class="record-row" href=`) != 1 || strings.Contains(body, "ZgotmplZ") || !strings.Contains(body, "export.csv?q=Beta") || !strings.Contains(body, "export.xlsx?q=Beta") {
 		t.Fatalf("bad partial: %s", body)
 	}
 }
@@ -1354,6 +1354,7 @@ func TestSecurityHeadersOnAuthenticatedResponses(t *testing.T) {
 		{"attachment", "GET", "/attachments/" + attachment.ID.String(), "", true, false, 200},
 		{"attachment requires auth", "GET", "/attachments/" + attachment.ID.String(), "", false, false, 303},
 		{"CSV download", "GET", "/records/export.csv", "", true, false, 200},
+		{"XLSX download", "GET", "/records/export.xlsx", "", true, false, 200},
 		{"HTMX partial", "GET", vehiclePath + "?q=oil", "", true, true, 200},
 		{"HTMX requires auth", "GET", vehiclePath, "", false, true, 200},
 		{"cross-origin rejection", "POST", "/logout", "https://other.example", true, false, 403},
