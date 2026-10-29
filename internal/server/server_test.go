@@ -995,13 +995,13 @@ func TestHealthIsPublic(t *testing.T) {
 }
 func TestCostParser(t *testing.T) {
 	for in, want := range map[string]int64{"$89.00": 8900, "0.5": 50, "12": 1200} {
-		got, e := parseCents(in)
+		got, e := model.ParseCents(in)
 		if e != nil || got != want {
 			t.Fatalf("%s: %d %v", in, got, e)
 		}
 	}
-	for _, bad := range []string{"-1", "1.234", "x", "999999999999999999"} {
-		if _, e := parseCents(bad); e == nil {
+	for _, bad := range []string{"-1", "-0.50", "1.234", "x", "999999999999999999"} {
+		if _, e := model.ParseCents(bad); e == nil {
 			t.Fatalf("accepted %s", bad)
 		}
 	}
