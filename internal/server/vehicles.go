@@ -284,8 +284,8 @@ func vehicleFromForm(request *http.Request) (model.Vehicle, string) {
 		vehicle.Year = &n
 	}
 	if raw := strings.TrimSpace(request.FormValue("current_odometer")); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || n < 0 {
+		n, err := model.ParseOdometerMiles(raw)
+		if err != nil {
 			return vehicle, "Current odometer must be a nonnegative whole number."
 		}
 		vehicle.CurrentOdometer = &n

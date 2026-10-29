@@ -2,10 +2,8 @@ package server
 
 import (
 	"errors"
-	"math"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -195,52 +193,20 @@ func recordFromForm(request *http.Request) (model.Record, string) {
 		return record, "Service type is required."
 	}
 	if raw := strings.TrimSpace(request.FormValue("odometer")); raw != "" {
-		n, err := strconv.ParseInt(strings.ReplaceAll(raw, ",", ""), 10, 64)
-		if err != nil || n < 0 {
+		n, err := model.ParseOdometerMiles(strings.ReplaceAll(raw, ",", ""))
+		if err != nil {
 			return record, "Odometer must be a non-negative whole number."
 		}
 		record.OdometerMiles = &n
 	}
 	if raw := strings.TrimSpace(request.FormValue("cost")); raw != "" {
-		n, err := parseCents(raw)
+		n, err := model.ParseCents(raw)
 		if err != nil {
 			return record, "Cost must be a non-negative amount with at most two decimals."
 		}
 		record.CostCents = &n
 	}
 	return record, ""
-}
-
-func parseCents(raw string) (int64, error) {
-	raw = strings.TrimSpace(strings.TrimPrefix(strings.ReplaceAll(raw, ",", ""), "$"))
-	parts := strings.Split(raw, ".")
-	if len(parts) > 2 || len(parts[0]) == 0 {
-		return 0, errors.New("bad cost")
-	}
-	if len(parts) == 2 && len(parts[1]) > 2 {
-		return 0, errors.New("bad cost")
-	}
-	whole, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || whole < 0 {
-		return 0, errors.New("bad cost")
-	}
-	frac := int64(0)
-	if len(parts) == 2 {
-		file := parts[1]
-		if len(file) == 1 {
-			file += "0"
-		}
-		if file != "" {
-			frac, err = strconv.ParseInt(file, 10, 64)
-			if err != nil {
-				return 0, err
-			}
-		}
-	}
-	if whole > (math.MaxInt64-frac)/100 {
-		return 0, errors.New("bad cost")
-	}
-	return whole*100 + frac, nil
 }
 
 func (s *Server) recordFormError(response http.ResponseWriter, request *http.Request, vehicle model.Vehicle, record model.Record, editing bool, msg string) {
