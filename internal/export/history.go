@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/google/uuid"
 )
 
 // HistorySummary totals a vehicle's service records for the printable history.
@@ -14,6 +15,12 @@ type HistorySummary struct {
 	// First and Last are the earliest and latest service dates; nil when there
 	// are no records.
 	First, Last *time.Time
+}
+
+// Query lists service history oldest first. The printable history and the XLSX
+// workbook both start from this query. A nil vehicle ID lists every vehicle.
+func Query(vehicleID *uuid.UUID) model.RecordQuery {
+	return model.RecordQuery{VehicleID: vehicleID, Sort: "date"}
 }
 
 // Summarize totals records for the printable vehicle history.

@@ -17,7 +17,7 @@ automatic migration job in the deploy hook.
 | Migrations | Numbered SQL files, embedded, applied by a `carma-migrate` binary at deploy time | noted |
 | Auth | Google OAuth/OIDC + email allowlist + hashed cookie sessions | dined |
 | File storage | Opaque-key filesystem store on NFS volume (`/data/assets`) | noted |
-| Export | `encoding/csv` (stdlib); XLSX later via `github.com/xuri/excelize/v2` | new |
+| Export | `encoding/csv` (stdlib) and XLSX via `github.com/xuri/excelize/v2` | new |
 | Email | stdlib SMTP over implicit TLS, password via `carma_smtp_password` | new |
 
 ### Why a monolith + HTMX and not an SPA
@@ -70,7 +70,7 @@ carma/
 │   ├── reminder/         # due-status computation
 │   ├── reminderemail/    # scheduler, runner, and message rendering
 │   ├── mailer/           # implicit-TLS SMTP client
-│   ├── export/           # CSV (later XLSX) writers
+│   ├── export/           # CSV and XLSX writers
 │   └── ui/               # html/template views, HTMX partials
 ├── migrations/           # 001_..., embedded via embed.go
 ├── static/               # styles.css, htmx.min.js, favicons

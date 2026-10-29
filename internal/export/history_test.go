@@ -6,7 +6,20 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
+	"github.com/google/uuid"
 )
+
+func TestQueryListsHistoryOldestFirst(t *testing.T) {
+	id := uuid.New()
+	query := Query(&id)
+	if query.VehicleID == nil || *query.VehicleID != id || query.Sort != "date" || query.Desc || query.Search != "" {
+		t.Fatalf("vehicle query=%+v", query)
+	}
+	all := Query(nil)
+	if all.VehicleID != nil || all.Sort != "date" || all.Desc {
+		t.Fatalf("all-vehicle query=%+v", all)
+	}
+}
 
 func TestSummarizeTotalsCostsReceiptsAndDates(t *testing.T) {
 	empty := Summarize(nil)

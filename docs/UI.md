@@ -84,6 +84,9 @@ flowchart TD
   B --> C[Click Export CSV]
   C --> D[Server re-runs the exact filtered query]
   D --> E[Streams carma-outback-2026-07-31.csv download]
+  B --> X[Click Export XLSX]
+  X --> Y[Server lists the history query with the same filters]
+  Y --> Z[Streams one sheet per vehicle as .xlsx]
 ```
 
 ## Screen wireframes
@@ -123,7 +126,7 @@ flowchart TD
 ├───────────────────────────────┬──────────────────────────────┤
 │ Records      [+ Add record]   │ Reminders                    │
 │ [search….] [Type ▾] [Dates ▾] │ ● Oil change     OVERDUE     │
-│              [Export CSV]     │   6 mo / 5,000 mi            │
+│ [Export CSV] [XLSX]           │   6 mo / 5,000 mi            │
 │ ┌───────────────────────────┐ │ ○ Tire rotation  ok          │
 │ │ Date▾   Type     Mi   Cost│ │   7,500 mi                   │
 │ │ 6/12/26 Oil chg 62410  $89│ │ ○ Cabin filter   ok          │

@@ -177,7 +177,7 @@ Prometheus scrapes it over the private overlay network. The listener exports:
 - **Reminders** - time- and/or mileage-based intervals per vehicle and service
   type, with common starter presets offered when adding a vehicle; overdue and
   due-soon surfaced on the dashboard, with overdue email delivery.
-- **Export** - filtered CSV (XLSX later) of any records view.
+- **Export** - filtered CSV and XLSX of any records view.
 
 ## How it will be built
 

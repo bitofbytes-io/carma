@@ -118,7 +118,8 @@ filters, inspections) doesn't get forgotten.
   search/filter, so "2019 Outback, oil changes only, 2023-2025" is one click.
 - Columns: vehicle, date, service type, odometer, cost, vendor, notes, receipt count,
   logged by.
-- **XLSX** export (via `excelize`) as a nice-to-have follow-up; CSV ships first.
+- **XLSX** export (via `excelize`) of the same filtered view: one sheet per vehicle,
+  with typed dates and costs and a totals row.
 - **Printable history** at `/vehicles/{id}/history` for handing a car to a buyer: the
   vehicle's year/make/model, VIN, and odometer, its record count and date range, total
   spent, receipts on file, and every record oldest first (date, service, mileage, cost,

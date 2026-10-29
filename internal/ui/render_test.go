@@ -340,7 +340,7 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(b.String(), `href="/vehicles/`+v.ID.String()+`/export.csv?"`) || !strings.Contains(b.String(), "Manage reminders") {
+	if !strings.Contains(b.String(), `href="/vehicles/`+v.ID.String()+`/export.csv?"`) || !strings.Contains(b.String(), `href="/vehicles/`+v.ID.String()+`/export.xlsx?"`) || !strings.Contains(b.String(), "Manage reminders") {
 		t.Fatal("vehicle page rendered incompletely")
 	}
 	for _, name := range []string{"Search records", "Filter by service type", "From date", "To date", "Sort records by", "Sort direction"} {

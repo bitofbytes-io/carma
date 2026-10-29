@@ -101,6 +101,7 @@ func TestSecurityHeadersOnAuthenticatedResponses(t *testing.T) {
 		{"attachment", "GET", "/attachments/" + attachment.ID.String(), "", true, false, 200},
 		{"attachment requires auth", "GET", "/attachments/" + attachment.ID.String(), "", false, false, 303},
 		{"CSV download", "GET", "/records/export.csv", "", true, false, 200},
+		{"XLSX download", "GET", "/records/export.xlsx", "", true, false, 200},
 		{"HTMX partial", "GET", vehiclePath + "?q=oil", "", true, true, 200},
 		{"HTMX requires auth", "GET", vehiclePath, "", false, true, 200},
 		{"cross-origin rejection", "POST", "/logout", "https://other.example", true, false, 403},
