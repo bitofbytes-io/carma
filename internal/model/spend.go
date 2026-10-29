@@ -91,7 +91,10 @@ type spendGroup struct {
 	lifetime *big.Int
 }
 
-// AggregateSpend totals priced service records through today.
+// AggregateSpend totals priced service records through today. It is the
+// database-free form of the vehicle-page rules. The page itself still asks
+// Postgres for one row per service type, so a load does not read the history
+// into this function.
 //
 // A nil cost is left out. Zero is a real cost and is counted. Year-to-date
 // is January 1 through today in today's calendar, compared as dates. Each
