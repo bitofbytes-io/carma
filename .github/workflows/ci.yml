@@ -8,12 +8,12 @@ on:
     - cron: '17 9 * * 1'
 jobs:
   test:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     permissions:
       contents: read
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: carma_test
           POSTGRES_PASSWORD: carma_test
@@ -28,10 +28,10 @@ jobs:
     env:
       CARMA_TEST_DATABASE_URL: postgres://carma_test:carma_test@127.0.0.1:5432/carma_test?sslmode=disable
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
       - name: Validate
@@ -53,7 +53,7 @@ jobs:
   build-and-trigger:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     concurrency:
       group: carma-crystal-deploy
@@ -72,7 +72,7 @@ jobs:
       PLATFORMS: linux/arm64/v8
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
