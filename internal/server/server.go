@@ -91,8 +91,10 @@ type pageData struct {
 	VINMessage string
 	VINError   bool
 	// History totals the printable history's records, dated Generated.
+	// HideCosts drops prices from the buyer print view when costs=hidden.
 	History   carmaexport.HistorySummary
 	Generated time.Time
+	HideCosts bool
 	// Spend is the vehicle page's cost summary for SpendYear and all time.
 	Spend     model.SpendSummary
 	SpendYear int
@@ -135,6 +137,7 @@ func (s *Server) Router() http.Handler {
 		router.Get("/vehicles/{vehicleID}/export.csv", s.vehicleCSV)
 		router.Get("/vehicles/{vehicleID}/export.xlsx", s.vehicleXLSX)
 		router.Get("/vehicles/{vehicleID}/history", s.vehicleHistory)
+		router.Get("/vehicles/{vehicleID}/history/print", s.vehicleHistoryPrint)
 		router.Get("/vehicles/{vehicleID}/reminders", s.remindersPage)
 		router.Post("/vehicles/{vehicleID}/reminders", s.upsertReminder)
 		router.Post("/vehicles/{vehicleID}/reminders/{reminderID}/delete", s.deleteReminder)

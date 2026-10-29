@@ -1,0 +1,60 @@
+{{define "content"}}
+<div class="history-toolbar history-print-toolbar no-print">
+  <a href="/vehicles/{{.Vehicle.ID}}">‹ Back to {{.Vehicle.Nickname}}</a>
+  <form class="history-costs" method="get" action="/vehicles/{{.Vehicle.ID}}/history/print">
+    <label class="cost-toggle"><input type="checkbox" name="costs" value="hidden" data-history-costs{{if .HideCosts}} checked{{end}}> Hide costs</label>
+    <noscript><button class="secondary" type="submit">Update</button></noscript>
+  </form>
+  <button class="primary" type="button" data-print-history>Print or save as PDF</button>
+</div>
+<article class="card history history-sheet">
+  <header class="history-head">
+    <div>
+      <p class="muted">Service history</p>
+      <h1>{{if .Vehicle.Year}}{{.Vehicle.Year}} {{end}}{{.Vehicle.Make}} {{.Vehicle.Model}}{{if not (or .Vehicle.Make .Vehicle.Model)}}{{.Vehicle.Nickname}}{{end}}</h1>
+    </div>
+    <p class="muted">Prepared {{date .Generated}} with Carma</p>
+  </header>
+  <dl class="history-facts">
+    <div><dt>VIN</dt><dd>{{if .Vehicle.VIN}}{{.Vehicle.VIN}}{{else}}—{{end}}</dd></div>
+    <div><dt>Odometer</dt><dd>{{num .Vehicle.LatestOdometer}}{{if .Vehicle.LatestOdometer}} mi{{end}}</dd></div>
+    <div><dt>Service records</dt><dd>{{.History.Records}}{{with .History.First}} · {{date .}}{{end}}{{with .History.Last}} – {{date .}}{{end}}</dd></div>
+    {{if not .HideCosts}}<div><dt>Total spent</dt><dd>{{money .History.TotalCents}}</dd></div>{{end}}
+    <div><dt>Receipts on file</dt><dd>{{.History.Receipts}}</dd></div>
+  </dl>
+  {{if .Records}}
+  <div class="history-table-wrap"><table class="history-table">
+    <thead><tr>
+      <th scope="col">Date</th>
+      <th scope="col">Service</th>
+      <th scope="col" class="number">Mileage</th>
+      {{if not .HideCosts}}<th scope="col" class="number">Cost</th>{{end}}
+      <th scope="col">Shop</th>
+      <th scope="col">Notes</th>
+      <th scope="col" class="number">Receipts</th>
+    </tr></thead>
+    <tbody>{{range .Records}}<tr>
+      <td data-label="Date">{{date .OccurredOn}}</td>
+      <td data-label="Service">{{.ServiceTypeName}}</td>
+      <td class="number" data-label="Mileage">{{num .OdometerMiles}}</td>
+      {{if not $.HideCosts}}<td class="number history-cost" data-label="Cost">{{money .CostCents}}</td>{{end}}
+      <td data-label="Shop">{{.Vendor}}</td>
+      <td class="history-notes" data-label="Notes">{{.Notes}}</td>
+      <td class="number" data-label="Receipts">{{if .AttachmentCount}}{{.AttachmentCount}}{{else}}—{{end}}</td>
+    </tr>{{end}}</tbody>
+  </table></div>
+  {{else}}<p>No service records yet.</p>{{end}}
+  <section class="history-recalls">
+    <h2>Open safety recalls</h2>
+    {{if .Recalls}}{{range .Recalls}}<article class="history-recall">
+      <h3>{{if .Component}}{{.Component}}{{else}}Recall{{end}}</h3>
+      <p class="muted">Campaign {{.CampaignNumber}}{{with .ReportReceivedOn}} · reported {{date .}}{{end}}</p>
+      {{if .ParkIt}}<p class="recall-warning">Do not drive this vehicle until the recall repair is done.</p>{{end}}
+      {{if .ParkOutside}}<p class="recall-warning">Park outside and away from buildings until the recall repair is done.</p>{{end}}
+      {{if .Summary}}<p>{{.Summary}}</p>{{end}}
+      {{if .Consequence}}<p><strong>Risk:</strong> {{.Consequence}}</p>{{end}}
+      {{if .Remedy}}<p><strong>Remedy:</strong> {{.Remedy}}</p>{{end}}
+    </article>{{end}}{{else}}<p>No open recalls on file.</p>{{end}}
+  </section>
+</article>
+{{end}}

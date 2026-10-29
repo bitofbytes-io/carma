@@ -3,6 +3,9 @@ document.addEventListener("change", function (event) {
   if (event.target.matches(".vehicle-switch") && event.target.value) {
     window.location.href = event.target.value;
   }
+  if (event.target.matches("[data-history-costs]") && event.target.form) {
+    event.target.form.submit();
+  }
 });
 
 document.addEventListener("click", function (event) {
