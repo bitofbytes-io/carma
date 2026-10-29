@@ -137,6 +137,12 @@ flowchart TD
 (📎 marks rows with receipts. On phones the reminders panel stacks above the
 table.)
 
+Print history opens `/vehicles/{id}/history/print`, the buyer sheet for that
+vehicle. It shows the VIN, year/make/model, service records oldest first (date,
+odometer, vendor, and cost), the cost total from the history summary, and open
+recalls. Hide costs reloads the page without prices. Printing hides the top
+navigation and the controls, and the sheet fits Letter and A4.
+
 ### 3. Add / edit record (`/vehicles/{id}/records/new`)
 
 ```

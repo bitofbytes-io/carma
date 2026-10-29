@@ -2,7 +2,7 @@
 <section class="vehicle-hero">
   {{if .Vehicle.PhotoKey}}<img src="/vehicles/{{.Vehicle.ID}}/photo" alt="">{{end}}
   <div><h1>{{.Vehicle.Nickname}}{{if .Vehicle.Year}} · {{.Vehicle.Year}}{{end}} {{.Vehicle.Make}} {{.Vehicle.Model}}</h1><p class="muted">{{num .Vehicle.LatestOdometer}} {{if .Vehicle.LatestOdometer}}mi{{end}}{{if .Vehicle.VIN}} · VIN {{.Vehicle.VIN}}{{end}}{{if .Vehicle.LicensePlate}} · {{.Vehicle.LicensePlate}}{{end}}</p>{{if not .Vehicle.ArchivedAt}}{{template "odometer-form" (odometerForm .Vehicle "vehicle")}}{{end}}</div>
-  <div class="hero-actions"><a class="secondary" href="/vehicles/{{.Vehicle.ID}}/edit">Edit</a><a class="secondary" href="/vehicles/{{.Vehicle.ID}}/history">Print history</a><a class="secondary accent" href="/vehicles/{{.Vehicle.ID}}/reminders">Reminders</a></div>
+  <div class="hero-actions"><a class="secondary" href="/vehicles/{{.Vehicle.ID}}/edit">Edit</a><a class="secondary" href="/vehicles/{{.Vehicle.ID}}/history/print">Print history</a><a class="secondary accent" href="/vehicles/{{.Vehicle.ID}}/reminders">Reminders</a></div>
 </section>
 {{if .Vehicle.ArchivedAt}}<div class="alert">This vehicle is archived. Its history remains available.</div>{{end}}
 {{if .Recalls}}<a class="alert recall-alert" href="#recalls">{{len .Recalls}} open safety recall{{if ne (len .Recalls) 1}}s{{end}} for this model year ›</a>{{end}}

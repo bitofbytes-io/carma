@@ -124,6 +124,10 @@ filters, inspections) doesn't get forgotten.
   spent, receipts on file, and every record oldest first (date, service, mileage, cost,
   shop, notes, receipt count). A print stylesheet drops the app chrome, and the
   browser's print dialog saves it as a PDF. It leaves out who logged each record.
+- **Buyer print view** at `/vehicles/{id}/history/print` reuses that history summary:
+  VIN, year/make/model, oldest-first records (odometer and vendor), the cost total,
+  and open recalls. Costs can be hidden. Print CSS hides navigation and fits Letter
+  and A4.
 
 ### Email reminders
 
