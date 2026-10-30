@@ -79,9 +79,9 @@ type pageData struct {
 	Types                                     []model.ServiceType
 	// Vendors are distinct shops already used in the household, most recent
 	// first, suggested on the record form.
-	Vendors                                   []string
-	Attachments                               []model.Attachment
-	Reminders, Attention                      []reminder.Result
+	Vendors              []string
+	Attachments          []model.Attachment
+	Reminders, Attention []reminder.Result
 	// SnoozeReminderID is the reminder whose snooze form failed, so that panel
 	// stays open beside Error.
 	SnoozeReminderID uuid.UUID

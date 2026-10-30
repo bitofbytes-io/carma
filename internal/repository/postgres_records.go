@@ -100,8 +100,9 @@ func (p *Postgres) ListVendors(ctx context.Context) ([]string, error) {
 		SELECT vendor FROM (
 			SELECT DISTINCT ON (vendor) vendor, occurred_on, created_at, id
 			FROM records
-			-- [[:space:]] includes tabs and other whitespace. btrim() strips spaces only.
-			WHERE vendor !~ '^[[:space:]]*$'
+			-- POSIX [[:space:]] misses NBSP (U+00A0). The other characters are the rest
+			-- of the Unicode whitespace strings.TrimSpace removes.
+			WHERE vendor !~ E'^[[:space:]\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$'
 			ORDER BY vendor, occurred_on DESC, created_at DESC, id DESC
 		) latest
 		ORDER BY occurred_on DESC, created_at DESC, id DESC`)

@@ -46,9 +46,9 @@ func TestListVendorsDistinctAndMostRecentFirst(t *testing.T) {
 	}
 	// Same shop logged twice collapses to its latest service date. A different
 	// spelling stays distinct. An older service logged later does not outrank
-	// a newer service date. Blank names, including a tab-only vendor, are not
-	// suggestions. The tab is the newest service date so it would lead the
-	// list if the filter treated it as a name.
+	// a newer service date. Blank names, including a tab-only vendor and an
+	// NBSP-only vendor, are not suggestions. Those two are the newest service
+	// dates so they would lead the list if the filter treated them as names.
 	rows := []model.Record{
 		record(car, oil, date(2026, 1, 10), now, "Jiffy Lube"),
 		record(car, oil, date(2026, 7, 1), now.Add(time.Hour), "Jiffy Lube"),
@@ -58,6 +58,7 @@ func TestListVendorsDistinctAndMostRecentFirst(t *testing.T) {
 		record(car, oil, date(2026, 8, 1), now, ""),
 		record(car, oil, date(2026, 8, 2), now, "   "),
 		record(car, oil, date(2026, 9, 1), now, "\t"),
+		record(car, oil, date(2026, 9, 2), now, "\u00a0"),
 		record(truck, tires, date(2026, 5, 1), now, "Tire Barn"),
 	}
 	for _, row := range rows {
