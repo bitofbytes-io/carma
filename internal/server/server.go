@@ -76,11 +76,14 @@ type pageData struct {
 	Record                                    model.Record
 	Records                                   []model.Record
 	Types                                     []model.ServiceType
-	Attachments                               []model.Attachment
-	Reminders, Attention                      []reminder.Result
-	Params                                    url.Values
-	OdometerForm                              ui.OdometerForm
-	ReminderPresets                           []ui.ReminderPreset
+	// Vendors are distinct shops already used in the household, most recent
+	// first, suggested on the record form.
+	Vendors              []string
+	Attachments          []model.Attachment
+	Reminders, Attention []reminder.Result
+	Params               url.Values
+	OdometerForm         ui.OdometerForm
+	ReminderPresets      []ui.ReminderPreset
 	// Recalls are the vehicle page's NHTSA campaigns, open and dismissed;
 	// RecallAlerts are the dashboard's vehicles with open ones.
 	Recalls, DismissedRecalls []model.Recall

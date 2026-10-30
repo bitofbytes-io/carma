@@ -90,6 +90,34 @@ func (p *Postgres) ListRecords(ctx context.Context, query model.RecordQuery) ([]
 	return records, rows.Err()
 }
 
+// ListVendors returns distinct non-blank shop names from household records,
+// most recently used first. Recency is the latest service date for that exact
+// name, then when that record was logged. The database is one household, so
+// names from every vehicle are included.
+func (p *Postgres) ListVendors(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `
+		SELECT vendor FROM (
+			SELECT DISTINCT ON (vendor) vendor, occurred_on, created_at, id
+			FROM records
+			WHERE btrim(vendor) <> ''
+			ORDER BY vendor, occurred_on DESC, created_at DESC, id DESC
+		) latest
+		ORDER BY occurred_on DESC, created_at DESC, id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var vendors []string
+	for rows.Next() {
+		var vendor string
+		if err := rows.Scan(&vendor); err != nil {
+			return nil, err
+		}
+		vendors = append(vendors, vendor)
+	}
+	return vendors, rows.Err()
+}
+
 func escapeLikePattern(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
 }

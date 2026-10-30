@@ -142,6 +142,53 @@ func TestConfirmedDestructivePostsRedirectHTMXRequests(t *testing.T) {
 	}
 }
 
+func TestRecordFormSuggestsPreviousVendors(t *testing.T) {
+	f := setup(t)
+	outback := createVehicle(t, f)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tacoma := model.Vehicle{ID: uuid.New(), Nickname: "Tacoma", CreatedAt: now, UpdatedAt: now}
+	if _, err := f.store.CreateVehicle(t.Context(), tacoma, nil); err != nil {
+		t.Fatal(err)
+	}
+	types, err := f.store.ListServiceTypes(t.Context())
+	if err != nil || len(types) < 2 {
+		t.Fatalf("service types=%v err=%v", types, err)
+	}
+	oil, repair := types[0], types[1]
+	quoted := `O'Reilly & "Sons"`
+	latestJiffy := uuid.New()
+	for _, row := range []model.Record{
+		{ID: latestJiffy, VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC), Vendor: "Jiffy Lube", CreatedAt: now.Add(4 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Vendor: "Jiffy Lube", CreatedAt: now.Add(time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC), Vendor: "jiffy lube downtown", CreatedAt: now.Add(2 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: repair.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC), Vendor: "Tire Barn", CreatedAt: now.Add(3 * time.Hour)},
+		{ID: uuid.New(), VehicleID: tacoma.ID, ServiceTypeID: repair.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Vendor: "Quick Lane", CreatedAt: now.Add(3 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), Vendor: "   ", CreatedAt: now.Add(5 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Vendor: quoted, CreatedAt: now},
+	} {
+		if _, err := f.store.CreateRecord(t.Context(), row, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body := f.do(t, http.MethodGet, "/vehicles/"+outback.ID.String()+"/records/new", nil, "").Body.String()
+	list := `<datalist id="vendor-list">` +
+		`<option value="Jiffy Lube"></option>` +
+		`<option value="Tire Barn"></option>` +
+		`<option value="Quick Lane"></option>` +
+		`<option value="jiffy lube downtown"></option>` +
+		`<option value="O&#39;Reilly &amp; &#34;Sons&#34;"></option>` +
+		`</datalist>`
+	if !strings.Contains(body, `<input name="vendor" list="vendor-list" autocomplete="off" value="">`) || !strings.Contains(body, list) {
+		t.Fatalf("new record form missing vendor suggestions: %s", body)
+	}
+
+	edit := f.do(t, http.MethodGet, "/records/"+latestJiffy.String()+"/edit", nil, "").Body.String()
+	if !strings.Contains(edit, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(edit, list) {
+		t.Fatalf("edit form missing vendor suggestions: %s", edit)
+	}
+}
+
 func TestCostParser(t *testing.T) {
 	for in, want := range map[string]int64{"$89.00": 8900, "0.5": 50, "12": 1200} {
 		got, e := model.ParseCents(in)

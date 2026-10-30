@@ -46,6 +46,9 @@ type Store interface {
 	CreateServiceType(context.Context, model.ServiceType) (model.ServiceType, error)
 
 	ListRecords(context.Context, model.RecordQuery) ([]model.Record, error)
+	// ListVendors returns distinct non-blank shop names from household records,
+	// most recently used first. Names that differ only by case stay separate.
+	ListVendors(context.Context) ([]string, error)
 	GetRecord(context.Context, uuid.UUID) (model.Record, []model.Attachment, error)
 	GetAttachment(context.Context, uuid.UUID) (model.Record, model.Attachment, error)
 	CreateRecord(context.Context, model.Record, []model.Attachment) (model.Record, error)
