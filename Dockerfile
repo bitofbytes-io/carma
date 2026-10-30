@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma ./cmd/carma \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma-migrate ./cmd/carma-migrate \
  && CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/carma-reminders ./cmd/carma-reminders
 
-FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 WORKDIR /app
 RUN apk add --no-cache ca-certificates wget \
  && addgroup -g 10001 -S carma \
