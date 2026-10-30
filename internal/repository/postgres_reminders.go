@@ -22,9 +22,18 @@ const upsertReminderSQL = `INSERT INTO reminders(id,vehicle_id,service_type_id,i
 			updated_at=excluded.updated_at
 		RETURNING id,created_at,starting_odometer_miles,starting_odometer_pending`
 
+const setReminderSnoozeSQL = `UPDATE reminders SET snoozed_until_on=$3,snoozed_until_miles=$4,updated_at=$5
+		WHERE id=$1 AND vehicle_id=$2`
+
+// clearReminderSnoozeSQL ends a deferral when a matching service is logged.
+const clearReminderSnoozeSQL = `UPDATE reminders SET snoozed_until_on=NULL,snoozed_until_miles=NULL,updated_at=$3
+		WHERE vehicle_id=$1 AND service_type_id=$2
+		AND (snoozed_until_on IS NOT NULL OR snoozed_until_miles IS NOT NULL)`
+
 func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disabled bool) ([]model.Reminder, error) {
 	rows, err := p.pool.Query(ctx, `SELECT rm.id,rm.vehicle_id,rm.service_type_id,v.nickname,st.name,rm.interval_months,rm.interval_miles,
-			rm.starting_odometer_miles,rm.starting_odometer_pending,rm.enabled,rm.created_at,rm.updated_at,b.id,
+			rm.starting_odometer_miles,rm.starting_odometer_pending,rm.enabled,rm.snoozed_until_on,rm.snoozed_until_miles,
+			rm.created_at,rm.updated_at,b.id,
 			b.occurred_on,b.odometer_miles,b.created_at,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records x WHERE x.vehicle_id=rm.vehicle_id))
 		FROM reminders rm
 		JOIN vehicles v ON v.id=rm.vehicle_id
@@ -55,7 +64,8 @@ func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disa
 			&reminder.ID, &reminder.VehicleID, &reminder.ServiceTypeID,
 			&reminder.VehicleName, &reminder.ServiceTypeName, &reminder.IntervalMonths,
 			&reminder.IntervalMiles, &reminder.StartingOdometer, &reminder.StartingOdometerPending,
-			&reminder.Enabled, &reminder.CreatedAt, &reminder.UpdatedAt,
+			&reminder.Enabled, &reminder.SnoozedUntilOn, &reminder.SnoozedUntilMiles,
+			&reminder.CreatedAt, &reminder.UpdatedAt,
 			&baselineID, &baselineDate, &baselineOdometer,
 			&baselineCreatedAt, &reminder.LatestOdometer,
 		); err != nil {
@@ -84,6 +94,17 @@ func (p *Postgres) UpsertReminder(ctx context.Context, reminder model.Reminder) 
 		reminder.Enabled, reminder.CreatedAt, reminder.UpdatedAt,
 	).Scan(&reminder.ID, &reminder.CreatedAt, &reminder.StartingOdometer, &reminder.StartingOdometerPending)
 	return reminder, err
+}
+
+func (p *Postgres) SetReminderSnooze(ctx context.Context, vehicleID, id uuid.UUID, untilOn *time.Time, untilMiles *int64, updatedAt time.Time) error {
+	tag, err := p.pool.Exec(ctx, setReminderSnoozeSQL, id, vehicleID, untilOn, untilMiles, updatedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *Postgres) DeleteReminder(ctx context.Context, id uuid.UUID) error {

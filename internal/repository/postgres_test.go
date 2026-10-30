@@ -28,7 +28,7 @@ func TestPostgresReminderUpsertPreservesBaselineStateQuery(t *testing.T) {
 	if len(parts) != 2 {
 		t.Fatalf("missing conflict clause: %s", query)
 	}
-	for _, forbidden := range []string{"starting_odometer_miles=excluded", "starting_odometer_pending=excluded", "created_at=excluded"} {
+	for _, forbidden := range []string{"starting_odometer_miles=excluded", "starting_odometer_pending=excluded", "created_at=excluded", "snoozed_until_on=excluded", "snoozed_until_miles=excluded"} {
 		if strings.Contains(parts[1], forbidden) {
 			t.Fatalf("upsert conflict overwrites baseline state with %q: %s", forbidden, query)
 		}

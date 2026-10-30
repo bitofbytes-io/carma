@@ -168,6 +168,10 @@ func (p *Postgres) CreateRecord(ctx context.Context, record model.Record, attach
 			return record, err
 		}
 	}
+	// Logging this service ends a deferral of the matching reminder.
+	if _, err = tx.Exec(ctx, clearReminderSnoozeSQL, record.VehicleID, record.ServiceTypeID, record.UpdatedAt); err != nil {
+		return record, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return record, err
 	}

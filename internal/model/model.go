@@ -58,9 +58,13 @@ type Reminder struct {
 	StartingOdometer             *int64
 	StartingOdometerPending      bool
 	Enabled                      bool
-	CreatedAt, UpdatedAt         time.Time
-	Baseline                     *Record
-	LatestOdometer               *int64
+	// SnoozedUntilOn and SnoozedUntilMiles defer the reminder until every set
+	// threshold has passed. Logging a matching service record clears both.
+	SnoozedUntilOn       *time.Time
+	SnoozedUntilMiles    *int64
+	CreatedAt, UpdatedAt time.Time
+	Baseline             *Record
+	LatestOdometer       *int64
 	// MilesPerDay is the vehicle's estimated driving rate, used to project when
 	// a mileage interval comes due. Nil when there is too little history.
 	MilesPerDay *float64

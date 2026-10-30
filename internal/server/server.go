@@ -18,6 +18,7 @@ import (
 	"github.com/bitofbytes-io/carma/internal/ui"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 )
 
 type Server struct {
@@ -78,9 +79,12 @@ type pageData struct {
 	Types                                     []model.ServiceType
 	Attachments                               []model.Attachment
 	Reminders, Attention                      []reminder.Result
-	Params                                    url.Values
-	OdometerForm                              ui.OdometerForm
-	ReminderPresets                           []ui.ReminderPreset
+	// SnoozeReminderID is the reminder whose snooze form failed, so that panel
+	// stays open beside Error.
+	SnoozeReminderID uuid.UUID
+	Params           url.Values
+	OdometerForm     ui.OdometerForm
+	ReminderPresets  []ui.ReminderPreset
 	// Recalls are the vehicle page's NHTSA campaigns, open and dismissed;
 	// RecallAlerts are the dashboard's vehicles with open ones.
 	Recalls, DismissedRecalls []model.Recall
@@ -140,6 +144,7 @@ func (s *Server) Router() http.Handler {
 		router.Get("/vehicles/{vehicleID}/history/print", s.vehicleHistoryPrint)
 		router.Get("/vehicles/{vehicleID}/reminders", s.remindersPage)
 		router.Post("/vehicles/{vehicleID}/reminders", s.upsertReminder)
+		router.Post("/vehicles/{vehicleID}/reminders/{reminderID}/snooze", s.snoozeReminder)
 		router.Post("/vehicles/{vehicleID}/reminders/{reminderID}/delete", s.deleteReminder)
 		router.Post("/vehicles/{vehicleID}/recalls/{campaign}/dismiss", s.dismissRecall)
 		router.Post("/vehicles/{vehicleID}/recalls/{campaign}/restore", s.restoreRecall)

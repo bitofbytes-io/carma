@@ -256,6 +256,39 @@ func TestRecallNotificationsMigrationIsAdditiveWithBackfill(t *testing.T) {
 	}
 }
 
+func TestReminderSnoozeMigrationColumns(t *testing.T) {
+	up, err := fs.ReadFile(FS, "010_reminder_snooze.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"alter table reminders",
+		"add column snoozed_until_on date",
+		"add column snoozed_until_miles bigint",
+		"reminders_snoozed_until_miles_nonnegative",
+		"snoozed_until_miles is null or snoozed_until_miles >= 0",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("reminder snooze migration missing %q", declaration)
+		}
+	}
+	down, err := fs.ReadFile(FS, "010_reminder_snooze.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '010_reminder_snooze'",
+		"drop column if exists snoozed_until_miles",
+		"drop column if exists snoozed_until_on",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("reminder snooze down migration missing %q", declaration)
+		}
+	}
+}
+
 func TestRecallDismissalsMigrationIsAdditiveWithBackfill(t *testing.T) {
 	up, err := fs.ReadFile(FS, "009_recall_dismissals.up.sql")
 	if err != nil {
