@@ -76,12 +76,56 @@ func (s *Server) newRecord(response http.ResponseWriter, request *http.Request) 
 		s.notFound(response, err)
 		return
 	}
-	data, err := s.recordFormData(request, vehicle, model.Record{OccurredOn: s.today()}, false)
+	record, logAgainFrom, err := s.draftRecord(request, vehicle)
+	if err != nil {
+		s.notFound(response, err)
+		return
+	}
+	data, err := s.recordFormData(request, vehicle, record, false)
 	if err != nil {
 		s.fail(response, err)
 		return
 	}
-	s.render(response, 200, "record-form", data)
+	data.LogAgainFrom = logAgainFrom
+	s.render(response, http.StatusOK, "record-form", data)
+}
+
+// draftRecord is the unsaved new-record form. Without from, only the date is
+// filled. With from, service type, vendor, cost, and notes are copied from
+// that vehicle's record; the date stays today and the odometer is the
+// vehicle's current reading. Receipts are not copied, and the source row is
+// only read.
+func (s *Server) draftRecord(request *http.Request, vehicle model.Vehicle) (model.Record, string, error) {
+	draft := model.Record{OccurredOn: s.today()}
+	raw := strings.TrimSpace(request.URL.Query().Get("from"))
+	if raw == "" {
+		return draft, "", nil
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return model.Record{}, "", repository.ErrNotFound
+	}
+	source, _, err := s.store.GetRecord(request.Context(), id)
+	if err != nil {
+		return model.Record{}, "", err
+	}
+	if source.VehicleID != vehicle.ID {
+		return model.Record{}, "", repository.ErrNotFound
+	}
+	draft.ServiceTypeID = source.ServiceTypeID
+	draft.Vendor = source.Vendor
+	draft.Notes = source.Notes
+	draft.CostCents = copyInt64(source.CostCents)
+	draft.OdometerMiles = copyInt64(vehicle.CurrentOdometer)
+	return draft, id.String(), nil
+}
+
+func copyInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
 }
 
 func (s *Server) editRecord(response http.ResponseWriter, request *http.Request) {

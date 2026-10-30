@@ -9,5 +9,5 @@
   {{if not .Editing}}<label class="full upload">Receipts <input type="file" name="receipts" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/heic" capture="environment"><small>PDF, JPEG, PNG, WebP, or HEIC · 25 MiB each. On a phone you can use the camera.</small></label>{{end}}
   <div class="actions full"><a class="secondary" href="{{if .Editing}}/records/{{.Record.ID}}{{else}}/vehicles/{{.Vehicle.ID}}{{end}}">Cancel</a><button class="primary">Save record</button></div>
 </form><hr>
-<form method="post" action="/service-types" class="inline-form"><input type="hidden" name="return_to" value="{{if .Editing}}/records/{{.Record.ID}}/edit{{else}}/vehicles/{{.Vehicle.ID}}/records/new{{end}}"><label>Need another type? <input name="name" required placeholder="Custom service type"></label><button class="secondary">Add type</button></form>
+<form method="post" action="/service-types" class="inline-form"><input type="hidden" name="return_to" value="{{if .Editing}}/records/{{.Record.ID}}/edit{{else}}/vehicles/{{.Vehicle.ID}}/records/new{{if .LogAgainFrom}}?from={{.LogAgainFrom}}{{end}}{{end}}"><label>Need another type? <input name="name" required placeholder="Custom service type"></label><button class="secondary">Add type</button></form>
 </section>{{end}}
