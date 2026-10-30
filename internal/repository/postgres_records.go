@@ -99,7 +99,8 @@ func (p *Postgres) ListVendors(ctx context.Context) ([]string, error) {
 		SELECT vendor FROM (
 			SELECT DISTINCT ON (vendor) vendor, occurred_on, created_at, id
 			FROM records
-			WHERE btrim(vendor) <> ''
+			-- [[:space:]] includes tabs and other whitespace. btrim() strips spaces only.
+			WHERE vendor !~ '^[[:space:]]*$'
 			ORDER BY vendor, occurred_on DESC, created_at DESC, id DESC
 		) latest
 		ORDER BY occurred_on DESC, created_at DESC, id DESC`)
