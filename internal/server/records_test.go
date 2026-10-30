@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -187,6 +188,348 @@ func TestRecordFormSuggestsPreviousVendors(t *testing.T) {
 	if !strings.Contains(edit, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(edit, list) {
 		t.Fatalf("edit form missing vendor suggestions: %s", edit)
 	}
+
+	logAgainPath := "/vehicles/" + outback.ID.String() + "/records/new?from=" + latestJiffy.String()
+	logAgain := f.do(t, http.MethodGet, logAgainPath, nil, "").Body.String()
+	if !strings.Contains(logAgain, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(logAgain, list) {
+		t.Fatalf("log again form missing vendor suggestions: %s", logAgain)
+	}
+
+	invalid, contentType := formBody(t, map[string]string{
+		"occurred_on":     "",
+		"service_type_id": oil.ID.String(),
+		"vendor":          "Jiffy Lube",
+	}, "", nil)
+	failed := f.do(t, http.MethodPost, "/vehicles/"+outback.ID.String()+"/records?from="+latestJiffy.String(), invalid, contentType)
+	reRendered := failed.Body.String()
+	if failed.Code != http.StatusBadRequest || !strings.Contains(reRendered, "Date is required.") || !strings.Contains(reRendered, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(reRendered, list) || !strings.Contains(reRendered, `action="/vehicles/`+outback.ID.String()+`/records?from=`+latestJiffy.String()+`"`) {
+		t.Fatalf("log again validation error missing vendor suggestions: %d %s", failed.Code, reRendered)
+	}
+
+	blankInvalid, blankType := formBody(t, map[string]string{
+		"occurred_on":     "",
+		"service_type_id": oil.ID.String(),
+	}, "", nil)
+	blankFailed := f.do(t, http.MethodPost, "/vehicles/"+outback.ID.String()+"/records", blankInvalid, blankType)
+	blankPage := blankFailed.Body.String()
+	if blankFailed.Code != http.StatusBadRequest || !strings.Contains(blankPage, `<input name="vendor" list="vendor-list" autocomplete="off" value="">`) || !strings.Contains(blankPage, list) || strings.Contains(blankPage, "?from=") {
+		t.Fatalf("new record validation error missing vendor suggestions: %d %s", blankFailed.Code, blankPage)
+	}
+
+	editValues := url.Values{"occurred_on": {""}, "service_type_id": {oil.ID.String()}, "vendor": {"Jiffy Lube"}}
+	editFailed := f.do(t, http.MethodPost, "/records/"+latestJiffy.String(), strings.NewReader(editValues.Encode()), "application/x-www-form-urlencoded")
+	editPage := editFailed.Body.String()
+	if editFailed.Code != http.StatusBadRequest || !strings.Contains(editPage, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(editPage, list) || strings.Contains(editPage, "?from=") {
+		t.Fatalf("edit validation error missing vendor suggestions: %d %s", editFailed.Code, editPage)
+	}
+}
+
+func TestLogAgainPrefillsNewRecordAndLeavesSourceUnchanged(t *testing.T) {
+	f := setup(t)
+	vehicle := createVehicleWithOdometer(t, f, "Outback", "70100")
+	other := createVehicleWithOdometer(t, f, "Tacoma", "12000")
+	oil := serviceTypeNamed(t, f, "Oil change")
+	notes := "0W-20 full synthetic, filter #7317"
+	body, contentType := formBody(t, map[string]string{
+		"occurred_on":     "2026-06-12",
+		"service_type_id": oil.ID.String(),
+		"odometer":        "62410",
+		"cost":            "89.00",
+		"vendor":          "Jiffy Lube",
+		"notes":           notes,
+	}, "receipt.pdf", []byte("%PDF-1.7\nreceipt"))
+	created := f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String()+"/records", body, contentType)
+	if created.Code != http.StatusSeeOther {
+		t.Fatalf("create record: %d %s", created.Code, created.Body.String())
+	}
+	source := onlyRecord(t, f, vehicle.ID)
+	before, beforeFiles, err := f.store.GetRecord(t.Context(), source.ID)
+	if err != nil || len(beforeFiles) != 1 || beforeFiles[0].OriginalFilename != "receipt.pdf" {
+		t.Fatalf("source=%+v files=%+v err=%v", before, beforeFiles, err)
+	}
+	if current, err := f.store.GetVehicle(t.Context(), vehicle.ID); err != nil || current.CurrentOdometer == nil || *current.CurrentOdometer != 70100 {
+		t.Fatalf("vehicle current odometer=%v err=%v", current.CurrentOdometer, err)
+	}
+
+	detail := f.do(t, http.MethodGet, "/records/"+source.ID.String(), nil, "")
+	logAgain := "/vehicles/" + vehicle.ID.String() + "/records/new?from=" + source.ID.String()
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `<a class="secondary" href="`+logAgain+`">Log again</a>`) {
+		t.Fatalf("record page missing Log again: %d %s", detail.Code, detail.Body.String())
+	}
+
+	form := f.do(t, http.MethodGet, logAgain, nil, "")
+	if form.Code != http.StatusOK {
+		t.Fatalf("log again: %d %s", form.Code, form.Body.String())
+	}
+	page := form.Body.String()
+	for _, want := range []string{
+		`<h1>Add record · Outback</h1>`,
+		`enctype="multipart/form-data"`,
+		`action="/vehicles/` + vehicle.ID.String() + `/records?from=` + source.ID.String() + `"`,
+		`name="occurred_on" required value="2026-07-31"`,
+		`<option value="` + oil.ID.String() + `" selected>Oil change</option>`,
+		`name="odometer" value="70100"`,
+		`name="cost" placeholder="89.00" value="$89.00"`,
+		`<textarea name="notes">` + notes + `</textarea>`,
+		`name="return_to" value="` + logAgain + `"`,
+		`>Save record</button>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("prefilled form missing %s\n%s", want, page)
+		}
+	}
+	if !vendorInputValue(page, "Jiffy Lube") {
+		t.Fatalf("vendor was not prefilled:\n%s", page)
+	}
+	for _, absent := range []string{"2026-06-12", "62410", "receipt.pdf", `action="/records/` + source.ID.String() + `"`} {
+		if strings.Contains(page, absent) {
+			t.Fatalf("prefilled form copied %s\n%s", absent, page)
+		}
+	}
+
+	blank := f.do(t, http.MethodGet, "/vehicles/"+vehicle.ID.String()+"/records/new", nil, "").Body.String()
+	if !strings.Contains(blank, `name="odometer" value=""`) || vendorInputValue(blank, "Jiffy Lube") || strings.Contains(blank, "70100") || !strings.Contains(blank, `value="/vehicles/`+vehicle.ID.String()+`/records/new"`) {
+		t.Fatalf("blank form was prefilled:\n%s", blank)
+	}
+
+	rows, err := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &vehicle.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("log again saved a record: %+v err=%v", rows, err)
+	}
+	after, afterFiles, err := f.store.GetRecord(t.Context(), source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameRecord(t, before, after, beforeFiles, afterFiles)
+
+	for _, path := range []string{
+		"/vehicles/" + vehicle.ID.String() + "/records/new?from=" + uuid.NewString(),
+		"/vehicles/" + vehicle.ID.String() + "/records/new?from=custom",
+		"/vehicles/" + other.ID.String() + "/records/new?from=" + source.ID.String(),
+	} {
+		if response := f.do(t, http.MethodGet, path, nil, ""); response.Code != http.StatusNotFound {
+			t.Fatalf("%s: %d %s", path, response.Code, response.Body.String())
+		}
+	}
+	rows, err = f.store.ListRecords(t.Context(), model.RecordQuery{})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rejected log again changed records: %+v err=%v", rows, err)
+	}
+	after, afterFiles, err = f.store.GetRecord(t.Context(), source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameRecord(t, before, after, beforeFiles, afterFiles)
+
+	again, contentType := formBody(t, map[string]string{
+		"occurred_on":     "2026-07-31",
+		"service_type_id": oil.ID.String(),
+		"odometer":        "70100",
+		"cost":            "$89.00",
+		"vendor":          "Jiffy Lube",
+		"notes":           notes,
+	}, "", nil)
+	saved := f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String()+"/records", again, contentType)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("submit: %d %s", saved.Code, saved.Body.String())
+	}
+	newID, err := uuid.Parse(strings.TrimPrefix(saved.Header().Get("Location"), "/records/"))
+	if err != nil || newID == source.ID {
+		t.Fatalf("location=%q err=%v", saved.Header().Get("Location"), err)
+	}
+	repeat, repeatFiles, err := f.store.GetRecord(t.Context(), newID)
+	if err != nil || repeat.ServiceTypeID != oil.ID || repeat.Vendor != "Jiffy Lube" || repeat.Notes != notes || repeat.OccurredOn.Format("2006-01-02") != "2026-07-31" || repeat.OdometerMiles == nil || *repeat.OdometerMiles != 70100 || repeat.CostCents == nil || *repeat.CostCents != 8900 || len(repeatFiles) != 0 || repeat.AttachmentCount != 0 {
+		t.Fatalf("saved repeat=%+v files=%+v err=%v", repeat, repeatFiles, err)
+	}
+	after, afterFiles, err = f.store.GetRecord(t.Context(), source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameRecord(t, before, after, beforeFiles, afterFiles)
+}
+
+func TestLogAgainPrefillsLatestKnownMileage(t *testing.T) {
+	f := setup(t)
+	oil := serviceTypeNamed(t, f, "Oil change")
+	unset := createVehicle(t, f)
+	lower := createVehicleWithOdometer(t, f, "Lower", "50000")
+	miles := int64(62410)
+	higher := int64(80000)
+	now := time.Now()
+	fromRecord := func(vehicleID uuid.UUID, odometer *int64) model.Record {
+		t.Helper()
+		record := model.Record{ID: uuid.New(), VehicleID: vehicleID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: odometer, Vendor: "Jiffy Lube", CreatedAt: now, UpdatedAt: now}
+		if _, err := f.store.CreateRecord(t.Context(), record, nil); err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	recorded := fromRecord(unset.ID, &miles)
+	raised := fromRecord(lower.ID, &higher)
+	for _, tc := range []struct {
+		name, vehicleID, recordID, want string
+	}{
+		{name: "stored mileage unset", vehicleID: unset.ID.String(), recordID: recorded.ID.String(), want: "62410"},
+		{name: "record above stored mileage", vehicleID: lower.ID.String(), recordID: raised.ID.String(), want: "80000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form := f.do(t, http.MethodGet, "/vehicles/"+tc.vehicleID+"/records/new?from="+tc.recordID, nil, "")
+			if form.Code != http.StatusOK || !strings.Contains(form.Body.String(), `name="odometer" value="`+tc.want+`"`) {
+				t.Fatalf("odometer prefill: %d %s", form.Code, form.Body.String())
+			}
+		})
+	}
+	none := createVehicleWithOdometer(t, f, "Unknown", "")
+	source := model.Record{ID: uuid.New(), VehicleID: none.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), Vendor: "Shop", CreatedAt: now, UpdatedAt: now}
+	if _, err := f.store.CreateRecord(t.Context(), source, nil); err != nil {
+		t.Fatal(err)
+	}
+	form := f.do(t, http.MethodGet, "/vehicles/"+none.ID.String()+"/records/new?from="+source.ID.String(), nil, "")
+	if form.Code != http.StatusOK || !strings.Contains(form.Body.String(), `name="odometer" value=""`) {
+		t.Fatalf("unknown mileage was filled: %d %s", form.Code, form.Body.String())
+	}
+}
+
+func TestLogAgainPrefillsOdometerFromLaterRecordAboveColumn(t *testing.T) {
+	f := setup(t)
+	vehicle := createVehicleWithOdometer(t, f, "Outback", "60000")
+	oil := serviceTypeNamed(t, f, "Oil change")
+	tires := serviceTypeNamed(t, f, "Tire rotation")
+	now := time.Now()
+	sourceMiles := int64(62410)
+	laterMiles := int64(71000)
+	source := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: &sourceMiles, Vendor: "Jiffy Lube", CreatedAt: now, UpdatedAt: now}
+	later := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: tires.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC), OdometerMiles: &laterMiles, Vendor: "Discount Tire", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	if _, err := f.store.CreateRecord(t.Context(), source, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.CreateRecord(t.Context(), later, nil); err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.store.GetVehicle(t.Context(), vehicle.ID)
+	if err != nil || current.CurrentOdometer == nil || *current.CurrentOdometer != 60000 || current.LatestOdometer == nil || *current.LatestOdometer != laterMiles {
+		t.Fatalf("vehicle current=%v latest=%v err=%v", current.CurrentOdometer, current.LatestOdometer, err)
+	}
+	form := f.do(t, http.MethodGet, "/vehicles/"+vehicle.ID.String()+"/records/new?from="+source.ID.String(), nil, "")
+	page := form.Body.String()
+	if form.Code != http.StatusOK || !strings.Contains(page, `name="odometer" value="71000"`) || strings.Contains(page, `value="60000"`) || strings.Contains(page, `value="62410"`) || !vendorInputValue(page, "Jiffy Lube") || vendorInputValue(page, "Discount Tire") || !strings.Contains(page, `<option value="`+oil.ID.String()+`" selected>Oil change</option>`) {
+		t.Fatalf("prefill used the wrong mileage: %d %s", form.Code, page)
+	}
+}
+
+func TestLogAgainValidationErrorKeepsReturnToSource(t *testing.T) {
+	f := setup(t)
+	vehicle := createVehicleWithOdometer(t, f, "Outback", "70100")
+	oil := serviceTypeNamed(t, f, "Oil change")
+	notes := "0W-20 full synthetic"
+	miles := int64(62410)
+	cost := int64(8900)
+	source := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: &miles, CostCents: &cost, Vendor: "Jiffy Lube", Notes: notes, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if _, err := f.store.CreateRecord(t.Context(), source, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, beforeFiles, err := f.store.GetRecord(t.Context(), source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, contentType := formBody(t, map[string]string{
+		"occurred_on":     "",
+		"service_type_id": oil.ID.String(),
+		"odometer":        "70100",
+		"cost":            "$89.00",
+		"vendor":          "Jiffy Lube",
+		"notes":           notes,
+	}, "", nil)
+	response := f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String()+"/records?from="+source.ID.String(), body, contentType)
+	page := response.Body.String()
+	logAgain := "/vehicles/" + vehicle.ID.String() + "/records/new?from=" + source.ID.String()
+	if response.Code != http.StatusBadRequest || !strings.Contains(page, "Date is required.") || !strings.Contains(page, `<option value="`+oil.ID.String()+`" selected>Oil change</option>`) || !strings.Contains(page, `name="odometer" value="70100"`) || !strings.Contains(page, `value="$89.00"`) || !strings.Contains(page, `<textarea name="notes">`+notes+`</textarea>`) || !strings.Contains(page, `action="/vehicles/`+vehicle.ID.String()+`/records?from=`+source.ID.String()+`"`) || !strings.Contains(page, `name="return_to" value="`+logAgain+`"`) || !vendorInputValue(page, "Jiffy Lube") {
+		t.Fatalf("validation error dropped the repeat: %d %s", response.Code, page)
+	}
+	rows, err := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &vehicle.ID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("invalid form saved a record: %+v err=%v", rows, err)
+	}
+	after, afterFiles, err := f.store.GetRecord(t.Context(), source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameRecord(t, before, after, beforeFiles, afterFiles)
+}
+
+func createVehicleWithOdometer(t *testing.T, f fixture, nickname, miles string) model.Vehicle {
+	t.Helper()
+	body, contentType := formBody(t, map[string]string{"nickname": nickname, "current_odometer": miles}, "", nil)
+	response := f.do(t, http.MethodPost, "/vehicles", body, contentType)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create vehicle: %d %s", response.Code, response.Body.String())
+	}
+	vehicles, err := f.store.ListVehicles(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, vehicle := range vehicles {
+		if vehicle.Nickname == nickname {
+			return vehicle
+		}
+	}
+	t.Fatalf("vehicle %s not stored", nickname)
+	return model.Vehicle{}
+}
+
+func serviceTypeNamed(t *testing.T, f fixture, name string) model.ServiceType {
+	t.Helper()
+	types, err := f.store.ListServiceTypes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, serviceType := range types {
+		if serviceType.Name == name {
+			return serviceType
+		}
+	}
+	t.Fatalf("missing service type %s", name)
+	return model.ServiceType{}
+}
+
+func onlyRecord(t *testing.T, f fixture, vehicleID uuid.UUID) model.Record {
+	t.Helper()
+	rows, err := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &vehicleID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("records=%+v err=%v", rows, err)
+	}
+	return rows[0]
+}
+
+func vendorInputValue(body, value string) bool {
+	for _, tag := range regexp.MustCompile(`<input\b[^>]*>`).FindAllString(body, -1) {
+		if strings.Contains(tag, `name="vendor"`) && strings.Contains(tag, `value="`+value+`"`) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertSameRecord(t *testing.T, before, after model.Record, beforeFiles, afterFiles []model.Attachment) {
+	t.Helper()
+	if after.ID != before.ID || after.VehicleID != before.VehicleID || after.ServiceTypeID != before.ServiceTypeID || !after.OccurredOn.Equal(before.OccurredOn) || !sameInt64(after.OdometerMiles, before.OdometerMiles) || !sameInt64(after.CostCents, before.CostCents) || after.Vendor != before.Vendor || after.Notes != before.Notes || !after.CreatedAt.Equal(before.CreatedAt) || !after.UpdatedAt.Equal(before.UpdatedAt) || after.AttachmentCount != before.AttachmentCount {
+		t.Fatalf("source record changed\nbefore=%+v\nafter=%+v", before, after)
+	}
+	if len(afterFiles) != len(beforeFiles) {
+		t.Fatalf("attachments=%d, want %d", len(afterFiles), len(beforeFiles))
+	}
+	for i := range beforeFiles {
+		if afterFiles[i].ID != beforeFiles[i].ID || afterFiles[i].RecordID != beforeFiles[i].RecordID || afterFiles[i].OriginalFilename != beforeFiles[i].OriginalFilename || afterFiles[i].StorageKey != beforeFiles[i].StorageKey || afterFiles[i].ByteSize != beforeFiles[i].ByteSize {
+			t.Fatalf("attachment changed\nbefore=%+v\nafter=%+v", beforeFiles[i], afterFiles[i])
+		}
+	}
+}
+
+func sameInt64(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func TestCostParser(t *testing.T) {
