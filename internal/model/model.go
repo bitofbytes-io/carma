@@ -59,7 +59,8 @@ type Reminder struct {
 	StartingOdometerPending      bool
 	Enabled                      bool
 	// SnoozedUntilOn and SnoozedUntilMiles defer the reminder until every set
-	// threshold has passed. Logging a matching service record clears both.
+	// threshold has passed. The snooze clears when a record becomes the latest
+	// match for this reminder.
 	SnoozedUntilOn       *time.Time
 	SnoozedUntilMiles    *int64
 	CreatedAt, UpdatedAt time.Time

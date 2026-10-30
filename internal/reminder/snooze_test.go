@@ -24,6 +24,30 @@ func TestResolveSnoozePresets(t *testing.T) {
 	if err != nil || april.UntilOn == nil || !april.UntilOn.Equal(time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("mid-month = %+v err=%v", april, err)
 	}
+	jan31 := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	february, err := ResolveSnooze(SnoozeOneMonth, "", "", jan31, &latest)
+	if err != nil || february.UntilOn == nil || !february.UntilOn.Equal(time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("jan 31 = %+v err=%v", february, err)
+	}
+	mar31 := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
+	aprilEnd, err := ResolveSnooze(SnoozeOneMonth, "", "", mar31, &latest)
+	if err != nil || aprilEnd.UntilOn == nil || !aprilEnd.UntilOn.Equal(time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("mar 31 = %+v err=%v", aprilEnd, err)
+	}
+	leap := time.Date(2024, 1, 31, 0, 0, 0, 0, time.UTC)
+	leapDay, err := ResolveSnooze(SnoozeOneMonth, "", "", leap, &latest)
+	if err != nil || leapDay.UntilOn == nil || !leapDay.UntilOn.Equal(time.Date(2024, 2, 29, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("leap day = %+v err=%v", leapDay, err)
+	}
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evening := time.Date(2026, 1, 31, 22, 30, 0, 0, newYork)
+	clamped, err := ResolveSnooze(SnoozeOneMonth, "", "", evening, &latest)
+	if err != nil || clamped.UntilOn == nil || !clamped.UntilOn.Equal(time.Date(2026, 2, 28, 22, 30, 0, 0, newYork)) {
+		t.Fatalf("jan 31 evening = %+v err=%v", clamped, err)
+	}
 	plus, err := ResolveSnooze(SnoozePlus500Miles, "", "", today, &latest)
 	if err != nil || plus.UntilOn != nil || plus.UntilMiles == nil || *plus.UntilMiles != 10500 {
 		t.Fatalf("+500 = %+v err=%v", plus, err)

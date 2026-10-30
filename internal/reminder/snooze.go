@@ -48,7 +48,7 @@ func ResolveSnooze(preset, untilOn, untilMiles string, today time.Time, latest *
 		date := today.AddDate(0, 0, 14)
 		return Snooze{UntilOn: &date}, nil
 	case SnoozeOneMonth:
-		date := today.AddDate(0, 1, 0)
+		date := addOneMonth(today)
 		return Snooze{UntilOn: &date}, nil
 	case SnoozePlus500Miles:
 		if latest == nil {
@@ -63,6 +63,18 @@ func ResolveSnooze(preset, untilOn, untilMiles string, today time.Time, latest *
 	default:
 		return Snooze{}, ErrSnoozePreset
 	}
+}
+
+// addOneMonth adds one calendar month and clamps the day to the last day of
+// the target month. January 31 therefore lands in February, not March.
+func addOneMonth(today time.Time) time.Time {
+	year, month, day := today.Date()
+	target := time.Date(year, month+1, 1, today.Hour(), today.Minute(), today.Second(), today.Nanosecond(), today.Location())
+	last := time.Date(target.Year(), target.Month()+1, 0, 0, 0, 0, 0, today.Location()).Day()
+	if day > last {
+		day = last
+	}
+	return time.Date(target.Year(), target.Month(), day, today.Hour(), today.Minute(), today.Second(), today.Nanosecond(), today.Location())
 }
 
 func customSnooze(untilOn, untilMiles string, today time.Time, latest *int64) (Snooze, error) {

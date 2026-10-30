@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/google/uuid"
@@ -168,8 +169,8 @@ func (p *Postgres) CreateRecord(ctx context.Context, record model.Record, attach
 			return record, err
 		}
 	}
-	// Logging this service ends a deferral of the matching reminder.
-	if _, err = tx.Exec(ctx, clearReminderSnoozeSQL, record.VehicleID, record.ServiceTypeID, record.UpdatedAt); err != nil {
+	// Logging the latest match for this service ends that reminder's deferral.
+	if _, err = tx.Exec(ctx, clearReminderSnoozeSQL, record.VehicleID, record.ServiceTypeID, record.UpdatedAt, record.ID); err != nil {
 		return record, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -179,18 +180,42 @@ func (p *Postgres) CreateRecord(ctx context.Context, record model.Record, attach
 }
 
 func (p *Postgres) UpdateRecord(ctx context.Context, record model.Record) (model.Record, error) {
-	tag, err := p.pool.Exec(
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return record, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var vehicleID, previousType uuid.UUID
+	var previousOccurred time.Time
+	err = tx.QueryRow(ctx, `SELECT vehicle_id,service_type_id,occurred_on FROM records WHERE id=$1 FOR UPDATE`, record.ID).Scan(&vehicleID, &previousType, &previousOccurred)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return record, ErrNotFound
+	}
+	if err != nil {
+		return record, err
+	}
+	if _, err = tx.Exec(
 		ctx, `UPDATE records SET service_type_id=$2,occurred_on=$3,odometer_miles=$4,cost_cents=$5,vendor=$6,notes=$7,
 			updated_at=$8
 		WHERE id=$1`, record.ID,
 		record.ServiceTypeID, record.OccurredOn, record.OdometerMiles,
 		record.CostCents, record.Vendor, record.Notes,
 		record.UpdatedAt,
-	)
-	if err == nil && tag.RowsAffected() == 0 {
-		err = ErrNotFound
+	); err != nil {
+		return record, err
 	}
-	return record, err
+	if _, err = tx.Exec(
+		ctx, clearReminderSnoozeOnEditSQL, vehicleID, record.ServiceTypeID,
+		record.ID, previousType, previousOccurred.UTC().Format(time.DateOnly),
+		record.UpdatedAt,
+	); err != nil {
+		return record, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return record, err
+	}
+	return record, nil
 }
 
 func (p *Postgres) DeleteRecord(ctx context.Context, id uuid.UUID) ([]string, error) {

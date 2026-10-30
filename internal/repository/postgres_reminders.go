@@ -25,10 +25,38 @@ const upsertReminderSQL = `INSERT INTO reminders(id,vehicle_id,service_type_id,i
 const setReminderSnoozeSQL = `UPDATE reminders SET snoozed_until_on=$3,snoozed_until_miles=$4,updated_at=$5
 		WHERE id=$1 AND vehicle_id=$2`
 
-// clearReminderSnoozeSQL ends a deferral when a matching service is logged.
+// clearReminderSnoozeSQL ends a deferral when record $4 is the latest match
+// for that vehicle and service type. An older row leaves the snooze set.
+// Latest follows ListReminders: occurred_on DESC, created_at DESC, id DESC.
 const clearReminderSnoozeSQL = `UPDATE reminders SET snoozed_until_on=NULL,snoozed_until_miles=NULL,updated_at=$3
 		WHERE vehicle_id=$1 AND service_type_id=$2
-		AND (snoozed_until_on IS NOT NULL OR snoozed_until_miles IS NOT NULL)`
+		AND (snoozed_until_on IS NOT NULL OR snoozed_until_miles IS NOT NULL)
+		AND (SELECT r.id FROM records r
+			WHERE r.vehicle_id=$1 AND r.service_type_id=$2
+			ORDER BY r.occurred_on DESC,r.created_at DESC,r.id DESC
+			LIMIT 1)=$4`
+
+// clearReminderSnoozeOnEditSQL ends a deferral when the edited row ($3) is the
+// latest match and was not that baseline before the save. $4 is the previous
+// service type and $5 is the previous occurred_on (YYYY-MM-DD). Changing onto
+// this service type, or moving occurred_on ahead of the old baseline, clears
+// the snooze. A notes or vendor edit of the current baseline does not.
+const clearReminderSnoozeOnEditSQL = `UPDATE reminders SET snoozed_until_on=NULL,snoozed_until_miles=NULL,updated_at=$6
+		WHERE vehicle_id=$1 AND service_type_id=$2
+		AND (snoozed_until_on IS NOT NULL OR snoozed_until_miles IS NOT NULL)
+		AND (SELECT r.id FROM records r
+			WHERE r.vehicle_id=$1 AND r.service_type_id=$2
+			ORDER BY r.occurred_on DESC,r.created_at DESC,r.id DESC
+			LIMIT 1)=$3
+		AND ($4::uuid IS DISTINCT FROM $2::uuid
+			OR (SELECT c.id FROM (
+				SELECT r.id,r.occurred_on,r.created_at FROM records r
+				WHERE r.vehicle_id=$1 AND r.service_type_id=$4 AND r.id<>$3
+				UNION ALL
+				SELECT $3::uuid,$5::date,(SELECT created_at FROM records WHERE id=$3)
+			) c
+			ORDER BY c.occurred_on DESC,c.created_at DESC,c.id DESC
+			LIMIT 1) IS DISTINCT FROM $3)`
 
 func (p *Postgres) ListReminders(ctx context.Context, vehicleID *uuid.UUID, disabled bool) ([]model.Reminder, error) {
 	rows, err := p.pool.Query(ctx, `SELECT rm.id,rm.vehicle_id,rm.service_type_id,v.nickname,st.name,rm.interval_months,rm.interval_miles,
