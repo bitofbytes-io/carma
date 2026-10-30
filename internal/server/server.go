@@ -102,6 +102,9 @@ type pageData struct {
 	// Spend is the vehicle page's cost summary for SpendYear and all time.
 	Spend     model.SpendSummary
 	SpendYear int
+	// LogAgainFrom is the source record when the new-record form was opened
+	// from Log again. Empty on a blank form and when editing.
+	LogAgainFrom string
 }
 
 func (s *Server) Router() http.Handler {
