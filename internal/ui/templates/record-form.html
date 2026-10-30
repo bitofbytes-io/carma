@@ -1,6 +1,6 @@
 {{define "content"}}<section class="card form-card">
 <h1>{{if .Editing}}Edit record{{else}}Add record{{end}} · {{.Vehicle.Nickname}}</h1>{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
-<form method="post" {{if not .Editing}}enctype="multipart/form-data"{{end}} action="{{if .Editing}}/records/{{.Record.ID}}{{else}}/vehicles/{{.Vehicle.ID}}/records{{end}}" class="form-grid">
+<form method="post" {{if not .Editing}}enctype="multipart/form-data"{{end}} action="{{if .Editing}}/records/{{.Record.ID}}{{else}}/vehicles/{{.Vehicle.ID}}/records{{if .LogAgainFrom}}?from={{.LogAgainFrom}}{{end}}{{end}}" class="form-grid">
   <label>Date <input type="date" name="occurred_on" required value="{{iso .Record.OccurredOn}}"></label>
   <label>Service type <select name="service_type_id" required>{{range .Types}}<option value="{{.ID}}" {{selected .ID $.Record.ServiceTypeID}}>{{.Name}}</option>{{end}}</select></label>
   <label>Odometer (mi) <input type="number" inputmode="numeric" min="0" name="odometer" value="{{if .Record.OdometerMiles}}{{.Record.OdometerMiles}}{{end}}"></label>

@@ -184,7 +184,7 @@ func TestLogAgainPrefillsNewRecordAndLeavesSourceUnchanged(t *testing.T) {
 	for _, want := range []string{
 		`<h1>Add record · Outback</h1>`,
 		`enctype="multipart/form-data"`,
-		`action="/vehicles/` + vehicle.ID.String() + `/records"`,
+		`action="/vehicles/` + vehicle.ID.String() + `/records?from=` + source.ID.String() + `"`,
 		`name="occurred_on" required value="2026-07-31"`,
 		`<option value="` + oil.ID.String() + `" selected>Oil change</option>`,
 		`name="odometer" value="70100"`,
@@ -267,34 +267,86 @@ func TestLogAgainPrefillsNewRecordAndLeavesSourceUnchanged(t *testing.T) {
 	assertSameRecord(t, before, after, beforeFiles, afterFiles)
 }
 
-func TestLogAgainLeavesOdometerEmptyWhenVehicleHasNone(t *testing.T) {
+func TestLogAgainPrefillsLatestKnownMileage(t *testing.T) {
 	f := setup(t)
-	vehicle := createVehicle(t, f)
 	oil := serviceTypeNamed(t, f, "Oil change")
+	unset := createVehicle(t, f)
+	lower := createVehicleWithOdometer(t, f, "Lower", "50000")
 	miles := int64(62410)
-	source := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: &miles, Vendor: "Jiffy Lube", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	higher := int64(80000)
+	now := time.Now()
+	fromRecord := func(vehicleID uuid.UUID, odometer *int64) model.Record {
+		t.Helper()
+		record := model.Record{ID: uuid.New(), VehicleID: vehicleID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: odometer, Vendor: "Jiffy Lube", CreatedAt: now, UpdatedAt: now}
+		if _, err := f.store.CreateRecord(t.Context(), record, nil); err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+	recorded := fromRecord(unset.ID, &miles)
+	raised := fromRecord(lower.ID, &higher)
+	for _, tc := range []struct {
+		name, vehicleID, recordID, want string
+	}{
+		{name: "stored mileage unset", vehicleID: unset.ID.String(), recordID: recorded.ID.String(), want: "62410"},
+		{name: "record above stored mileage", vehicleID: lower.ID.String(), recordID: raised.ID.String(), want: "80000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form := f.do(t, http.MethodGet, "/vehicles/"+tc.vehicleID+"/records/new?from="+tc.recordID, nil, "")
+			if form.Code != http.StatusOK || !strings.Contains(form.Body.String(), `name="odometer" value="`+tc.want+`"`) {
+				t.Fatalf("odometer prefill: %d %s", form.Code, form.Body.String())
+			}
+		})
+	}
+	none := createVehicleWithOdometer(t, f, "Unknown", "")
+	source := model.Record{ID: uuid.New(), VehicleID: none.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), Vendor: "Shop", CreatedAt: now, UpdatedAt: now}
 	if _, err := f.store.CreateRecord(t.Context(), source, nil); err != nil {
 		t.Fatal(err)
 	}
-	before, _, err := f.store.GetRecord(t.Context(), source.ID)
+	form := f.do(t, http.MethodGet, "/vehicles/"+none.ID.String()+"/records/new?from="+source.ID.String(), nil, "")
+	if form.Code != http.StatusOK || !strings.Contains(form.Body.String(), `name="odometer" value=""`) {
+		t.Fatalf("unknown mileage was filled: %d %s", form.Code, form.Body.String())
+	}
+}
+
+func TestLogAgainValidationErrorKeepsReturnToSource(t *testing.T) {
+	f := setup(t)
+	vehicle := createVehicleWithOdometer(t, f, "Outback", "70100")
+	oil := serviceTypeNamed(t, f, "Oil change")
+	notes := "0W-20 full synthetic"
+	miles := int64(62410)
+	cost := int64(8900)
+	source := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: &miles, CostCents: &cost, Vendor: "Jiffy Lube", Notes: notes, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if _, err := f.store.CreateRecord(t.Context(), source, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, beforeFiles, err := f.store.GetRecord(t.Context(), source.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	form := f.do(t, http.MethodGet, "/vehicles/"+vehicle.ID.String()+"/records/new?from="+source.ID.String(), nil, "")
-	if form.Code != http.StatusOK || !strings.Contains(form.Body.String(), `name="odometer" value=""`) || strings.Contains(form.Body.String(), "62410") || !vendorInputValue(form.Body.String(), "Jiffy Lube") {
-		t.Fatalf("missing mileage was copied from the record: %d %s", form.Code, form.Body.String())
+	body, contentType := formBody(t, map[string]string{
+		"occurred_on":     "",
+		"service_type_id": oil.ID.String(),
+		"odometer":        "70100",
+		"cost":            "$89.00",
+		"vendor":          "Jiffy Lube",
+		"notes":           notes,
+	}, "", nil)
+	response := f.do(t, http.MethodPost, "/vehicles/"+vehicle.ID.String()+"/records?from="+source.ID.String(), body, contentType)
+	page := response.Body.String()
+	logAgain := "/vehicles/" + vehicle.ID.String() + "/records/new?from=" + source.ID.String()
+	if response.Code != http.StatusBadRequest || !strings.Contains(page, "Date is required.") || !strings.Contains(page, `<option value="`+oil.ID.String()+`" selected>Oil change</option>`) || !strings.Contains(page, `name="odometer" value="70100"`) || !strings.Contains(page, `value="$89.00"`) || !strings.Contains(page, `<textarea name="notes">`+notes+`</textarea>`) || !strings.Contains(page, `action="/vehicles/`+vehicle.ID.String()+`/records?from=`+source.ID.String()+`"`) || !strings.Contains(page, `name="return_to" value="`+logAgain+`"`) || !vendorInputValue(page, "Jiffy Lube") {
+		t.Fatalf("validation error dropped the repeat: %d %s", response.Code, page)
 	}
 	rows, err := f.store.ListRecords(t.Context(), model.RecordQuery{VehicleID: &vehicle.ID})
 	if err != nil || len(rows) != 1 {
-		t.Fatalf("records=%+v err=%v", rows, err)
+		t.Fatalf("invalid form saved a record: %+v err=%v", rows, err)
 	}
 	after, afterFiles, err := f.store.GetRecord(t.Context(), source.ID)
-	if err != nil || len(afterFiles) != 0 {
-		t.Fatalf("after=%+v files=%+v err=%v", after, afterFiles, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if after.Vendor != before.Vendor || after.OdometerMiles == nil || *after.OdometerMiles != 62410 || !after.UpdatedAt.Equal(before.UpdatedAt) {
-		t.Fatalf("source changed before=%+v after=%+v", before, after)
-	}
+	assertSameRecord(t, before, after, beforeFiles, afterFiles)
 }
 
 func createVehicleWithOdometer(t *testing.T, f fixture, nickname, miles string) model.Vehicle {
