@@ -19,23 +19,8 @@ func (s *Server) remindersPage(response http.ResponseWriter, request *http.Reque
 		s.notFound(response, err)
 		return
 	}
-	data, err := s.base(request, "Reminders")
+	data, err := s.reminderPageData(request, vehicle)
 	if err != nil {
-		s.fail(response, err)
-		return
-	}
-	data.Vehicle = vehicle
-	data.Types, err = s.store.ListServiceTypes(request.Context())
-	if err != nil {
-		s.fail(response, err)
-		return
-	}
-	reminders, err := s.store.ListReminders(request.Context(), &vehicle.ID, true)
-	if err != nil {
-		s.fail(response, err)
-		return
-	}
-	if data.Reminders, err = s.evaluateReminders(request.Context(), reminders); err != nil {
 		s.fail(response, err)
 		return
 	}
@@ -86,6 +71,77 @@ func (s *Server) upsertReminder(response http.ResponseWriter, request *http.Requ
 	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String()+"/reminders", http.StatusSeeOther)
 }
 
+func (s *Server) snoozeReminder(response http.ResponseWriter, request *http.Request) {
+	vehicle, err := s.getVehicle(request)
+	if err != nil {
+		s.notFound(response, err)
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(request, "reminderID"))
+	if err != nil {
+		http.NotFound(response, request)
+		return
+	}
+	if err = request.ParseForm(); err != nil {
+		http.Error(response, "Invalid form", http.StatusBadRequest)
+		return
+	}
+	rows, err := s.store.ListReminders(request.Context(), &vehicle.ID, true)
+	if err != nil {
+		s.fail(response, err)
+		return
+	}
+	var current *model.Reminder
+	for i := range rows {
+		if rows[i].ID == id {
+			current = &rows[i]
+			break
+		}
+	}
+	if current == nil {
+		http.NotFound(response, request)
+		return
+	}
+	window, err := reminder.ResolveSnooze(request.FormValue("preset"), request.FormValue("until_on"), request.FormValue("until_miles"), s.today(), current.LatestOdometer)
+	if err != nil {
+		message, ok := snoozeFormError(err)
+		if !ok {
+			s.fail(response, err)
+			return
+		}
+		s.writeReminders(response, request, vehicle, message, id)
+		return
+	}
+	if err = s.store.SetReminderSnooze(request.Context(), vehicle.ID, id, window.UntilOn, window.UntilMiles, s.now()); err != nil {
+		s.notFound(response, err)
+		return
+	}
+	if isHTMX(request) {
+		s.renderReminderList(response, request, vehicle)
+		return
+	}
+	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String()+"/reminders", http.StatusSeeOther)
+}
+
+func snoozeFormError(err error) (string, bool) {
+	switch {
+	case errors.Is(err, reminder.ErrSnoozeMileageUnknown):
+		return "Set a current mileage before snoozing by miles.", true
+	case errors.Is(err, reminder.ErrSnoozeDate):
+		return "Choose a snooze date after today.", true
+	case errors.Is(err, reminder.ErrSnoozeMiles):
+		return "Snooze mileage must be a positive whole number.", true
+	case errors.Is(err, reminder.ErrSnoozeMilesLow):
+		return "Snooze mileage must be above the current reading.", true
+	case errors.Is(err, reminder.ErrSnoozeEmpty):
+		return "Choose a date or a mileage.", true
+	case errors.Is(err, reminder.ErrSnoozePreset):
+		return "Choose a snooze option.", true
+	default:
+		return "", false
+	}
+}
+
 func (s *Server) deleteReminder(response http.ResponseWriter, request *http.Request) {
 	vehicle, err := s.getVehicle(request)
 	if err != nil {
@@ -125,30 +181,45 @@ func (s *Server) deleteReminder(response http.ResponseWriter, request *http.Requ
 }
 
 func (s *Server) renderReminderList(response http.ResponseWriter, request *http.Request, vehicle model.Vehicle) {
-	data, err := s.base(request, "Reminders")
+	s.writeReminders(response, request, vehicle, "", uuid.Nil)
+}
+
+// writeReminders renders the reminder list. A form error on a full-page POST
+// is a 400 document; htmx receives the list partial so the message can swap in.
+func (s *Server) writeReminders(response http.ResponseWriter, request *http.Request, vehicle model.Vehicle, formError string, snoozeID uuid.UUID) {
+	data, err := s.reminderPageData(request, vehicle)
 	if err != nil {
 		s.fail(response, err)
 		return
 	}
-	data.Vehicle = vehicle
-	data.Types, err = s.store.ListServiceTypes(request.Context())
-	if err != nil {
-		s.fail(response, err)
-		return
-	}
-	rows, err := s.store.ListReminders(request.Context(), &vehicle.ID, true)
-	if err != nil {
-		s.fail(response, err)
-		return
-	}
-	if data.Reminders, err = s.evaluateReminders(request.Context(), rows); err != nil {
-		s.fail(response, err)
+	data.Error = formError
+	data.SnoozeReminderID = snoozeID
+	if formError != "" && !isHTMX(request) {
+		s.render(response, http.StatusBadRequest, "reminders", data)
 		return
 	}
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err = s.ui.RenderNamed(response, "reminders", "reminder-list", data); err != nil {
 		s.fail(response, err)
 	}
+}
+
+func (s *Server) reminderPageData(request *http.Request, vehicle model.Vehicle) (pageData, error) {
+	data, err := s.base(request, "Reminders")
+	if err != nil {
+		return data, err
+	}
+	data.Vehicle = vehicle
+	data.Types, err = s.store.ListServiceTypes(request.Context())
+	if err != nil {
+		return data, err
+	}
+	rows, err := s.store.ListReminders(request.Context(), &vehicle.ID, true)
+	if err != nil {
+		return data, err
+	}
+	data.Reminders, err = s.evaluateReminders(request.Context(), rows)
+	return data, err
 }
 
 // evaluateReminders evaluates reminders on today, projecting mileage intervals

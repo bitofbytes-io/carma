@@ -1,14 +1,14 @@
 {{define "content"}}
 <section class="card reminders-card">
   <div class="section-head"><h1>Reminders · {{.Vehicle.Nickname}}</h1><a class="secondary" href="/vehicles/{{.Vehicle.ID}}">Back to vehicle</a></div>
-  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
   {{template "reminder-list" .}}
-  <p class="muted reminder-help">A new reminder starts from the date you add it and the vehicle's current mileage. If mileage is unknown, mileage tracking starts after the first matching service record.</p>
+  <p class="muted reminder-help">A new reminder starts from the date you add it and the vehicle's current mileage. If mileage is unknown, mileage tracking starts after the first matching service record. Snooze hides a reminder until a date or mileage. Logging that service clears the snooze.</p>
 </section>
 {{end}}
 
 {{define "reminder-list"}}
 <div id="reminder-list">
+  {{if .Error}}<div class="error" role="alert">{{.Error}}</div>{{end}}
   <div class="reminder-table">
     <div class="reminder-row header" aria-hidden="true">
       <div class="reminder-header-fields"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span><span class="reminder-header-status">Status</span><span class="reminder-header-enabled">Enabled</span></div>
@@ -27,7 +27,23 @@
       </form>
       <div class="reminder-actions">
         <button class="secondary" type="submit" form="reminder-{{.Reminder.ID}}">Save</button>
+        <label class="secondary snooze-toggle-label" for="snooze-{{.Reminder.ID}}" aria-label="Snooze {{.Reminder.ServiceTypeName}} reminder">Snooze</label>
         <form method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/delete" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/delete" hx-target="#reminder-list" hx-swap="outerHTML" hx-confirm="Delete this reminder?"><button class="link danger-text" type="submit">Delete</button></form>
+      </div>
+      <input type="checkbox" class="snooze-toggle" id="snooze-{{.Reminder.ID}}" aria-controls="snooze-panel-{{.Reminder.ID}}" {{if and $.Error (eq $.SnoozeReminderID .Reminder.ID)}}checked{{end}}>
+      <div class="reminder-snooze-panel" id="snooze-panel-{{.Reminder.ID}}">
+        <p class="muted snooze-panel-help">Hide this reminder until a date or mileage.</p>
+        <form class="snooze-presets" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-target="#reminder-list" hx-swap="outerHTML" aria-label="Snooze presets for {{.Reminder.ServiceTypeName}}">
+          <button class="secondary" type="submit" name="preset" value="2w">2 weeks</button>
+          <button class="secondary" type="submit" name="preset" value="1m">1 month</button>
+          <button class="secondary" type="submit" name="preset" value="500mi">+500 mi</button>
+          {{if or .Reminder.SnoozedUntilOn .Reminder.SnoozedUntilMiles}}<button class="link" type="submit" name="preset" value="clear">Clear snooze</button>{{end}}
+        </form>
+        <form class="snooze-custom" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-target="#reminder-list" hx-swap="outerHTML">
+          <label><span>Until date</span><input type="date" name="until_on" aria-label="Snooze {{.Reminder.ServiceTypeName}} until date"></label>
+          <label><span>Until mileage</span><input type="number" min="1" step="1" inputmode="numeric" name="until_miles" placeholder="Mileage" aria-label="Snooze {{.Reminder.ServiceTypeName}} until mileage"></label>
+          <button class="primary" type="submit" name="preset" value="custom">Apply</button>
+        </form>
       </div>
     </div>
     {{else}}

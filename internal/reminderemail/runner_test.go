@@ -108,6 +108,22 @@ func TestRunnerSendsOnlyDueAndAuditsAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestRunnerSkipsSnoozedReminder(t *testing.T) {
+	now := time.Date(2026, time.March, 15, 12, 0, 0, 0, time.UTC)
+	month := 1
+	until := now.AddDate(0, 0, 14)
+	store := &fakeStore{lockAvailable: true, emails: []string{"user@example.com"}, reminders: []model.Reminder{
+		{ID: uuid.New(), VehicleID: uuid.New(), VehicleName: "Roadster", ServiceTypeName: "Oil change", IntervalMonths: &month, Enabled: true, CreatedAt: now.AddDate(0, -2, 0), SnoozedUntilOn: &until},
+	}}
+	sender := &fakeSender{}
+	runner := NewRunner(store, sender, "https://carma.bitofbytes.io", nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner.now = func() time.Time { return now }
+	report, err := runner.Run(context.Background(), Options{})
+	if err != nil || report.Evaluated != 1 || report.Due != 0 || report.Sent != 0 || len(sender.messages) != 0 {
+		t.Fatalf("report=%+v err=%v messages=%d", report, err, len(sender.messages))
+	}
+}
+
 func TestRunnerAuditsSendAcceptedAsTheRunEnds(t *testing.T) {
 	now := time.Date(2026, time.March, 15, 12, 0, 0, 0, time.UTC)
 	month := 1

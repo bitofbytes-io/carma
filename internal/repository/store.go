@@ -64,6 +64,10 @@ type Store interface {
 	ListReminders(context.Context, *uuid.UUID, bool) ([]model.Reminder, error)
 	UpsertReminder(context.Context, model.Reminder) (model.Reminder, error)
 	DeleteReminder(context.Context, uuid.UUID) error
+	// SetReminderSnooze defers the reminder until untilOn, untilMiles, or both.
+	// A nil threshold clears that side. Both nil clears the snooze. The reminder
+	// must belong to vehicleID.
+	SetReminderSnooze(ctx context.Context, vehicleID, id uuid.UUID, untilOn *time.Time, untilMiles *int64, updatedAt time.Time) error
 
 	// ListRecalls returns NHTSA recall campaigns for active vehicles, or for one
 	// vehicle when vehicleID is set, skipping dismissed ones unless asked.
