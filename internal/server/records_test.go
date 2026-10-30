@@ -143,6 +143,87 @@ func TestConfirmedDestructivePostsRedirectHTMXRequests(t *testing.T) {
 	}
 }
 
+func TestRecordFormSuggestsPreviousVendors(t *testing.T) {
+	f := setup(t)
+	outback := createVehicle(t, f)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tacoma := model.Vehicle{ID: uuid.New(), Nickname: "Tacoma", CreatedAt: now, UpdatedAt: now}
+	if _, err := f.store.CreateVehicle(t.Context(), tacoma, nil); err != nil {
+		t.Fatal(err)
+	}
+	types, err := f.store.ListServiceTypes(t.Context())
+	if err != nil || len(types) < 2 {
+		t.Fatalf("service types=%v err=%v", types, err)
+	}
+	oil, repair := types[0], types[1]
+	quoted := `O'Reilly & "Sons"`
+	latestJiffy := uuid.New()
+	for _, row := range []model.Record{
+		{ID: latestJiffy, VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC), Vendor: "Jiffy Lube", CreatedAt: now.Add(4 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Vendor: "Jiffy Lube", CreatedAt: now.Add(time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC), Vendor: "jiffy lube downtown", CreatedAt: now.Add(2 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: repair.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC), Vendor: "Tire Barn", CreatedAt: now.Add(3 * time.Hour)},
+		{ID: uuid.New(), VehicleID: tacoma.ID, ServiceTypeID: repair.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC), Vendor: "Quick Lane", CreatedAt: now.Add(3 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), Vendor: "   ", CreatedAt: now.Add(5 * time.Hour)},
+		{ID: uuid.New(), VehicleID: outback.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Vendor: quoted, CreatedAt: now},
+	} {
+		if _, err := f.store.CreateRecord(t.Context(), row, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	body := f.do(t, http.MethodGet, "/vehicles/"+outback.ID.String()+"/records/new", nil, "").Body.String()
+	list := `<datalist id="vendor-list">` +
+		`<option value="Jiffy Lube"></option>` +
+		`<option value="Tire Barn"></option>` +
+		`<option value="Quick Lane"></option>` +
+		`<option value="jiffy lube downtown"></option>` +
+		`<option value="O&#39;Reilly &amp; &#34;Sons&#34;"></option>` +
+		`</datalist>`
+	if !strings.Contains(body, `<input name="vendor" list="vendor-list" autocomplete="off" value="">`) || !strings.Contains(body, list) {
+		t.Fatalf("new record form missing vendor suggestions: %s", body)
+	}
+
+	edit := f.do(t, http.MethodGet, "/records/"+latestJiffy.String()+"/edit", nil, "").Body.String()
+	if !strings.Contains(edit, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(edit, list) {
+		t.Fatalf("edit form missing vendor suggestions: %s", edit)
+	}
+
+	logAgainPath := "/vehicles/" + outback.ID.String() + "/records/new?from=" + latestJiffy.String()
+	logAgain := f.do(t, http.MethodGet, logAgainPath, nil, "").Body.String()
+	if !strings.Contains(logAgain, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(logAgain, list) {
+		t.Fatalf("log again form missing vendor suggestions: %s", logAgain)
+	}
+
+	invalid, contentType := formBody(t, map[string]string{
+		"occurred_on":     "",
+		"service_type_id": oil.ID.String(),
+		"vendor":          "Jiffy Lube",
+	}, "", nil)
+	failed := f.do(t, http.MethodPost, "/vehicles/"+outback.ID.String()+"/records?from="+latestJiffy.String(), invalid, contentType)
+	reRendered := failed.Body.String()
+	if failed.Code != http.StatusBadRequest || !strings.Contains(reRendered, "Date is required.") || !strings.Contains(reRendered, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(reRendered, list) || !strings.Contains(reRendered, `action="/vehicles/`+outback.ID.String()+`/records?from=`+latestJiffy.String()+`"`) {
+		t.Fatalf("log again validation error missing vendor suggestions: %d %s", failed.Code, reRendered)
+	}
+
+	blankInvalid, blankType := formBody(t, map[string]string{
+		"occurred_on":     "",
+		"service_type_id": oil.ID.String(),
+	}, "", nil)
+	blankFailed := f.do(t, http.MethodPost, "/vehicles/"+outback.ID.String()+"/records", blankInvalid, blankType)
+	blankPage := blankFailed.Body.String()
+	if blankFailed.Code != http.StatusBadRequest || !strings.Contains(blankPage, `<input name="vendor" list="vendor-list" autocomplete="off" value="">`) || !strings.Contains(blankPage, list) || strings.Contains(blankPage, "?from=") {
+		t.Fatalf("new record validation error missing vendor suggestions: %d %s", blankFailed.Code, blankPage)
+	}
+
+	editValues := url.Values{"occurred_on": {""}, "service_type_id": {oil.ID.String()}, "vendor": {"Jiffy Lube"}}
+	editFailed := f.do(t, http.MethodPost, "/records/"+latestJiffy.String(), strings.NewReader(editValues.Encode()), "application/x-www-form-urlencoded")
+	editPage := editFailed.Body.String()
+	if editFailed.Code != http.StatusBadRequest || !strings.Contains(editPage, `<input name="vendor" list="vendor-list" autocomplete="off" value="Jiffy Lube">`) || !strings.Contains(editPage, list) || strings.Contains(editPage, "?from=") {
+		t.Fatalf("edit validation error missing vendor suggestions: %d %s", editFailed.Code, editPage)
+	}
+}
+
 func TestLogAgainPrefillsNewRecordAndLeavesSourceUnchanged(t *testing.T) {
 	f := setup(t)
 	vehicle := createVehicleWithOdometer(t, f, "Outback", "70100")
@@ -331,7 +412,7 @@ func TestLogAgainPrefillsOdometerFromLaterRecordAboveColumn(t *testing.T) {
 	}
 	form := f.do(t, http.MethodGet, "/vehicles/"+vehicle.ID.String()+"/records/new?from="+source.ID.String(), nil, "")
 	page := form.Body.String()
-	if form.Code != http.StatusOK || !strings.Contains(page, `name="odometer" value="71000"`) || strings.Contains(page, `value="60000"`) || strings.Contains(page, `value="62410"`) || !vendorInputValue(page, "Jiffy Lube") || strings.Contains(page, "Discount Tire") || !strings.Contains(page, `<option value="`+oil.ID.String()+`" selected>Oil change</option>`) {
+	if form.Code != http.StatusOK || !strings.Contains(page, `name="odometer" value="71000"`) || strings.Contains(page, `value="60000"`) || strings.Contains(page, `value="62410"`) || !vendorInputValue(page, "Jiffy Lube") || vendorInputValue(page, "Discount Tire") || !strings.Contains(page, `<option value="`+oil.ID.String()+`" selected>Oil change</option>`) {
 		t.Fatalf("prefill used the wrong mileage: %d %s", form.Code, page)
 	}
 }

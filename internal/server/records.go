@@ -164,6 +164,10 @@ func (s *Server) recordFormData(request *http.Request, vehicle model.Vehicle, re
 	data.Record = record
 	data.Editing = editing
 	data.Types, err = s.store.ListServiceTypes(request.Context())
+	if err != nil {
+		return data, err
+	}
+	data.Vendors, err = s.store.ListVendors(request.Context())
 	return data, err
 }
 

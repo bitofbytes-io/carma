@@ -5,7 +5,7 @@
   <label>Service type <select name="service_type_id" required>{{range .Types}}<option value="{{.ID}}" {{selected .ID $.Record.ServiceTypeID}}>{{.Name}}</option>{{end}}</select></label>
   <label>Odometer (mi) <input type="number" inputmode="numeric" min="0" name="odometer" value="{{if .Record.OdometerMiles}}{{.Record.OdometerMiles}}{{end}}"></label>
   <label>Cost <input inputmode="decimal" name="cost" placeholder="89.00" value="{{if .Record.CostCents}}{{money .Record.CostCents}}{{end}}"></label>
-  <label>Vendor <input name="vendor" value="{{.Record.Vendor}}"></label><label class="full">Notes <textarea name="notes">{{.Record.Notes}}</textarea></label>
+  <label>Vendor <input name="vendor" list="vendor-list" autocomplete="off" value="{{.Record.Vendor}}"><datalist id="vendor-list">{{range .Vendors}}<option value="{{.}}"></option>{{end}}</datalist></label><label class="full">Notes <textarea name="notes">{{.Record.Notes}}</textarea></label>
   {{if not .Editing}}<label class="full upload">Receipts <input type="file" name="receipts" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/heic" capture="environment"><small>PDF, JPEG, PNG, WebP, or HEIC · 25 MiB each. On a phone you can use the camera.</small></label>{{end}}
   <div class="actions full"><a class="secondary" href="{{if .Editing}}/records/{{.Record.ID}}{{else}}/vehicles/{{.Vehicle.ID}}{{end}}">Cancel</a><button class="primary">Save record</button></div>
 </form><hr>
