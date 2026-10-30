@@ -222,6 +222,64 @@ func TestDigestWaitsForMondayMorningInHouseholdTimeZone(t *testing.T) {
 	}
 }
 
+func TestDigestSkipsSnoozedReminders(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, _, _ := digestFixture(now)
+	later := now.AddDate(0, 0, 14)
+	miles := int64(6000)
+	for i := range store.reminders {
+		switch store.reminders[i].ServiceTypeName {
+		case "Oil change":
+			store.reminders[i].SnoozedUntilOn = &later
+		case "Tire rotation":
+			store.reminders[i].SnoozedUntilMiles = &miles
+		}
+	}
+	sender := &fakeSender{}
+	report, err := newTestDigestRunner(store, sender, now).Run(context.Background(), DigestOptions{})
+	if err != nil || !report.Sent || report.Overdue != 0 || report.DueSoon != 1 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	body := sender.messages[0].Body
+	if sender.messages[0].Subject != "Carma weekly digest: 1 due soon" || !strings.Contains(body, "Due soon: Wipers") || strings.Contains(body, "Oil change") || strings.Contains(body, "Tire rotation") {
+		t.Fatalf("snoozed reminders leaked into the digest:\n%s", body)
+	}
+
+	store, _, _ = digestFixture(now)
+	for i := range store.reminders {
+		switch store.reminders[i].ServiceTypeName {
+		case "Oil change", "Wipers":
+			store.reminders[i].SnoozedUntilOn = &later
+		case "Tire rotation":
+			store.reminders[i].SnoozedUntilMiles = &miles
+		}
+	}
+	sender = &fakeSender{}
+	report, err = newTestDigestRunner(store, sender, now).Run(context.Background(), DigestOptions{})
+	if err != nil || report.Sent || report.Overdue != 0 || report.DueSoon != 0 || report.Message != nil || len(sender.messages) != 0 || len(store.digests) != 0 {
+		t.Fatalf("fully snoozed week: report=%+v err=%v messages=%d", report, err, len(sender.messages))
+	}
+}
+
+func TestDigestIncludesReminderWhoseSnoozeHasPassed(t *testing.T) {
+	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
+	store, _, _ := digestFixture(now)
+	today := time.Date(2026, time.March, 18, 0, 0, 0, 0, time.UTC)
+	for i := range store.reminders {
+		if store.reminders[i].ServiceTypeName == "Oil change" {
+			store.reminders[i].SnoozedUntilOn = &today
+		}
+	}
+	sender := &fakeSender{}
+	report, err := newTestDigestRunner(store, sender, now).Run(context.Background(), DigestOptions{})
+	if err != nil || !report.Sent || report.Overdue != 1 || report.DueSoon != 2 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if !strings.Contains(sender.messages[0].Body, "OVERDUE: Oil change") {
+		t.Fatalf("passed snooze was still hidden:\n%s", sender.messages[0].Body)
+	}
+}
+
 func TestDigestSkipsEmptyWeekWithoutRecordingIt(t *testing.T) {
 	now := time.Date(2026, time.March, 18, 12, 0, 0, 0, time.UTC)
 	month := 6

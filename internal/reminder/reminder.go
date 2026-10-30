@@ -16,6 +16,9 @@ const (
 	Soon     Status = "due-soon"
 	Due      Status = "overdue"
 	Disabled Status = "disabled"
+	// Snoozed defers the reminder until its date or mileage passes.
+	// Overdue lists and the digest skip it.
+	Snoozed Status = "snoozed"
 )
 
 const (
@@ -59,6 +62,11 @@ func Evaluate(r model.Reminder, today time.Time) Result {
 	res := Result{Reminder: r, Status: OK}
 	if !r.Enabled {
 		res.Status = Disabled
+		return res
+	}
+	if detail, snoozed := activeSnooze(r, today); snoozed {
+		res.Status = Snoozed
+		res.Detail = detail
 		return res
 	}
 	due, soon := false, false

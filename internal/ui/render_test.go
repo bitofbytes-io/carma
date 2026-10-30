@@ -428,15 +428,16 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 	months := 6
 	row := reminder.Result{Reminder: model.Reminder{ID: reminderID, VehicleID: vehicle.ID, ServiceTypeID: serviceType.ID, ServiceTypeName: serviceType.Name, IntervalMonths: &months, Enabled: true, CreatedAt: time.Now()}, Status: reminder.OK}
 	type data struct {
-		Title         string
-		Error         string
-		Flash         string
-		Authenticated bool
-		User          *model.User
-		NavVehicles   []model.Vehicle
-		Vehicle       model.Vehicle
-		Types         []model.ServiceType
-		Reminders     []reminder.Result
+		Title            string
+		Error            string
+		Flash            string
+		Authenticated    bool
+		User             *model.User
+		NavVehicles      []model.Vehicle
+		Vehicle          model.Vehicle
+		Types            []model.ServiceType
+		Reminders        []reminder.Result
+		SnoozeReminderID uuid.UUID
 	}
 	var b bytes.Buffer
 	if err := r.Render(&b, "reminders", data{Authenticated: true, User: &model.User{}, Vehicle: vehicle, Types: []model.ServiceType{serviceType}, Reminders: []reminder.Result{row}}); err != nil {
@@ -456,6 +457,16 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 		`<span class="field-label">Every (months)</span>`,
 		`<span class="field-label">Every (miles)</span>`,
 		`aria-label="Enable Oil change reminder"`,
+		`aria-label="Snooze Oil change reminder"`,
+		`name="preset" value="2w"`,
+		`>2 weeks</button>`,
+		`name="preset" value="1m"`,
+		`>1 month</button>`,
+		`name="preset" value="500mi"`,
+		`>+500 mi</button>`,
+		`name="preset" value="custom"`,
+		`aria-label="Snooze Oil change until date"`,
+		`aria-label="Snooze Oil change until mileage"`,
 		`<label><span>Service type</span><select name="service_type_id"`,
 	} {
 		if !strings.Contains(body, want) {
