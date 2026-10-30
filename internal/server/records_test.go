@@ -309,6 +309,33 @@ func TestLogAgainPrefillsLatestKnownMileage(t *testing.T) {
 	}
 }
 
+func TestLogAgainPrefillsOdometerFromLaterRecordAboveColumn(t *testing.T) {
+	f := setup(t)
+	vehicle := createVehicleWithOdometer(t, f, "Outback", "60000")
+	oil := serviceTypeNamed(t, f, "Oil change")
+	tires := serviceTypeNamed(t, f, "Tire rotation")
+	now := time.Now()
+	sourceMiles := int64(62410)
+	laterMiles := int64(71000)
+	source := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: oil.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 6, 12, 0, 0, 0, 0, time.UTC), OdometerMiles: &sourceMiles, Vendor: "Jiffy Lube", CreatedAt: now, UpdatedAt: now}
+	later := model.Record{ID: uuid.New(), VehicleID: vehicle.ID, ServiceTypeID: tires.ID, CreatedBy: f.user.ID, OccurredOn: time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC), OdometerMiles: &laterMiles, Vendor: "Discount Tire", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}
+	if _, err := f.store.CreateRecord(t.Context(), source, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.CreateRecord(t.Context(), later, nil); err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.store.GetVehicle(t.Context(), vehicle.ID)
+	if err != nil || current.CurrentOdometer == nil || *current.CurrentOdometer != 60000 || current.LatestOdometer == nil || *current.LatestOdometer != laterMiles {
+		t.Fatalf("vehicle current=%v latest=%v err=%v", current.CurrentOdometer, current.LatestOdometer, err)
+	}
+	form := f.do(t, http.MethodGet, "/vehicles/"+vehicle.ID.String()+"/records/new?from="+source.ID.String(), nil, "")
+	page := form.Body.String()
+	if form.Code != http.StatusOK || !strings.Contains(page, `name="odometer" value="71000"`) || strings.Contains(page, `value="60000"`) || strings.Contains(page, `value="62410"`) || !vendorInputValue(page, "Jiffy Lube") || strings.Contains(page, "Discount Tire") || !strings.Contains(page, `<option value="`+oil.ID.String()+`" selected>Oil change</option>`) {
+		t.Fatalf("prefill used the wrong mileage: %d %s", form.Code, page)
+	}
+}
+
 func TestLogAgainValidationErrorKeepsReturnToSource(t *testing.T) {
 	f := setup(t)
 	vehicle := createVehicleWithOdometer(t, f, "Outback", "70100")
