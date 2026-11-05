@@ -7,3 +7,6 @@ local.mk
 /carma-migrate
 .playwright-cli/
 output/
+
+# PR screenshots are attached to PRs, not committed
+shots/
