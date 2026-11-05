@@ -361,6 +361,7 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 			data.DismissedRecalls = append(data.DismissedRecalls, recall)
 		}
 	}
+	data.WarrantyActive = s.warrantyActive(data.Records, vehicle)
 	if isHTMX(request) {
 		s.renderNamed(response, "vehicle", "records-section", data)
 		return

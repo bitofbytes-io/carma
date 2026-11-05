@@ -10,18 +10,24 @@ import (
 
 func CSV(w io.Writer, records []model.Record) error {
 	c := csv.NewWriter(w)
-	if err := c.Write([]string{"vehicle", "date", "service type", "odometer", "cost", "vendor", "notes", "receipt count", "logged by"}); err != nil {
+	if err := c.Write([]string{"vehicle", "date", "service type", "odometer", "cost", "vendor", "notes", "receipt count", "logged by", "warranty until date", "warranty until miles"}); err != nil {
 		return err
 	}
 	for _, r := range records {
-		odo, cost := "", ""
+		odo, cost, warrantyDate, warrantyMiles := "", "", "", ""
+		if r.WarrantyUntilOn != nil {
+			warrantyDate = r.WarrantyUntilOn.Format("2006-01-02")
+		}
+		if r.WarrantyUntilMiles != nil {
+			warrantyMiles = strconv.FormatInt(*r.WarrantyUntilMiles, 10)
+		}
 		if r.OdometerMiles != nil {
 			odo = strconv.FormatInt(*r.OdometerMiles, 10)
 		}
 		if r.CostCents != nil {
 			cost = formatCents(*r.CostCents)
 		}
-		if err := c.Write([]string{spreadsheetText(r.VehicleName), r.OccurredOn.Format("2006-01-02"), spreadsheetText(r.ServiceTypeName), odo, cost, spreadsheetText(r.Vendor), spreadsheetText(r.Notes), strconv.Itoa(r.AttachmentCount), spreadsheetText(r.CreatedByName)}); err != nil {
+		if err := c.Write([]string{spreadsheetText(r.VehicleName), r.OccurredOn.Format("2006-01-02"), spreadsheetText(r.ServiceTypeName), odo, cost, spreadsheetText(r.Vendor), spreadsheetText(r.Notes), strconv.Itoa(r.AttachmentCount), spreadsheetText(r.CreatedByName), warrantyDate, warrantyMiles}); err != nil {
 			return err
 		}
 	}

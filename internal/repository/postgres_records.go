@@ -40,7 +40,7 @@ func (p *Postgres) CreateServiceType(ctx context.Context, serviceType model.Serv
 }
 
 const recordSelect = `SELECT r.id,r.vehicle_id,r.service_type_id,r.created_by,r.occurred_on,r.odometer_miles,r.cost_cents,r.vendor,
-			r.notes,r.created_at,r.updated_at,v.nickname,st.name,COALESCE(NULLIF(u.display_name,''),u.email),(SELECT count(*) FROM attachments a WHERE a.record_id=r.id)
+			r.notes,r.warranty_until_date,r.warranty_until_miles,r.created_at,r.updated_at,v.nickname,st.name,COALESCE(NULLIF(u.display_name,''),u.email),(SELECT count(*) FROM attachments a WHERE a.record_id=r.id)
 		FROM records r
 		JOIN vehicles v ON v.id=r.vehicle_id
 		JOIN service_types st ON st.id=r.service_type_id
@@ -59,6 +59,7 @@ func scanRecord(row pgx.Row) (model.Record, error) {
 		&record.ID, &record.VehicleID, &record.ServiceTypeID,
 		&record.CreatedBy, &record.OccurredOn, &record.OdometerMiles,
 		&record.CostCents, &record.Vendor, &record.Notes,
+		&record.WarrantyUntilOn, &record.WarrantyUntilMiles,
 		&record.CreatedAt, &record.UpdatedAt, &record.VehicleName,
 		&record.ServiceTypeName, &record.CreatedByName, &record.AttachmentCount,
 	)
@@ -179,12 +180,12 @@ func (p *Postgres) CreateRecord(ctx context.Context, record model.Record, attach
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(
 		ctx, `INSERT INTO records(id,vehicle_id,service_type_id,occurred_on,odometer_miles,cost_cents,vendor,notes,
-			created_by,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, record.ID,
+			warranty_until_date,warranty_until_miles,created_by,created_at,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, record.ID,
 		record.VehicleID, record.ServiceTypeID, record.OccurredOn,
 		record.OdometerMiles, record.CostCents, record.Vendor,
-		record.Notes, record.CreatedBy, record.CreatedAt,
-		record.UpdatedAt,
+		record.Notes, record.WarrantyUntilOn, record.WarrantyUntilMiles,
+		record.CreatedBy, record.CreatedAt, record.UpdatedAt,
 	)
 	if err != nil {
 		return record, err
@@ -227,11 +228,11 @@ func (p *Postgres) UpdateRecord(ctx context.Context, record model.Record) (model
 	}
 	if _, err = tx.Exec(
 		ctx, `UPDATE records SET service_type_id=$2,occurred_on=$3,odometer_miles=$4,cost_cents=$5,vendor=$6,notes=$7,
-			updated_at=$8
+			warranty_until_date=$8,warranty_until_miles=$9,updated_at=$10
 		WHERE id=$1`, record.ID,
 		record.ServiceTypeID, record.OccurredOn, record.OdometerMiles,
 		record.CostCents, record.Vendor, record.Notes,
-		record.UpdatedAt,
+		record.WarrantyUntilOn, record.WarrantyUntilMiles, record.UpdatedAt,
 	); err != nil {
 		return record, err
 	}

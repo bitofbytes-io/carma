@@ -30,6 +30,7 @@
       <th scope="col" class="number">Mileage</th>
       {{if not .HideCosts}}<th scope="col" class="number">Cost</th>{{end}}
       <th scope="col">Shop</th>
+      <th scope="col">Warranty</th>
       <th scope="col">Notes</th>
       <th scope="col" class="number">Receipts</th>
     </tr></thead>
@@ -39,6 +40,7 @@
       <td class="number" data-label="Mileage">{{num .OdometerMiles}}</td>
       {{if not $.HideCosts}}<td class="number history-cost" data-label="Cost">{{money .CostCents}}</td>{{end}}
       <td data-label="Shop">{{.Vendor}}</td>
+      <td class="history-warranty" data-label="Warranty">{{if .HasWarranty}}Until {{.WarrantyLimits}}<br><span class="muted">{{if index $.WarrantyActive .ID}}Active{{else}}Expired{{end}}</span>{{else}}—{{end}}</td>
       <td class="history-notes" data-label="Notes">{{.Notes}}</td>
       <td class="number" data-label="Receipts">{{if .AttachmentCount}}{{.AttachmentCount}}{{else}}—{{end}}</td>
     </tr>{{end}}</tbody>

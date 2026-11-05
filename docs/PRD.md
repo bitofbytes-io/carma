@@ -58,7 +58,11 @@ filters, inspections) doesn't get forgotten.
   - odometer reading in miles (optional but encouraged - drives mileage reminders)
   - cost (optional, stored in cents)
   - vendor / shop (optional free text; "DIY" is just text)
-  - notes (optional free text, e.g. part numbers, warranty info)
+  - notes (optional free text, e.g. part numbers)
+  - warranty end date and/or warranty mileage limit (optional; the date cannot be
+    before the service date). The vehicle and record pages show "Under warranty
+    until ..." while neither set limit has passed: the date through its last day,
+    the mileage through the limit itself, judged at the vehicle's latest odometer.
 - Records can be edited and deleted.
 - Vehicle detail page lists records newest-first with:
   - text search across service type, vendor, and notes
@@ -117,9 +121,9 @@ filters, inspections) doesn't get forgotten.
 - Export records to **CSV** from any records view; the export respects the current
   search/filter, so "2019 Outback, oil changes only, 2023-2025" is one click.
 - Columns: vehicle, date, service type, odometer, cost, vendor, notes, receipt count,
-  logged by.
+  logged by, warranty until date, warranty until miles.
 - **XLSX** export (via `excelize`) of the same filtered view: one sheet per vehicle,
-  with typed dates and costs and a totals row.
+  with typed dates and costs, warranty end date and mileage columns, and a totals row.
 - **Printable history** at `/vehicles/{id}/history` for handing a car to a buyer: the
   vehicle's year/make/model, VIN, and odometer, its record count and date range, total
   spent, receipts on file, and every record oldest first (date, service, mileage, cost,

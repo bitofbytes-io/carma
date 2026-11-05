@@ -66,6 +66,32 @@ func TestCSVParsesAndMatchesRows(t *testing.T) {
 	}
 }
 
+func TestCSVIncludesWarrantyColumns(t *testing.T) {
+	until := time.Date(2028, 3, 3, 0, 0, 0, 0, time.UTC)
+	miles := int64(36000)
+	records := []model.Record{
+		{VehicleName: "Outback", OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), WarrantyUntilOn: &until, WarrantyUntilMiles: &miles},
+		{VehicleName: "Outback", OccurredOn: time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC), WarrantyUntilMiles: &miles},
+		{VehicleName: "Outback", OccurredOn: time.Date(2026, 1, 4, 0, 0, 0, 0, time.UTC)},
+	}
+	var output bytes.Buffer
+	if err := CSV(&output, records); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(strings.NewReader(output.String())).ReadAll()
+	if err != nil || len(rows) != 4 {
+		t.Fatalf("rows=%v err=%v", rows, err)
+	}
+	if got := strings.Join(rows[0][9:], "|"); got != "warranty until date|warranty until miles" {
+		t.Fatalf("warranty headers=%q", got)
+	}
+	for i, want := range []string{"2028-03-03|36000", "|36000", "|"} {
+		if got := strings.Join(rows[i+1][9:], "|"); got != want {
+			t.Fatalf("row %d warranty=%q want=%q", i+1, got, want)
+		}
+	}
+}
+
 func TestCSVNeutralizesSpreadsheetFormulaText(t *testing.T) {
 	var records []model.Record
 	var hazardous []string

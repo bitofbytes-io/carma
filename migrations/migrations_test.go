@@ -289,6 +289,44 @@ func TestReminderSnoozeMigrationColumns(t *testing.T) {
 	}
 }
 
+func TestRecordWarrantyMigrationIsAdditive(t *testing.T) {
+	up, err := fs.ReadFile(FS, "011_record_warranty.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := strings.ToLower(string(up))
+	for _, declaration := range []string{
+		"alter table records",
+		"add column warranty_until_date date",
+		"add column warranty_until_miles bigint",
+		"records_warranty_until_miles_nonnegative",
+		"warranty_until_miles is null or warranty_until_miles >= 0",
+	} {
+		if !strings.Contains(sql, declaration) {
+			t.Fatalf("record warranty migration missing %q", declaration)
+		}
+	}
+	for _, statement := range []string{"drop ", "delete from", "update ", "not null"} {
+		if strings.Contains(sql, statement) {
+			t.Fatalf("record warranty migration must only add nullable columns, found %q", statement)
+		}
+	}
+	down, err := fs.ReadFile(FS, "011_record_warranty.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downSQL := strings.ToLower(string(down))
+	for _, declaration := range []string{
+		"delete from schema_migrations where version = '011_record_warranty'",
+		"drop column if exists warranty_until_miles",
+		"drop column if exists warranty_until_date",
+	} {
+		if !strings.Contains(downSQL, declaration) {
+			t.Fatalf("record warranty down migration missing %q", declaration)
+		}
+	}
+}
+
 func TestRecallDismissalsMigrationIsAdditiveWithBackfill(t *testing.T) {
 	up, err := fs.ReadFile(FS, "009_recall_dismissals.up.sql")
 	if err != nil {

@@ -170,14 +170,17 @@ Prometheus scrapes it over the private overlay network. The listener exports:
 - **Vehicles** - manage the whole household garage; every allowlisted user sees
   and edits the same vehicles. A one-field mileage update on each dashboard card
   and vehicle page keeps mileage reminders current and records every reading.
-- **Records** - log service/repairs with date, type, odometer, cost, vendor, and
-  notes; search, sort, and filter the history.
+- **Records** - log service/repairs with date, type, odometer, cost, vendor,
+  notes, and an optional warranty end date and/or mileage; an "Under warranty
+  until" badge shows while the warranty is active. Search, sort, and filter the
+  history.
 - **Receipts** - attach PDF/photo receipts to any record; stored on the NAS, no
   more glove-box paper.
 - **Reminders** - time- and/or mileage-based intervals per vehicle and service
   type, with common starter presets offered when adding a vehicle; overdue and
   due-soon surfaced on the dashboard, with overdue email delivery.
-- **Export** - filtered CSV and XLSX of any records view.
+- **Export** - filtered CSV and XLSX of any records view, including warranty
+  limits; the printable history shows them too.
 
 ## How it will be built
 

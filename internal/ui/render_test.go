@@ -668,6 +668,112 @@ func TestHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 	}
 }
 
+func TestWarrantyBadgeAndHistoryColumn(t *testing.T) {
+	renderer, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := time.Date(2028, 3, 3, 0, 0, 0, 0, time.UTC)
+	limit := int64(36000)
+	active := model.Record{ID: uuid.New(), OccurredOn: time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Battery", WarrantyUntilOn: &until, WarrantyUntilMiles: &limit}
+	expired := model.Record{ID: uuid.New(), OccurredOn: time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Brakes", WarrantyUntilMiles: &limit}
+	none := model.Record{ID: uuid.New(), OccurredOn: time.Date(2025, 1, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Wipers"}
+	records := []model.Record{expired, none, active}
+	vehicle := model.Vehicle{ID: uuid.New(), Nickname: "Outback"}
+	type data struct {
+		Title, Error, Flash string
+		Authenticated       bool
+		User                *model.User
+		NavVehicles         []model.Vehicle
+		Vehicle             model.Vehicle
+		RecordsURL          string
+		Params              url.Values
+		Types               []model.ServiceType
+		Records             []model.Record
+		Reminders           []any
+		Recalls             []model.Recall
+		DismissedRecalls    []model.Recall
+		Spend               model.SpendSummary
+		SpendYear           int
+		History             carmaexport.HistorySummary
+		Generated           time.Time
+		WarrantyActive      map[uuid.UUID]bool
+		Record              model.Record
+		HideCosts, Editing  bool
+		LogAgainFrom        string
+		Vendors             []string
+		Attachments         []model.Attachment
+	}
+	page := data{
+		Authenticated: true, User: &model.User{}, Vehicle: vehicle, RecordsURL: "/vehicles/" + vehicle.ID.String(),
+		Params: url.Values{}, Records: records, History: carmaexport.Summarize(records),
+		Generated: time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC), WarrantyActive: map[uuid.UUID]bool{active.ID: true},
+	}
+
+	var body bytes.Buffer
+	if err := renderer.Render(&body, "vehicle", page); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(body.String(), "Under warranty until"); got != 1 || !strings.Contains(body.String(), "Under warranty until Mar 3, 2028 or 36,000 mi") {
+		t.Fatalf("vehicle list badges=%d: %s", got, body.String())
+	}
+
+	for _, template := range []string{"history-print", "history"} {
+		body.Reset()
+		if err := renderer.Render(&body, template, page); err != nil {
+			t.Fatalf("%s: %v", template, err)
+		}
+		html := body.String()
+		for _, want := range []string{">Warranty</th>", "Until Mar 3, 2028 or 36,000 mi", `<span class="muted">Active</span>`, "Until 36,000 mi", `<span class="muted">Expired</span>`} {
+			if !strings.Contains(html, want) {
+				t.Fatalf("%s missing %q:\n%s", template, want, html)
+			}
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		record model.Record
+		active bool
+		want   string
+	}{
+		{name: "active", record: active, active: true, want: "Under warranty until Mar 3, 2028 or 36,000 mi"},
+		{name: "expired", record: expired, want: "Expired · was until 36,000 mi"},
+		{name: "none", record: none},
+	} {
+		body.Reset()
+		page.Record = tc.record
+		page.WarrantyActive = map[uuid.UUID]bool{tc.record.ID: tc.active}
+		if err := renderer.Render(&body, "record", page); err != nil {
+			t.Fatal(err)
+		}
+		html := body.String()
+		if tc.want == "" {
+			if strings.Contains(html, "<dt>Warranty</dt>") {
+				t.Fatalf("%s: record without warranty shows a warranty row", tc.name)
+			}
+			continue
+		}
+		if !strings.Contains(html, tc.want) {
+			t.Fatalf("%s missing %q:\n%s", tc.name, tc.want, html)
+		}
+		if got := strings.Contains(html, `class="warranty-badge"`); got != tc.active {
+			t.Fatalf("%s badge present=%v want=%v", tc.name, got, tc.active)
+		}
+	}
+
+	body.Reset()
+	page.Record = model.Record{ID: uuid.New(), OccurredOn: until, WarrantyUntilOn: &until, WarrantyUntilMiles: &limit}
+	if err := renderer.Render(&body, "record-form", page); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`name="warranty_until" value="2028-03-03"`, `name="warranty_miles" value="36000"`} {
+		if !strings.Contains(body.String(), want) {
+			t.Fatalf("record form missing %q:\n%s", want, body.String())
+		}
+	}
+}
+
 func TestVehicleTemplateLinksToHistoryPrint(t *testing.T) {
 	renderer, err := New()
 	if err != nil {
