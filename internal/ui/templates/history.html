@@ -10,8 +10,8 @@
     <div><dt>Receipts on file</dt><dd>{{.History.Receipts}}</dd></div>
   </dl>
   {{if .Records}}<div class="history-table-wrap"><table class="history-table">
-    <thead><tr><th scope="col">Date</th><th scope="col">Service</th><th scope="col" class="number">Mileage</th><th scope="col" class="number">Cost</th><th scope="col">Shop</th><th scope="col">Notes</th><th scope="col" class="number">Receipts</th></tr></thead>
-    <tbody>{{range .Records}}<tr><td>{{date .OccurredOn}}</td><td>{{.ServiceTypeName}}</td><td class="number">{{num .OdometerMiles}}</td><td class="number">{{money .CostCents}}</td><td>{{.Vendor}}</td><td class="history-notes">{{.Notes}}</td><td class="number">{{if .AttachmentCount}}{{.AttachmentCount}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
+    <thead><tr><th scope="col">Date</th><th scope="col">Service</th><th scope="col" class="number">Mileage</th><th scope="col" class="number">Cost</th><th scope="col">Shop</th><th scope="col">Warranty</th><th scope="col">Notes</th><th scope="col" class="number">Receipts</th></tr></thead>
+    <tbody>{{range .Records}}<tr><td>{{date .OccurredOn}}</td><td>{{.ServiceTypeName}}</td><td class="number">{{num .OdometerMiles}}</td><td class="number">{{money .CostCents}}</td><td>{{.Vendor}}</td><td class="history-warranty">{{if .HasWarranty}}Until {{.WarrantyLimits}}<br><span class="muted">{{if index $.WarrantyActive .ID}}Active{{else}}Expired{{end}}</span>{{else}}—{{end}}</td><td class="history-notes">{{.Notes}}</td><td class="number">{{if .AttachmentCount}}{{.AttachmentCount}}{{else}}—{{end}}</td></tr>{{end}}</tbody>
   </table></div>{{else}}<p>No service records yet.</p>{{end}}
 </article>
 {{end}}

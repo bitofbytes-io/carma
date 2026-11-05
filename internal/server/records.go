@@ -273,6 +273,30 @@ func recordFromForm(request *http.Request) (model.Record, string) {
 			record.CostCents = &n
 		}
 	}
+	if raw := strings.TrimSpace(request.FormValue("warranty_until")); raw != "" {
+		date, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			if msg == "" {
+				msg = "Warranty end date must be a valid date."
+			}
+		} else {
+			record.WarrantyUntilOn = &date
+			// A missing or invalid service date already set msg.
+			if !record.OccurredOn.IsZero() && msg == "" && model.ValidateWarranty(record.OccurredOn, &date) != nil {
+				msg = "Warranty end date cannot be before the service date."
+			}
+		}
+	}
+	if raw := strings.TrimSpace(request.FormValue("warranty_miles")); raw != "" {
+		n, err := model.ParseOdometerMiles(strings.ReplaceAll(raw, ",", ""))
+		if err != nil {
+			if msg == "" {
+				msg = "Warranty mileage must be a non-negative whole number."
+			}
+		} else {
+			record.WarrantyUntilMiles = &n
+		}
+	}
 	return record, msg
 }
 
@@ -291,8 +315,27 @@ func (s *Server) recordFormError(response http.ResponseWriter, request *http.Req
 	s.render(response, 400, "record-form", data)
 }
 
+// warrantyActive marks the records whose warranty still covers the vehicle
+// today, judged at the vehicle's latest odometer. All records must belong to
+// that vehicle.
+func (s *Server) warrantyActive(records []model.Record, vehicle model.Vehicle) map[uuid.UUID]bool {
+	today := s.today()
+	active := map[uuid.UUID]bool{}
+	for _, record := range records {
+		if record.WarrantyActive(today, vehicle.LatestOdometer) {
+			active[record.ID] = true
+		}
+	}
+	return active
+}
+
 func (s *Server) record(response http.ResponseWriter, request *http.Request) {
 	record, attachments, err := s.getRecord(request)
+	if err != nil {
+		s.notFound(response, err)
+		return
+	}
+	vehicle, err := s.store.GetVehicle(request.Context(), record.VehicleID)
 	if err != nil {
 		s.notFound(response, err)
 		return
@@ -302,6 +345,7 @@ func (s *Server) record(response http.ResponseWriter, request *http.Request) {
 		s.fail(response, err)
 		return
 	}
+	data.WarrantyActive = s.warrantyActive([]model.Record{record}, vehicle)
 	data.Record = record
 	data.Attachments = attachments
 	s.render(response, 200, "record", data)

@@ -105,6 +105,9 @@ type pageData struct {
 	// Spend is the vehicle page's cost summary for SpendYear and all time.
 	Spend     model.SpendSummary
 	SpendYear int
+	// WarrantyActive holds the IDs of the listed records whose warranty still
+	// covers the vehicle. Only pages that know one vehicle set it.
+	WarrantyActive map[uuid.UUID]bool
 	// LogAgainFrom is the source record when the new-record form was opened
 	// from Log again. Empty on a blank form and when editing.
 	LogAgainFrom string

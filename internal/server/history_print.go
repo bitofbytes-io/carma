@@ -30,6 +30,7 @@ func (s *Server) vehicleHistoryPrint(response http.ResponseWriter, request *http
 	}
 	data.History = carmaexport.Summarize(data.Records)
 	data.Generated = s.today()
+	data.WarrantyActive = s.warrantyActive(data.Records, vehicle)
 	data.Recalls, err = s.store.ListRecalls(request.Context(), &vehicle.ID, false)
 	if err != nil {
 		s.fail(response, err)

@@ -18,8 +18,10 @@ func TestXLSXReadsBackTypedRowsAndTotals(t *testing.T) {
 	oil, tires, driveway := int64(8900), int64(45050), int64(0)
 	miles := int64(55000)
 	laterMiles := int64(61000)
+	warrantyMiles := int64(36000)
+	warrantyUntil := time.Date(2028, 11, 14, 0, 0, 0, 0, time.UTC)
 	records := []model.Record{
-		{VehicleID: outback, VehicleName: "Outback", OccurredOn: time.Date(2025, 11, 14, 22, 0, 0, 0, time.FixedZone("EDT", -4*3600)), ServiceTypeName: "Oil change", OdometerMiles: &miles, CostCents: &oil, Vendor: "Jiffy Lube"},
+		{VehicleID: outback, VehicleName: "Outback", OccurredOn: time.Date(2025, 11, 14, 22, 0, 0, 0, time.FixedZone("EDT", -4*3600)), ServiceTypeName: "Oil change", OdometerMiles: &miles, CostCents: &oil, Vendor: "Jiffy Lube", WarrantyUntilOn: &warrantyUntil, WarrantyUntilMiles: &warrantyMiles},
 		{VehicleID: outback, VehicleName: "Outback", OccurredOn: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Tire rotation", Vendor: "=cmd|' /C calc'!A0"},
 		{VehicleID: tacoma, VehicleName: "Tacoma/North?", OccurredOn: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Tires", OdometerMiles: &laterMiles, CostCents: &tires, Vendor: "Tire Barn"},
 		{VehicleID: tacoma, VehicleName: "Tacoma/North?", OccurredOn: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Inspection", CostCents: &driveway, Vendor: "DIY"},
@@ -44,8 +46,15 @@ func TestXLSXReadsBackTypedRowsAndTotals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 4 || strings.Join(rows[0], "|") != "Date|Odometer|Service|Vendor|Cost" {
+	if len(rows) != 4 || strings.Join(rows[0], "|") != "Date|Odometer|Service|Vendor|Cost|Warranty until|Warranty miles" {
 		t.Fatalf("header rows=%v", rows)
+	}
+	assertDateCell(t, book, "Outback", "F2", "2028-11-14")
+	assertNumber(t, book, "Outback", "G2", "36000")
+	for _, cell := range []string{"F3", "G3"} {
+		if value, err := book.GetCellValue("Outback", cell); err != nil || value != "" {
+			t.Fatalf("missing warranty %s=%q err=%v", cell, value, err)
+		}
 	}
 	assertDateCell(t, book, "Outback", "A2", "2025-11-14")
 	assertNumber(t, book, "Outback", "B2", "55000")

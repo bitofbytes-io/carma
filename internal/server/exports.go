@@ -52,6 +52,7 @@ func (s *Server) vehicleHistory(response http.ResponseWriter, request *http.Requ
 	}
 	data.History = carmaexport.Summarize(data.Records)
 	data.Generated = s.today()
+	data.WarrantyActive = s.warrantyActive(data.Records, vehicle)
 	s.render(response, http.StatusOK, "history", data)
 }
 

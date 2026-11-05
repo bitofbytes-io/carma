@@ -41,8 +41,12 @@ type Record struct {
 	OccurredOn                                  time.Time
 	OdometerMiles, CostCents                    *int64
 	Vendor, Notes                               string
-	CreatedAt, UpdatedAt                        time.Time
-	AttachmentCount                             int
+	// WarrantyUntilOn and WarrantyUntilMiles are the optional limits of the
+	// warranty on this work. See WarrantyActive.
+	WarrantyUntilOn      *time.Time
+	WarrantyUntilMiles   *int64
+	CreatedAt, UpdatedAt time.Time
+	AttachmentCount      int
 }
 type Attachment struct {
 	ID, RecordID                              uuid.UUID

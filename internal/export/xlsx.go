@@ -24,10 +24,13 @@ const (
 	colService
 	colVendor
 	colCost
+	colWarrantyDate
+	colWarrantyMiles
 )
 
 // XLSX writes one worksheet per vehicle. Columns are date, odometer, service,
-// vendor, and cost. Date and cost are Excel date and currency values, and each
+// vendor, cost, warranty end date, and warranty mileage limit. Dates and cost
+// are Excel date and currency values, and each
 // sheet ends with the cost total from Summarize. Records stay in the order
 // given, which is oldest first when they come from Query.
 func XLSX(w io.Writer, records []model.Record) error {
@@ -102,7 +105,7 @@ func groupByVehicle(records []model.Record) []vehicleGroup {
 }
 
 func writeVehicleSheet(file *excelize.File, sheet string, records []model.Record, dateStyle, costStyle, totalCostStyle, headerStyle, odometerStyle int) error {
-	for i, header := range []string{"Date", "Odometer", "Service", "Vendor", "Cost"} {
+	for i, header := range []string{"Date", "Odometer", "Service", "Vendor", "Cost", "Warranty until", "Warranty miles"} {
 		cell, err := excelize.CoordinatesToCellName(i+1, 1)
 		if err != nil {
 			return err
@@ -111,7 +114,7 @@ func writeVehicleSheet(file *excelize.File, sheet string, records []model.Record
 			return err
 		}
 	}
-	if err := file.SetCellStyle(sheet, "A1", "E1", headerStyle); err != nil {
+	if err := file.SetCellStyle(sheet, "A1", "G1", headerStyle); err != nil {
 		return err
 	}
 	for i, record := range records {
@@ -150,7 +153,7 @@ func writeVehicleSheet(file *excelize.File, sheet string, records []model.Record
 	if err = file.SetColWidth(sheet, "C", "D", 24); err != nil {
 		return err
 	}
-	return file.SetColWidth(sheet, "E", "E", 14)
+	return file.SetColWidth(sheet, "E", "G", 14)
 }
 
 func writeRecordRow(file *excelize.File, sheet string, row int, record model.Record, dateStyle, costStyle, odometerStyle int) error {
@@ -198,6 +201,32 @@ func writeRecordRow(file *excelize.File, sheet string, row int, record model.Rec
 			return err
 		}
 		if err = writeCost(file, sheet, cell, *record.CostCents, costStyle); err != nil {
+			return err
+		}
+	}
+	if record.WarrantyUntilOn != nil {
+		cell, err := excelize.CoordinatesToCellName(colWarrantyDate, row)
+		if err != nil {
+			return err
+		}
+		until := record.WarrantyUntilOn
+		day := time.Date(until.Year(), until.Month(), until.Day(), 0, 0, 0, 0, time.UTC)
+		if err = file.SetCellValue(sheet, cell, day); err != nil {
+			return err
+		}
+		if err = file.SetCellStyle(sheet, cell, cell, dateStyle); err != nil {
+			return err
+		}
+	}
+	if record.WarrantyUntilMiles != nil {
+		cell, err := excelize.CoordinatesToCellName(colWarrantyMiles, row)
+		if err != nil {
+			return err
+		}
+		if err = file.SetCellInt(sheet, cell, *record.WarrantyUntilMiles); err != nil {
+			return err
+		}
+		if err = file.SetCellStyle(sheet, cell, cell, odometerStyle); err != nil {
 			return err
 		}
 	}
