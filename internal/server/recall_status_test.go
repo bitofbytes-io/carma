@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/nhtsa"
@@ -90,6 +91,44 @@ func TestSavingAVehiclePersistsTrimAndChecksRecallsInTheBackground(t *testing.T)
 	f.s.recallChecks.Wait()
 	if len(checker.vehicles) != 2 {
 		t.Fatalf("archiving checked recalls: %+v", checker.vehicles)
+	}
+}
+
+type blockingRecallChecker struct {
+	started chan struct{}
+	err     error
+}
+
+func (b *blockingRecallChecker) CheckVehicle(ctx context.Context, _ model.Vehicle) error {
+	close(b.started)
+	<-ctx.Done()
+	b.err = ctx.Err()
+	return b.err
+}
+
+func TestDrainRecallChecksWaitsThenCancels(t *testing.T) {
+	f := setup(t)
+	f.s.EnableRecallCheck(&fakeRecallChecker{})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	body, contentType := formBody(t, map[string]string{"nickname": "Benz", "year": "2024", "make": "Mercedes-Benz", "model": "E-Class"}, "", nil)
+	if w := f.do(t, "POST", "/vehicles", body, contentType); w.Code != http.StatusSeeOther {
+		t.Fatalf("create: %d", w.Code)
+	}
+	f.s.DrainRecallChecks(ctx) // a quick check is simply waited for
+
+	blocking := &blockingRecallChecker{started: make(chan struct{})}
+	f.s.EnableRecallCheck(blocking)
+	body, contentType = formBody(t, map[string]string{"nickname": "Other", "year": "2024", "make": "Mercedes-Benz", "model": "E-Class"}, "", nil)
+	if w := f.do(t, "POST", "/vehicles", body, contentType); w.Code != http.StatusSeeOther {
+		t.Fatalf("create: %d", w.Code)
+	}
+	<-blocking.started
+	expired, expire := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer expire()
+	f.s.DrainRecallChecks(expired) // a stuck check is canceled once the drain deadline passes
+	if !errors.Is(blocking.err, context.Canceled) {
+		t.Fatalf("blocked check ended with %v, want it canceled", blocking.err)
 	}
 }
 

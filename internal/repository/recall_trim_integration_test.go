@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -81,6 +82,32 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	}
 	if vehicles := due(); len(vehicles) != 0 {
 		t.Fatalf("due after the trim is restored = %+v", vehicles)
+	}
+
+	// A VIN change is due again too, since the VIN supplies the trim when none
+	// is saved.
+	vehicle.VIN, vehicle.UpdatedAt = "W1KLF6BB7VA343747", now.Add(90*time.Second)
+	if _, _, err = store.UpdateVehicle(ctx, vehicle); err != nil {
+		t.Fatal(err)
+	}
+	if vehicles := due(); len(vehicles) != 1 || vehicles[0].VIN != "W1KLF6BB7VA343747" {
+		t.Fatalf("due after a VIN edit = %+v", vehicles)
+	}
+	// A result looked up for the vehicle as it was before the edit is refused
+	// instead of replacing the campaigns of the edited vehicle.
+	staleVehicle := vehicle
+	staleVehicle.VIN = ""
+	if _, err = store.SaveRecallCheck(ctx, staleVehicle, []model.Recall{{CampaignNumber: "00V000000"}}, now.Add(2*time.Minute)); !errors.Is(err, repository.ErrStaleVehicle) {
+		t.Fatalf("stale save err = %v", err)
+	}
+	if recalls, err := store.ListRecalls(ctx, &vehicle.ID, false); err != nil || len(recalls) != 1 || recalls[0].CampaignNumber != "24V224000" {
+		t.Fatalf("recalls after a stale save = %+v err=%v", recalls, err)
+	}
+	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if vehicles := due(); len(vehicles) != 0 {
+		t.Fatalf("due after checking the new VIN = %+v", vehicles)
 	}
 
 	// Checks made before the current matching are redone once.

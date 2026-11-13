@@ -10,6 +10,7 @@ import (
 
 	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/nhtsa"
+	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/google/uuid"
 )
 
@@ -18,6 +19,7 @@ type fakeStore struct {
 	staleBefore   time.Time
 	saved         map[uuid.UUID][]model.Recall
 	lockAvailable bool
+	saveErr       error
 	unlockCalls   int
 }
 
@@ -27,6 +29,9 @@ func (f *fakeStore) ListRecallCheckDue(_ context.Context, staleBefore time.Time)
 }
 
 func (f *fakeStore) SaveRecallCheck(_ context.Context, vehicle model.Vehicle, recalls []model.Recall, _ time.Time) (int, error) {
+	if f.saveErr != nil {
+		return 0, f.saveErr
+	}
 	if f.saved == nil {
 		f.saved = map[uuid.UUID][]model.Recall{}
 	}
@@ -135,6 +140,18 @@ func TestCheckVehicleChecksOneVehicleWithItsTrim(t *testing.T) {
 	store.saved = nil
 	if err := newTestRunner(store, source, now).CheckVehicle(context.Background(), benz); err == nil || len(store.saved) != 0 {
 		t.Fatalf("failed lookup: err=%v saved=%v", err, store.saved)
+	}
+}
+
+func TestCheckVehicleDropsAResultForAVehicleEditedMeanwhile(t *testing.T) {
+	store := &fakeStore{saveErr: repository.ErrStaleVehicle}
+	source := &fakeSource{recalls: map[string][]nhtsa.Recall{"Subaru/Outback": {{CampaignNumber: "19V493000"}}}}
+	if err := newTestRunner(store, source, time.Now()).CheckVehicle(context.Background(), vehicle("Subaru", "Outback", 2019)); err != nil {
+		t.Fatalf("a stale result is dropped, not an error: %v", err)
+	}
+	store.saveErr = errors.New("connection lost")
+	if err := newTestRunner(store, source, time.Now()).CheckVehicle(context.Background(), vehicle("Subaru", "Outback", 2019)); err == nil {
+		t.Fatal("a failed save should fail the check")
 	}
 }
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,6 +41,10 @@ type Server struct {
 	// background checks it is running.
 	recallChecker RecallChecker
 	recallChecks  sync.WaitGroup
+	// recallCtx is the parent of those checks; cancelRecallChecks cuts them
+	// short.
+	recallCtx          context.Context
+	cancelRecallChecks context.CancelFunc
 	// metrics is nil until EnableMetrics; a nil *metrics.Metrics records nothing.
 	metrics *metrics.Metrics
 }
@@ -59,6 +64,7 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 	if err != nil {
 		return nil, err
 	}
+	recallCtx, cancelRecallChecks := context.WithCancel(context.Background())
 	return &Server{
 		cfg:    cfg,
 		store:  store,
@@ -68,6 +74,9 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 		ui:     renderer,
 		static: static,
 		now:    time.Now,
+
+		recallCtx:          recallCtx,
+		cancelRecallChecks: cancelRecallChecks,
 
 		readyTimeout: readyTimeout,
 	}, nil

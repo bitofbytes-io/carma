@@ -49,12 +49,29 @@ func (s *Server) checkRecallsSoon(vehicle model.Vehicle) {
 		return
 	}
 	s.recallChecks.Go(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), recallCheckTimeout)
+		ctx, cancel := context.WithTimeout(s.recallCtx, recallCheckTimeout)
 		defer cancel()
 		if err := s.recallChecker.CheckVehicle(ctx, vehicle); err != nil {
 			slog.Warn("recall check after save failed", "vehicle_id", vehicle.ID, "error", err)
 		}
 	})
+}
+
+// DrainRecallChecks waits for the background recall checks started by vehicle
+// saves, canceling them if ctx ends first. Call it after the HTTP server has
+// stopped and before the store closes.
+func (s *Server) DrainRecallChecks(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		s.recallChecks.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		s.cancelRecallChecks()
+		<-done
+	}
 }
 
 // loadAttention fills the dashboard's "Needs attention" lists: overdue and

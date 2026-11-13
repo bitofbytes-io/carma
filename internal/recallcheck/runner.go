@@ -156,6 +156,11 @@ func (r *Runner) check(ctx context.Context, vehicle model.Vehicle) (int, error) 
 		})
 	}
 	added, err := r.store.SaveRecallCheck(ctx, vehicle, recalls, r.now())
+	if errors.Is(err, repository.ErrStaleVehicle) {
+		// Edited while NHTSA was queried; the edit's own check covers it.
+		r.logger.Info("recall check dropped: vehicle changed", "vehicle_id", vehicle.ID)
+		return 0, nil
+	}
 	if err != nil {
 		return 0, fmt.Errorf("save recalls for vehicle %s: %w", vehicle.ID, err)
 	}
