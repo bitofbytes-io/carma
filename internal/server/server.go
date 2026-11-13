@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/assets"
@@ -35,6 +37,14 @@ type Server struct {
 	dbCheck, assetCheck singleCheck
 	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
+	// recallChecker is nil until EnableRecallCheck; recallChecks tracks the
+	// background checks it is running.
+	recallChecker RecallChecker
+	recallChecks  sync.WaitGroup
+	// recallCtx is the parent of those checks; cancelRecallChecks cuts them
+	// short.
+	recallCtx          context.Context
+	cancelRecallChecks context.CancelFunc
 	// metrics is nil until EnableMetrics; a nil *metrics.Metrics records nothing.
 	metrics *metrics.Metrics
 }
@@ -54,6 +64,7 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 	if err != nil {
 		return nil, err
 	}
+	recallCtx, cancelRecallChecks := context.WithCancel(context.Background())
 	return &Server{
 		cfg:    cfg,
 		store:  store,
@@ -63,6 +74,9 @@ func New(cfg *config.Config, store repository.Store, assetStore assets.Store, au
 		ui:     renderer,
 		static: static,
 		now:    time.Now,
+
+		recallCtx:          recallCtx,
+		cancelRecallChecks: cancelRecallChecks,
 
 		readyTimeout: readyTimeout,
 	}, nil
@@ -91,7 +105,10 @@ type pageData struct {
 	// Recalls are the vehicle page's NHTSA campaigns, open and dismissed;
 	// RecallAlerts are the dashboard's vehicles with open ones.
 	Recalls, DismissedRecalls []model.Recall
-	RecallAlerts              []ui.RecallAlert
+	// RecallsCheckedAt is when the vehicle's recalls were last checked, or nil
+	// if they never were.
+	RecallsCheckedAt *time.Time
+	RecallAlerts     []ui.RecallAlert
 	// VINDecode shows the vehicle form's "Decode VIN" button; VINMessage is
 	// the outcome of a decode.
 	VINDecode  bool

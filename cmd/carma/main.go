@@ -33,6 +33,9 @@ const (
 	serverIdleTimeout        = 2 * time.Minute
 	schedulerShutdownTimeout = 15 * time.Second
 	metricsShutdownTimeout   = 5 * time.Second
+	// recallDrainTimeout is how long shutdown lets recall checks started by
+	// vehicle saves finish before cutting them short.
+	recallDrainTimeout = 10 * time.Second
 	// backgroundJobTimeout bounds each scheduled run, so a run stuck on the
 	// database or a remote service ends and frees its leader lock instead of
 	// holding it until the process restarts.
@@ -88,6 +91,7 @@ func run() error {
 	nhtsaClient := nhtsa.NewClient()
 	app.EnableVINDecode(nhtsaClient)
 	recallRunner := recallcheck.NewRunner(store, nhtsaClient, slog.Default())
+	app.EnableRecallCheck(recallRunner)
 	var reminderRunner *reminderemail.Runner
 	var digestRunner *reminderemail.DigestRunner
 	if cfg.ReminderEmail.Enabled {
@@ -175,6 +179,9 @@ func run() error {
 		defer c()
 		result = httpServer.Shutdown(shutdown)
 	}
+	drain, cancelDrain := context.WithTimeout(context.Background(), recallDrainTimeout)
+	app.DrainRecallChecks(drain)
+	cancelDrain()
 	metricsShutdown, cancelMetrics := context.WithTimeout(context.Background(), metricsShutdownTimeout)
 	defer cancelMetrics()
 	if e := metricsServer.Shutdown(metricsShutdown); e != nil {

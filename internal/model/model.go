@@ -16,13 +16,13 @@ type Session struct {
 	UserAgent, IPAddress string
 }
 type Vehicle struct {
-	ID                                              uuid.UUID
-	Nickname                                        string
-	Year                                            *int
-	Make, Model, VIN, LicensePlate, PhotoKey, Notes string
-	ArchivedAt                                      *time.Time
-	CreatedAt, UpdatedAt                            time.Time
-	CurrentOdometer                                 *int64
+	ID                                                    uuid.UUID
+	Nickname                                              string
+	Year                                                  *int
+	Make, Model, Trim, VIN, LicensePlate, PhotoKey, Notes string
+	ArchivedAt                                            *time.Time
+	CreatedAt, UpdatedAt                                  time.Time
+	CurrentOdometer                                       *int64
 	// CurrentOdometerOn is the calendar date CurrentOdometer was recorded,
 	// stored when the mileage is written so it can feed mileage projections.
 	CurrentOdometerOn *time.Time
