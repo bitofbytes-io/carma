@@ -88,6 +88,7 @@ func run() error {
 	nhtsaClient := nhtsa.NewClient()
 	app.EnableVINDecode(nhtsaClient)
 	recallRunner := recallcheck.NewRunner(store, nhtsaClient, slog.Default())
+	app.EnableRecallCheck(recallRunner)
 	var reminderRunner *reminderemail.Runner
 	var digestRunner *reminderemail.DigestRunner
 	if cfg.ReminderEmail.Enabled {

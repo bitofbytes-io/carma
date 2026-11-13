@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/assets"
@@ -35,6 +36,10 @@ type Server struct {
 	dbCheck, assetCheck singleCheck
 	// vinDecoder is nil until EnableVINDecode, which cmd/carma always calls.
 	vinDecoder VINDecoder
+	// recallChecker is nil until EnableRecallCheck; recallChecks tracks the
+	// background checks it is running.
+	recallChecker RecallChecker
+	recallChecks  sync.WaitGroup
 	// metrics is nil until EnableMetrics; a nil *metrics.Metrics records nothing.
 	metrics *metrics.Metrics
 }
@@ -91,7 +96,10 @@ type pageData struct {
 	// Recalls are the vehicle page's NHTSA campaigns, open and dismissed;
 	// RecallAlerts are the dashboard's vehicles with open ones.
 	Recalls, DismissedRecalls []model.Recall
-	RecallAlerts              []ui.RecallAlert
+	// RecallsCheckedAt is when the vehicle's recalls were last checked, or nil
+	// if they never were.
+	RecallsCheckedAt *time.Time
+	RecallAlerts     []ui.RecallAlert
 	// VINDecode shows the vehicle form's "Decode VIN" button; VINMessage is
 	// the outcome of a decode.
 	VINDecode  bool

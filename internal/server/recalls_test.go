@@ -70,8 +70,8 @@ func TestVINDecodeFillsIdentityFields(t *testing.T) {
 func TestRecallsShowOnDashboardAndCanBeDismissed(t *testing.T) {
 	f := setup(t)
 	vehicle := createVehicle(t, f)
-	if w := f.do(t, "GET", "/vehicles/"+vehicle.ID.String(), nil, ""); strings.Contains(w.Body.String(), `id="recalls"`) {
-		t.Fatal("recall section shown without recalls")
+	if page := f.do(t, "GET", "/vehicles/"+vehicle.ID.String(), nil, "").Body.String(); !strings.Contains(page, `id="recalls"`) || !strings.Contains(page, "Not checked yet") {
+		t.Fatalf("an unchecked vehicle should say so: %s", page)
 	}
 	recalls := []model.Recall{{CampaignNumber: "19V493000", Component: "STRUCTURE", Summary: "Spot welds.", ParkIt: true}}
 	if _, err := f.store.SaveRecallCheck(t.Context(), vehicle, recalls, f.s.now()); err != nil {

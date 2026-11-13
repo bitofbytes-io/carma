@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
@@ -21,9 +22,9 @@ const (
 	CheckAge = 7 * 24 * time.Hour
 )
 
-// Source lists NHTSA recall campaigns for a model year.
+// Source lists NHTSA recall campaigns for a vehicle and model year.
 type Source interface {
-	Recalls(ctx context.Context, vehicleMake, model string, year int) ([]nhtsa.Recall, error)
+	RecallsForVehicle(ctx context.Context, vehicleMake, model, trim string, year int) ([]nhtsa.Recall, error)
 }
 
 type Report struct {
@@ -91,8 +92,52 @@ func (r *Runner) Run(ctx context.Context) (report Report, runErr error) {
 	return report, errors.Join(failures...)
 }
 
+// CheckVehicle checks one vehicle now, such as right after it is added or
+// edited, instead of waiting for the next Run. A vehicle without a year, make,
+// and model is skipped. It does not take Run's lock: saving a check is one
+// transaction, so a concurrent Run at worst repeats the same check.
+func (r *Runner) CheckVehicle(ctx context.Context, vehicle model.Vehicle) error {
+	if vehicle.Year == nil || strings.TrimSpace(vehicle.Make) == "" || strings.TrimSpace(vehicle.Model) == "" {
+		return nil
+	}
+	added, err := r.check(ctx, vehicle)
+	if err != nil {
+		return err
+	}
+	if added > 0 {
+		r.logger.Info("new recalls found", "vehicle_id", vehicle.ID, "count", added)
+	}
+	return nil
+}
+
+// VINDecoder looks up what a VIN decodes to. A Source that is also a
+// VINDecoder supplies the trim for vehicles saved without one.
+type VINDecoder interface {
+	DecodeVIN(ctx context.Context, vin string) (nhtsa.Vehicle, error)
+}
+
+// trimFor returns the trim to look recalls up with: the vehicle's own, or for a
+// vehicle saved before trims were stored, the one its VIN decodes to. A VIN
+// that cannot be decoded is not an error; the lookup just has no trim.
+func (r *Runner) trimFor(ctx context.Context, vehicle model.Vehicle) (string, error) {
+	decoder, ok := r.source.(VINDecoder)
+	vin := nhtsa.LookupVIN(vehicle.VIN)
+	if vehicle.Trim != "" || !ok || vin == "" {
+		return vehicle.Trim, nil
+	}
+	decoded, err := decoder.DecodeVIN(ctx, vin)
+	if errors.Is(err, nhtsa.ErrNotDecoded) || errors.Is(err, nhtsa.ErrInvalidVIN) {
+		return "", nil
+	}
+	return decoded.Trim, err
+}
+
 func (r *Runner) check(ctx context.Context, vehicle model.Vehicle) (int, error) {
-	found, err := r.source.Recalls(ctx, vehicle.Make, vehicle.Model, *vehicle.Year)
+	trim, err := r.trimFor(ctx, vehicle)
+	if err != nil {
+		return 0, fmt.Errorf("decode VIN for vehicle %s: %w", vehicle.ID, err)
+	}
+	found, err := r.source.RecallsForVehicle(ctx, vehicle.Make, vehicle.Model, trim, *vehicle.Year)
 	if err != nil {
 		return 0, fmt.Errorf("fetch recalls for vehicle %s: %w", vehicle.ID, err)
 	}

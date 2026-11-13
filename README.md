@@ -66,14 +66,20 @@ before Monday 08:00 household time (each of these is a no-op, not a failure).
 due one, without sending email.
 
 NHTSA lookups are always on. The vehicle form has a "Decode VIN" button that fills
-in year, make, and model from NHTSA's free vPIC API, and a recall check, under its
-own advisory lock, fetches NHTSA safety recalls for each active vehicle's year, make,
-and model about once a week (and again right after any of them is edited). Open
-recalls appear in "Needs attention" and on the vehicle page, where they can be
-dismissed once fixed or not applicable. A vehicle's first check (and the first after
-its year, make, or model changes) only sets a baseline; campaigns NHTSA adds after
-that are emailed in the weekly digest when reminder email is on. Both APIs are keyless; the containers only
-need outbound HTTPS to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`.
+in year, make, model, and trim from NHTSA's free vPIC API, and a recall check, under
+its own advisory lock, fetches NHTSA safety recalls for each active vehicle's year,
+make, and model about once a week. A vehicle is also checked in the background as soon
+as it is added or edited. NHTSA files some recalls under trim names (such as
+"E 450 4MATIC") rather than the model family a VIN decodes to (such as "E-Class"), so
+the check looks up the model, the trim, their spacing variants, and NHTSA's own model
+names for that make and year in the same family, and merges the campaigns by number.
+The vehicle page always shows a "Safety recalls" section: the open recalls, "No open
+recalls" with when it was last checked, or "Not checked yet". Open recalls also appear
+in "Needs attention", and can be dismissed once fixed or not applicable. A vehicle's
+first check (and the first after its year, make, or model changes) only sets a
+baseline; campaigns NHTSA adds after that are emailed in the weekly digest when
+reminder email is on. Both APIs are keyless; the containers only need outbound HTTPS
+to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`. No configuration is needed.
 
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 Both `make test` (also used in CI) and `make test-integration` run the Go race

@@ -72,6 +72,9 @@ type Store interface {
 	// ListRecalls returns NHTSA recall campaigns for active vehicles, or for one
 	// vehicle when vehicleID is set, skipping dismissed ones unless asked.
 	ListRecalls(ctx context.Context, vehicleID *uuid.UUID, includeDismissed bool) ([]model.Recall, error)
+	// RecallCheckedAt returns when the vehicle's recalls were last checked, or
+	// nil if they never were.
+	RecallCheckedAt(ctx context.Context, vehicleID uuid.UUID) (*time.Time, error)
 	// SetRecallDismissed hides a vehicle's recall campaign, or shows it again
 	// when dismissedAt is nil.
 	SetRecallDismissed(ctx context.Context, vehicleID uuid.UUID, campaignNumber string, dismissedAt *time.Time) error

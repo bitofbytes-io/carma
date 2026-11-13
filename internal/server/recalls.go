@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/nhtsa"
 	"github.com/bitofbytes-io/carma/internal/ui"
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,37 @@ type VINDecoder interface {
 // EnableVINDecode adds the "Decode VIN" button to the vehicle form.
 func (s *Server) EnableVINDecode(decoder VINDecoder) {
 	s.vinDecoder = decoder
+}
+
+// recallCheckTimeout bounds one background recall check, which makes several
+// NHTSA requests.
+const recallCheckTimeout = 2 * time.Minute
+
+// RecallChecker checks one vehicle's NHTSA recalls and saves the result.
+type RecallChecker interface {
+	CheckVehicle(ctx context.Context, vehicle model.Vehicle) error
+}
+
+// EnableRecallCheck checks a vehicle's recalls as soon as it is added or
+// edited, instead of waiting for the next scheduled check.
+func (s *Server) EnableRecallCheck(checker RecallChecker) {
+	s.recallChecker = checker
+}
+
+// checkRecallsSoon starts a recall check for a saved vehicle in the
+// background. The request does not wait for it, and a failure is only logged:
+// the scheduled check retries the vehicle.
+func (s *Server) checkRecallsSoon(vehicle model.Vehicle) {
+	if s.recallChecker == nil || vehicle.ArchivedAt != nil {
+		return
+	}
+	s.recallChecks.Go(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), recallCheckTimeout)
+		defer cancel()
+		if err := s.recallChecker.CheckVehicle(ctx, vehicle); err != nil {
+			slog.Warn("recall check after save failed", "vehicle_id", vehicle.ID, "error", err)
+		}
+	})
 }
 
 // loadAttention fills the dashboard's "Needs attention" lists: overdue and
@@ -56,6 +88,7 @@ func (s *Server) decodeVIN(response http.ResponseWriter, request *http.Request) 
 	data.Vehicle.VIN = strings.TrimSpace(request.PostFormValue("vin"))
 	data.Vehicle.Make = strings.TrimSpace(request.PostFormValue("make"))
 	data.Vehicle.Model = strings.TrimSpace(request.PostFormValue("model"))
+	data.Vehicle.Trim = strings.TrimSpace(request.PostFormValue("trim"))
 	data.Vehicle.LicensePlate = strings.TrimSpace(request.PostFormValue("license_plate"))
 	if year, err := strconv.Atoi(strings.TrimSpace(request.PostFormValue("year"))); err == nil {
 		data.Vehicle.Year = &year
@@ -72,6 +105,7 @@ func (s *Server) decodeVIN(response http.ResponseWriter, request *http.Request) 
 	default:
 		data.Vehicle.VIN = nhtsa.NormalizeVIN(data.Vehicle.VIN)
 		data.Vehicle.Make, data.Vehicle.Model = decoded.Make, decoded.Model
+		data.Vehicle.Trim = decoded.Trim
 		if decoded.Year != nil {
 			data.Vehicle.Year = decoded.Year
 		}

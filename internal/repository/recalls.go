@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/model"
@@ -11,11 +12,17 @@ import (
 
 const recallCheckAdvisoryLockID int64 = 0x4341524d4152434c // "CARMARCL"
 
+// RecallMatchVersion numbers how the recall check matches NHTSA model names.
+// Raise it when matching improves, so vehicles checked with older matching are
+// checked again.
+const RecallMatchVersion = 1
+
 // RecallCheckStore is what the weekly NHTSA recall check needs.
 type RecallCheckStore interface {
 	// ListRecallCheckDue returns active vehicles with a year, make, and model
 	// that were never checked, were last checked before staleBefore, or were
-	// checked for a different year, make, or model.
+	// checked for a different year, make, model, or trim, or with older
+	// matching (RecallMatchVersion).
 	ListRecallCheckDue(ctx context.Context, staleBefore time.Time) ([]model.Vehicle, error)
 	// SaveRecallCheck replaces the vehicle's campaigns with recalls, checked for
 	// its year, make, and model. Campaigns still listed keep their first-seen
@@ -35,18 +42,19 @@ func (p *Postgres) TryRecallCheckLock(ctx context.Context) (func(context.Context
 }
 
 func (p *Postgres) ListRecallCheckDue(ctx context.Context, staleBefore time.Time) ([]model.Vehicle, error) {
-	rows, err := p.pool.Query(ctx, `SELECT v.id,v.nickname,v.year,v.make,v.model
+	rows, err := p.pool.Query(ctx, `SELECT v.id,v.nickname,v.year,v.make,v.model,v.trim,v.vin
 		FROM vehicles v
 		LEFT JOIN vehicle_recall_checks c ON c.vehicle_id=v.id
 		WHERE v.archived_at IS NULL AND v.year IS NOT NULL AND btrim(v.make)<>'' AND btrim(v.model)<>''
-			AND (c.vehicle_id IS NULL OR c.checked_at<$1 OR c.model_year<>v.year OR c.make<>v.make OR c.model<>v.model)
-		ORDER BY c.checked_at NULLS FIRST, v.id`, staleBefore.UTC())
+			AND (c.vehicle_id IS NULL OR c.checked_at<$1 OR c.model_year<>v.year OR c.make<>v.make OR c.model<>v.model
+				OR c.trim<>v.trim OR c.match_version<$2)
+		ORDER BY c.checked_at NULLS FIRST, v.id`, staleBefore.UTC(), RecallMatchVersion)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (model.Vehicle, error) {
 		var vehicle model.Vehicle
-		err := row.Scan(&vehicle.ID, &vehicle.Nickname, &vehicle.Year, &vehicle.Make, &vehicle.Model)
+		err := row.Scan(&vehicle.ID, &vehicle.Nickname, &vehicle.Year, &vehicle.Make, &vehicle.Model, &vehicle.Trim, &vehicle.VIN)
 		return vehicle, err
 	})
 }
@@ -100,10 +108,11 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 			return 0, err
 		}
 	}
-	tag, err := tx.Exec(ctx, `INSERT INTO vehicle_recall_checks(vehicle_id,checked_at,model_year,make,model)
-		SELECT id,$2,$3,$4,$5 FROM vehicles WHERE id=$1
-		ON CONFLICT(vehicle_id) DO UPDATE SET checked_at=EXCLUDED.checked_at,model_year=EXCLUDED.model_year,make=EXCLUDED.make,model=EXCLUDED.model`,
-		vehicle.ID, checkedAt.UTC(), *vehicle.Year, vehicle.Make, vehicle.Model)
+	tag, err := tx.Exec(ctx, `INSERT INTO vehicle_recall_checks(vehicle_id,checked_at,model_year,make,model,trim,match_version)
+		SELECT id,$2,$3,$4,$5,$6,$7 FROM vehicles WHERE id=$1
+		ON CONFLICT(vehicle_id) DO UPDATE SET checked_at=EXCLUDED.checked_at,model_year=EXCLUDED.model_year,make=EXCLUDED.make,model=EXCLUDED.model,
+		trim=EXCLUDED.trim,match_version=EXCLUDED.match_version`,
+		vehicle.ID, checkedAt.UTC(), *vehicle.Year, vehicle.Make, vehicle.Model, vehicle.Trim, RecallMatchVersion)
 	if err != nil {
 		return 0, err
 	}
@@ -111,6 +120,23 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 		return 0, ErrNotFound
 	}
 	return added, tx.Commit(ctx)
+}
+
+// RecallCheckedAt returns when the vehicle's recalls were last checked for its
+// current year, make, and model, or nil when they have not been (or the vehicle
+// has changed since), matching what ListRecalls shows.
+func (p *Postgres) RecallCheckedAt(ctx context.Context, vehicleID uuid.UUID) (*time.Time, error) {
+	var checkedAt time.Time
+	err := p.pool.QueryRow(ctx, `SELECT c.checked_at FROM vehicle_recall_checks c
+		JOIN vehicles v ON v.id=c.vehicle_id
+		WHERE c.vehicle_id=$1 AND c.model_year=v.year AND c.make=v.make AND c.model=v.model`, vehicleID).Scan(&checkedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &checkedAt, nil
 }
 
 // ListRecalls returns recall campaigns for active vehicles, or for one vehicle

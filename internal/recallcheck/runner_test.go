@@ -57,8 +57,11 @@ type fakeSource struct {
 	calls   []string
 }
 
-func (f *fakeSource) Recalls(_ context.Context, vehicleMake, model string, year int) ([]nhtsa.Recall, error) {
+func (f *fakeSource) RecallsForVehicle(_ context.Context, vehicleMake, model, trim string, year int) ([]nhtsa.Recall, error) {
 	key := vehicleMake + "/" + model
+	if trim != "" {
+		key += "/" + trim
+	}
 	f.calls = append(f.calls, key)
 	return f.recalls[key], f.err[key]
 }
@@ -101,6 +104,87 @@ func TestRunSavesRecallsAndContinuesPastFailures(t *testing.T) {
 	store.due = []model.Vehicle{outback}
 	if report, err = newTestRunner(store, source, now).Run(context.Background()); err != nil || report.Checked != 1 || report.New != 0 {
 		t.Fatalf("second run report=%+v err=%v", report, err)
+	}
+}
+
+func TestCheckVehicleChecksOneVehicleWithItsTrim(t *testing.T) {
+	now := time.Date(2026, time.November, 13, 12, 0, 0, 0, time.UTC)
+	benz := vehicle("Mercedes-Benz", "E-Class", 2024)
+	benz.Trim = "E450 4MATIC"
+	store := &fakeStore{}
+	source := &fakeSource{recalls: map[string][]nhtsa.Recall{"Mercedes-Benz/E-Class/E450 4MATIC": {{CampaignNumber: "24V224000"}, {CampaignNumber: "26V281000"}}}}
+	if err := newTestRunner(store, source, now).CheckVehicle(context.Background(), benz); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.saved[benz.ID]) != 2 || store.unlockCalls != 0 {
+		t.Fatalf("saved=%+v unlockCalls=%d", store.saved, store.unlockCalls)
+	}
+
+	incomplete := vehicle("Subaru", "", 2019)
+	noYear := model.Vehicle{ID: uuid.New(), Make: "Subaru", Model: "Outback"}
+	for _, v := range []model.Vehicle{incomplete, noYear} {
+		if err := newTestRunner(store, source, now).CheckVehicle(context.Background(), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(source.calls) != 1 {
+		t.Fatalf("incomplete vehicles were looked up: %v", source.calls)
+	}
+
+	source.err = map[string]error{"Mercedes-Benz/E-Class/E450 4MATIC": errors.New("HTTP 503")}
+	store.saved = nil
+	if err := newTestRunner(store, source, now).CheckVehicle(context.Background(), benz); err == nil || len(store.saved) != 0 {
+		t.Fatalf("failed lookup: err=%v saved=%v", err, store.saved)
+	}
+}
+
+type decodingSource struct {
+	*fakeSource
+	decoded nhtsa.Vehicle
+	err     error
+	vins    []string
+}
+
+func (d *decodingSource) DecodeVIN(_ context.Context, vin string) (nhtsa.Vehicle, error) {
+	d.vins = append(d.vins, vin)
+	return d.decoded, d.err
+}
+
+func TestRunDecodesTheTrimOfVehiclesSavedWithoutOne(t *testing.T) {
+	now := time.Date(2026, time.November, 13, 12, 0, 0, 0, time.UTC)
+	benz := vehicle("Mercedes-Benz", "E-Class", 2024)
+	benz.VIN = "w1klf6bb7va343747"
+	source := &decodingSource{
+		fakeSource: &fakeSource{recalls: map[string][]nhtsa.Recall{"Mercedes-Benz/E-Class/E450 4MATIC": {{CampaignNumber: "26V281000"}}}},
+		decoded:    nhtsa.Vehicle{Trim: "E450 4MATIC"},
+	}
+	store := &fakeStore{due: []model.Vehicle{benz}, lockAvailable: true}
+	runner := NewRunner(store, source, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runner.now = func() time.Time { return now }
+	if report, err := runner.Run(context.Background()); err != nil || report.Checked != 1 || report.New != 1 {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	if len(source.vins) != 1 || source.vins[0] != "W1KLF6BB7VA343747" {
+		t.Fatalf("decoded VINs = %v", source.vins)
+	}
+
+	// Neither a trim already saved nor a missing or undecodable VIN is decoded
+	// again; a lookup failure fails the check so it is retried.
+	withTrim, noVIN, undecodable := benz, benz, benz
+	withTrim.Trim = "E450 4MATIC"
+	noVIN.VIN = ""
+	source.err = nhtsa.ErrNotDecoded
+	for _, v := range []model.Vehicle{withTrim, noVIN, undecodable} {
+		if err := runner.CheckVehicle(context.Background(), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(source.vins) != 2 {
+		t.Fatalf("decoded VINs = %v", source.vins)
+	}
+	source.err = errors.New("HTTP 503")
+	if err := runner.CheckVehicle(context.Background(), undecodable); err == nil {
+		t.Fatal("a failed VIN lookup should fail the check")
 	}
 }
 

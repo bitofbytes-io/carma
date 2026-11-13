@@ -44,9 +44,9 @@ func NewClient() *Client {
 // Vehicle is what a VIN decodes to. Warning carries vPIC's note when the VIN
 // decoded with errors, such as a bad check digit.
 type Vehicle struct {
-	Make, Model string
-	Year        *int
-	Warning     string
+	Make, Model, Trim string
+	Year              *int
+	Warning           string
 }
 
 // Recall is one NHTSA safety recall campaign.
@@ -72,7 +72,8 @@ func LookupVIN(vin string) string {
 	return ""
 }
 
-// DecodeVIN looks up the make, model, and model year for a 17-character VIN.
+// DecodeVIN looks up the make, model, trim, and model year for a 17-character
+// VIN.
 func (c *Client) DecodeVIN(ctx context.Context, vin string) (Vehicle, error) {
 	vin = NormalizeVIN(vin)
 	if !vinPattern.MatchString(vin) {
@@ -80,7 +81,7 @@ func (c *Client) DecodeVIN(ctx context.Context, vin string) (Vehicle, error) {
 	}
 	var body struct {
 		Results []struct {
-			Make, Model, ModelYear, ErrorCode, ErrorText string
+			Make, Model, Trim, ModelYear, ErrorCode, ErrorText string
 		}
 	}
 	endpoint := strings.TrimRight(c.VPICURL, "/") + "/vehicles/DecodeVinValues/" + url.PathEscape(vin) + "?format=json"
@@ -91,7 +92,7 @@ func (c *Client) DecodeVIN(ctx context.Context, vin string) (Vehicle, error) {
 		return Vehicle{}, ErrNotDecoded
 	}
 	result := body.Results[0]
-	decoded := Vehicle{Make: displayName(result.Make), Model: strings.TrimSpace(result.Model)}
+	decoded := Vehicle{Make: displayName(result.Make), Model: strings.TrimSpace(result.Model), Trim: strings.TrimSpace(result.Trim)}
 	if year, err := strconv.Atoi(strings.TrimSpace(result.ModelYear)); err == nil && year >= 1886 && year <= 9999 {
 		decoded.Year = &year
 	}
@@ -101,8 +102,60 @@ func (c *Client) DecodeVIN(ctx context.Context, vin string) (Vehicle, error) {
 	return decoded, nil
 }
 
+// RecallsForVehicle lists the recall campaigns NHTSA has for a vehicle. NHTSA
+// files campaigns under whatever model name the manufacturer reported, such as
+// "E 450 4MATIC" for a vehicle decoded as "E-Class", so it queries the model,
+// the trim, their spacing variants, and NHTSA's own model names for the make
+// and year in the same family, then merges the campaigns by number. Only when
+// every name comes back empty is the vehicle treated as having no recalls.
+func (c *Client) RecallsForVehicle(ctx context.Context, vehicleMake, model, trim string, year int) ([]Recall, error) {
+	products, err := c.productModels(ctx, vehicleMake, year)
+	if err != nil {
+		return nil, err
+	}
+	recalls := []Recall{}
+	seen := map[string]bool{}
+	for _, name := range ModelCandidates(model, trim, products) {
+		found, err := c.Recalls(ctx, vehicleMake, name, year)
+		if err != nil {
+			return nil, err
+		}
+		for _, recall := range found {
+			if !seen[recall.CampaignNumber] {
+				seen[recall.CampaignNumber] = true
+				recalls = append(recalls, recall)
+			}
+		}
+	}
+	return recalls, nil
+}
+
+// productModels lists the model names NHTSA has recall data for under a make
+// and model year. An unknown make is answered with 400 and means no names.
+func (c *Client) productModels(ctx context.Context, vehicleMake string, year int) ([]string, error) {
+	query := url.Values{"modelYear": {strconv.Itoa(year)}, "make": {strings.TrimSpace(vehicleMake)}, "issueType": {"r"}}
+	var body struct {
+		Results []struct{ Model string } `json:"results"`
+	}
+	status, err := c.getJSON(ctx, strings.TrimRight(c.RecallsURL, "/")+"/products/vehicle/models?"+query.Encode(), &body)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, nil
+	}
+	names := make([]string, 0, len(body.Results))
+	for _, result := range body.Results {
+		if name := strings.TrimSpace(result.Model); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 // Recalls lists the recall campaigns NHTSA has for a make, model, and model
 // year. Campaigns cover the model year, so some may not apply to every VIN.
+// NHTSA matches the model name exactly; see RecallsForVehicle.
 func (c *Client) Recalls(ctx context.Context, vehicleMake, model string, year int) ([]Recall, error) {
 	query := url.Values{"make": {strings.TrimSpace(vehicleMake)}, "model": {strings.TrimSpace(model)}, "modelYear": {strconv.Itoa(year)}}
 	var body struct {
