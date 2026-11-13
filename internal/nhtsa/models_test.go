@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -30,7 +31,7 @@ func TestModelCandidates(t *testing.T) {
 		{"blank model and trim", "", " ", nil, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ModelCandidates(tt.model, tt.trim, tt.products); !reflect.DeepEqual(got, tt.want) {
+			if got, _ := ModelCandidates(tt.model, tt.trim, tt.products); !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("ModelCandidates = %q, want %q", got, tt.want)
 			}
 		})
@@ -42,8 +43,9 @@ func TestModelCandidatesAreBounded(t *testing.T) {
 	for i := range 40 {
 		products = append(products, "X "+strings.Repeat("9", i+1))
 	}
-	if got := ModelCandidates("X", "", products); len(got) != maxCandidates {
-		t.Fatalf("%d candidates, want %d", len(got), maxCandidates)
+	got, truncated := ModelCandidates("X", "", products)
+	if len(got) != maxCandidates || !truncated {
+		t.Fatalf("%d candidates (truncated=%v), want %d and truncated", len(got), truncated, maxCandidates)
 	}
 }
 
@@ -70,7 +72,7 @@ func (f *nhtsaFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, name := range names {
 			results = append(results, `{"model":"`+name+`"}`)
 		}
-		_, _ = w.Write([]byte(`{"count":` + string(rune('0'+len(names))) + `,"message":"Results returned successfully","results":[` + strings.Join(results, ",") + `]}`))
+		_, _ = w.Write([]byte(`{"count":` + strconv.Itoa(len(names)) + `,"message":"Results returned successfully","results":[` + strings.Join(results, ",") + `]}`))
 	case "/recalls/recallsByVehicle":
 		f.mu.Lock()
 		f.queried = append(f.queried, query.Get("model"))
@@ -167,6 +169,32 @@ func TestRecallsForVehicleIsEmptyOnlyAfterEveryNameMisses(t *testing.T) {
 	fixture.queried = nil
 	if got, err = client.RecallsForVehicle(context.Background(), "Custom", "Thing", "", 2027); err != nil || len(got) != 0 || !reflect.DeepEqual(fixture.queried, []string{"Thing"}) {
 		t.Fatalf("unknown make: %v err=%v queried=%q", campaignNumbers(got), err, fixture.queried)
+	}
+}
+
+func TestRecallsForVehicleDoesNotReportATruncatedLookupAsClean(t *testing.T) {
+	var products []string
+	for i := range maxCandidates + 3 {
+		products = append(products, "E "+strings.Repeat("1", i+1))
+	}
+	last := products[len(products)-1]
+	fixture := &nhtsaFixture{
+		products:  map[string][]string{"mercedes-benz|2024": products},
+		campaigns: map[string][]string{"mercedes-benz|" + strings.ToLower(last) + "|2024": {"24V000001"}},
+	}
+	client := testClient(t, fixture.ServeHTTP)
+	// Names beyond the limit were skipped and nothing was found: not "no recalls".
+	if _, err := client.RecallsForVehicle(context.Background(), "Mercedes-Benz", "E-Class", "", 2024); err == nil || !strings.Contains(err.Error(), "not all checked") {
+		t.Fatalf("truncated empty lookup err = %v", err)
+	}
+	if len(fixture.queried) != maxCandidates || slices.Contains(fixture.queried, last) {
+		t.Fatalf("queried %d names, including the last: %v", len(fixture.queried), slices.Contains(fixture.queried, last))
+	}
+	// Campaigns that were found are still reported.
+	fixture.campaigns["mercedes-benz|e-class|2024"] = []string{"24V000002"}
+	got, err := client.RecallsForVehicle(context.Background(), "Mercedes-Benz", "E-Class", "", 2024)
+	if err != nil || !reflect.DeepEqual(campaignNumbers(got), []string{"24V000002"}) {
+		t.Fatalf("partial lookup = %v err=%v", campaignNumbers(got), err)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 
 // maxCandidates bounds the model names tried per vehicle, so a family with
 // many NHTSA model names costs a bounded number of requests.
-const maxCandidates = 12
+const maxCandidates = 20
 
 var (
 	lettersThenDigits = regexp.MustCompile(`^([A-Za-z]+)([0-9]+)$`)
@@ -19,16 +19,22 @@ var (
 // ModelCandidates lists the model names to try against NHTSA's recall lookup,
 // most specific first and without duplicates: the stored model, the trim, their
 // spacing variants, then those of products (NHTSA's model names for the make
-// and year) in the same family as model.
-func ModelCandidates(model, trim string, products []string) []string {
-	var names []string
+// and year) in the same family as model. At most maxCandidates are returned;
+// truncated reports that more were dropped.
+func ModelCandidates(model, trim string, products []string) (names []string, truncated bool) {
 	seen := map[string]bool{}
 	add := func(name string) {
 		name = strings.Join(strings.Fields(name), " ")
-		if key := strings.ToLower(name); name != "" && !seen[key] && len(names) < maxCandidates {
-			seen[key] = true
-			names = append(names, name)
+		key := strings.ToLower(name)
+		if name == "" || seen[key] {
+			return
 		}
+		if len(names) >= maxCandidates {
+			truncated = true
+			return
+		}
+		seen[key] = true
+		names = append(names, name)
 	}
 	for _, name := range []string{model, trim, withoutDrivetrain(trim)} {
 		add(name)
@@ -41,7 +47,7 @@ func ModelCandidates(model, trim string, products []string) []string {
 			add(product)
 		}
 	}
-	return names
+	return names, truncated
 }
 
 // drivetrains are trim words that name a drivetrain, which NHTSA often leaves
