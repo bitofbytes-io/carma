@@ -27,15 +27,19 @@ type RecallCheckStore interface {
 	// SaveRecallCheck replaces the vehicle's campaigns with recalls, checked for
 	// its year, make, model, trim, and VIN. It saves nothing and returns
 	// ErrStaleVehicle when the vehicle has since been edited in any of those.
-	// Campaigns still listed keep their first-seen
-	// time and dismissal. It returns how many campaigns are new.
+	// It likewise saves nothing and returns ErrStaleCheck when a check saved
+	// since the lookup began (at or after lookupStartedAt) is already stored,
+	// so an older lookup never replaces a newer one. The check is recorded as
+	// made at now(), called once the vehicle is locked, so stored times follow
+	// the order checks are saved in. Campaigns still listed keep their
+	// first-seen time and dismissal. It returns how many campaigns are new.
 	// Dismissals and notifications are kept separately, so a campaign that
 	// drops out and is listed again keeps both.
 	//
 	// The first check for a year, make, and model is the vehicle's baseline:
 	// its campaigns are shown on the vehicle page but count as already
 	// notified, so only campaigns NHTSA adds later are emailed.
-	SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, recalls []model.Recall, checkedAt time.Time) (added int, err error)
+	SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, recalls []model.Recall, lookupStartedAt time.Time, now func() time.Time) (added int, err error)
 	TryRecallCheckLock(context.Context) (unlock func(context.Context) error, acquired bool, err error)
 }
 
@@ -61,7 +65,7 @@ func (p *Postgres) ListRecallCheckDue(ctx context.Context, staleBefore time.Time
 	})
 }
 
-func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, recalls []model.Recall, checkedAt time.Time) (int, error) {
+func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, recalls []model.Recall, lookupStartedAt time.Time, now func() time.Time) (int, error) {
 	if vehicle.Year == nil {
 		return 0, ErrNotFound
 	}
@@ -86,6 +90,15 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 		current.Trim != vehicle.Trim || current.VIN != vehicle.VIN {
 		return 0, ErrStaleVehicle
 	}
+	var lastCheckedAt time.Time
+	err = tx.QueryRow(ctx, `SELECT checked_at FROM vehicle_recall_checks WHERE vehicle_id=$1`, vehicle.ID).Scan(&lastCheckedAt)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	if err == nil && !lookupStartedAt.After(lastCheckedAt) {
+		return 0, ErrStaleCheck
+	}
+	checkedAt := now()
 	var covered bool
 	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM vehicle_recall_checks
 		WHERE vehicle_id=$1 AND model_year=$2 AND make=$3 AND model=$4)`,

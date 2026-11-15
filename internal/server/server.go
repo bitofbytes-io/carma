@@ -41,6 +41,11 @@ type Server struct {
 	// background checks it is running.
 	recallChecker RecallChecker
 	recallChecks  sync.WaitGroup
+	// recallMu guards recallsClosed, set by CloseRecallChecks, after which no
+	// check is started; it makes a late request unable to start one after the
+	// drain has seen the WaitGroup empty.
+	recallMu      sync.Mutex
+	recallsClosed bool
 	// recallCtx is the parent of those checks; cancelRecallChecks cuts them
 	// short.
 	recallCtx          context.Context

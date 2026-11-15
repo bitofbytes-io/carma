@@ -16,6 +16,10 @@ var ErrConflict = errors.New("already exists")
 // changed, so its result is not saved.
 var ErrStaleVehicle = errors.New("vehicle changed since the recall check")
 
+// ErrStaleCheck reports a recall lookup that began no later than the check
+// already saved for the vehicle, so its result is not saved.
+var ErrStaleCheck = errors.New("a newer recall check was already saved")
+
 type Store interface {
 	FindUserByOAuth(context.Context, string, string) (*model.User, error)
 	FindUserByEmail(context.Context, string) (*model.User, error)

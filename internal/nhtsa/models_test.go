@@ -190,10 +190,10 @@ func TestRecallsForVehicleDoesNotReportATruncatedLookupAsClean(t *testing.T) {
 	if len(fixture.queried) != maxCandidates || slices.Contains(fixture.queried, last) {
 		t.Fatalf("queried %d names, including the last: %v", len(fixture.queried), slices.Contains(fixture.queried, last))
 	}
-	// Campaigns that were found are still reported.
+	// A partial list is an error too: saving it would drop the skipped names' campaigns.
 	fixture.campaigns["mercedes-benz|e-class|2024"] = []string{"24V000002"}
 	got, err := client.RecallsForVehicle(context.Background(), "Mercedes-Benz", "E-Class", "", 2024)
-	if err != nil || !reflect.DeepEqual(campaignNumbers(got), []string{"24V000002"}) {
+	if err == nil || !strings.Contains(err.Error(), "not all checked") || len(got) != 0 {
 		t.Fatalf("partial lookup = %v err=%v", campaignNumbers(got), err)
 	}
 }

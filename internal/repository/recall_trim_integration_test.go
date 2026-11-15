@@ -55,7 +55,7 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	if vehicles := due(); len(vehicles) != 1 || vehicles[0].Trim != "E450 4MATIC" {
 		t.Fatalf("due before any check = %+v", vehicles)
 	}
-	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now); err != nil {
+	if _, err = testdb.SaveRecallCheckAt(ctx, store, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now); err != nil {
 		t.Fatal(err)
 	}
 	if vehicles := due(); len(vehicles) != 0 {
@@ -81,7 +81,7 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 		t.Fatalf("checked after a trim edit with no new check: %v err=%v", checkedAt, err)
 	}
 	trimCheckedAt := now.Add(time.Minute + time.Second)
-	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, trimCheckedAt); err != nil {
+	if _, err = testdb.SaveRecallCheckAt(ctx, store, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, trimCheckedAt); err != nil {
 		t.Fatal(err)
 	}
 	if checkedAt, err = store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt == nil || !checkedAt.Equal(trimCheckedAt) {
@@ -94,7 +94,7 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	if vehicles := due(); len(vehicles) != 1 {
 		t.Fatalf("due after the trim is restored = %+v", vehicles)
 	}
-	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now); err != nil {
+	if _, err = testdb.SaveRecallCheckAt(ctx, store, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now.Add(80*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if vehicles := due(); len(vehicles) != 0 {
@@ -117,13 +117,13 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	// instead of replacing the campaigns of the edited vehicle.
 	staleVehicle := vehicle
 	staleVehicle.VIN = ""
-	if _, err = store.SaveRecallCheck(ctx, staleVehicle, []model.Recall{{CampaignNumber: "00V000000"}}, now.Add(2*time.Minute)); !errors.Is(err, repository.ErrStaleVehicle) {
+	if _, err = testdb.SaveRecallCheckAt(ctx, store, staleVehicle, []model.Recall{{CampaignNumber: "00V000000"}}, now.Add(2*time.Minute)); !errors.Is(err, repository.ErrStaleVehicle) {
 		t.Fatalf("stale save err = %v", err)
 	}
 	if recalls, err := store.ListRecalls(ctx, &vehicle.ID, false); err != nil || len(recalls) != 1 || recalls[0].CampaignNumber != "24V224000" {
 		t.Fatalf("recalls after a stale save = %+v err=%v", recalls, err)
 	}
-	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now.Add(2*time.Minute)); err != nil {
+	if _, err = testdb.SaveRecallCheckAt(ctx, store, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now.Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if vehicles := due(); len(vehicles) != 0 {

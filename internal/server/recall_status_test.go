@@ -21,7 +21,7 @@ func TestVehiclePageAlwaysShowsRecallStatus(t *testing.T) {
 	if page := f.do(t, "GET", path, nil, "").Body.String(); !strings.Contains(page, "Safety recalls") || !strings.Contains(page, "Not checked yet") || strings.Contains(page, "No open recalls") {
 		t.Fatalf("before a check: %s", page)
 	}
-	if _, err := f.store.SaveRecallCheck(t.Context(), vehicle, nil, f.s.now()); err != nil {
+	if _, err := f.store.SaveRecallCheck(t.Context(), vehicle, nil, f.s.now(), f.s.now); err != nil {
 		t.Fatal(err)
 	}
 	if page := f.do(t, "GET", path, nil, "").Body.String(); !strings.Contains(page, "No open recalls") || !strings.Contains(page, "Last checked Jul 31, 2026.") || strings.Contains(page, "Not checked yet") {
@@ -129,6 +129,28 @@ func TestDrainRecallChecksWaitsThenCancels(t *testing.T) {
 	f.s.DrainRecallChecks(expired) // a stuck check is canceled once the drain deadline passes
 	if !errors.Is(blocking.err, context.Canceled) {
 		t.Fatalf("blocked check ended with %v, want it canceled", blocking.err)
+	}
+}
+
+func TestCloseRecallChecksStopsNewChecks(t *testing.T) {
+	f := setup(t)
+	checker := &fakeRecallChecker{}
+	f.s.EnableRecallCheck(checker)
+	f.s.CloseRecallChecks()
+	// A handler that finishes after shutdown began saves the vehicle but starts
+	// no check, so nothing runs untracked once the drain has returned.
+	body, contentType := formBody(t, map[string]string{"nickname": "Late", "year": "2024", "make": "Mercedes-Benz", "model": "E-Class"}, "", nil)
+	if w := f.do(t, "POST", "/vehicles", body, contentType); w.Code != http.StatusSeeOther {
+		t.Fatalf("create: %d", w.Code)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	f.s.DrainRecallChecks(ctx)
+	if len(checker.vehicles) != 0 {
+		t.Fatalf("a check started after close: %+v", checker.vehicles)
+	}
+	if vehicles, err := f.store.ListVehicles(t.Context(), false); err != nil || len(vehicles) != 1 {
+		t.Fatalf("stored vehicles=%+v err=%v", vehicles, err)
 	}
 }
 

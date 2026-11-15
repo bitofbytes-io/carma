@@ -28,7 +28,7 @@ func (f *fakeStore) ListRecallCheckDue(_ context.Context, staleBefore time.Time)
 	return f.due, nil
 }
 
-func (f *fakeStore) SaveRecallCheck(_ context.Context, vehicle model.Vehicle, recalls []model.Recall, _ time.Time) (int, error) {
+func (f *fakeStore) SaveRecallCheck(_ context.Context, vehicle model.Vehicle, recalls []model.Recall, _ time.Time, _ func() time.Time) (int, error) {
 	if f.saveErr != nil {
 		return 0, f.saveErr
 	}
@@ -148,6 +148,10 @@ func TestCheckVehicleDropsAResultForAVehicleEditedMeanwhile(t *testing.T) {
 	source := &fakeSource{recalls: map[string][]nhtsa.Recall{"Subaru/Outback": {{CampaignNumber: "19V493000"}}}}
 	if err := newTestRunner(store, source, time.Now()).CheckVehicle(context.Background(), vehicle("Subaru", "Outback", 2019)); err != nil {
 		t.Fatalf("a stale result is dropped, not an error: %v", err)
+	}
+	store.saveErr = repository.ErrStaleCheck
+	if err := newTestRunner(store, source, time.Now()).CheckVehicle(context.Background(), vehicle("Subaru", "Outback", 2019)); err != nil {
+		t.Fatalf("a result older than the saved check is dropped, not an error: %v", err)
 	}
 	store.saveErr = errors.New("connection lost")
 	if err := newTestRunner(store, source, time.Now()).CheckVehicle(context.Background(), vehicle("Subaru", "Outback", 2019)); err == nil {

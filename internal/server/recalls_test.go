@@ -74,7 +74,7 @@ func TestRecallsShowOnDashboardAndCanBeDismissed(t *testing.T) {
 		t.Fatalf("an unchecked vehicle should say so: %s", page)
 	}
 	recalls := []model.Recall{{CampaignNumber: "19V493000", Component: "STRUCTURE", Summary: "Spot welds.", ParkIt: true}}
-	if _, err := f.store.SaveRecallCheck(t.Context(), vehicle, recalls, f.s.now()); err != nil {
+	if _, err := f.store.SaveRecallCheck(t.Context(), vehicle, recalls, f.s.now(), f.s.now); err != nil {
 		t.Fatal(err)
 	}
 	dashboard := f.do(t, "GET", "/", nil, "").Body.String()

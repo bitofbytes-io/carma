@@ -24,7 +24,7 @@ func TestRecallCheckedAtIgnoresEmptyCheckAfterTrimOrVINEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.SaveRecallCheck(ctx, vehicle, nil, now); err != nil {
+	if _, err = testdb.SaveRecallCheckAt(ctx, store, vehicle, nil, now); err != nil {
 		t.Fatal(err)
 	}
 	if checkedAt, err := store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt == nil || !checkedAt.Equal(now) {

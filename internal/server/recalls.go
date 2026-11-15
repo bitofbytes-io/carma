@@ -48,6 +48,11 @@ func (s *Server) checkRecallsSoon(vehicle model.Vehicle) {
 	if s.recallChecker == nil || vehicle.ArchivedAt != nil {
 		return
 	}
+	s.recallMu.Lock()
+	defer s.recallMu.Unlock()
+	if s.recallsClosed {
+		return
+	}
 	s.recallChecks.Go(func() {
 		ctx, cancel := context.WithTimeout(s.recallCtx, recallCheckTimeout)
 		defer cancel()
@@ -57,9 +62,19 @@ func (s *Server) checkRecallsSoon(vehicle model.Vehicle) {
 	})
 }
 
+// CloseRecallChecks stops vehicle saves from starting recall checks; the
+// scheduled check covers the vehicles saved afterwards. Call it before
+// shutting the HTTP server down, so that a handler still running at the
+// shutdown deadline cannot start a check DrainRecallChecks does not wait for.
+func (s *Server) CloseRecallChecks() {
+	s.recallMu.Lock()
+	s.recallsClosed = true
+	s.recallMu.Unlock()
+}
+
 // DrainRecallChecks waits for the background recall checks started by vehicle
-// saves, canceling them if ctx ends first. Call it after the HTTP server has
-// stopped and before the store closes.
+// saves, canceling them if ctx ends first. Call it after CloseRecallChecks and
+// the HTTP server's shutdown, and before the store closes.
 func (s *Server) DrainRecallChecks(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {

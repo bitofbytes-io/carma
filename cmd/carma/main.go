@@ -171,10 +171,14 @@ func run() error {
 	var result error
 	select {
 	case e := <-errs:
+		app.CloseRecallChecks()
 		if !errors.Is(e, http.ErrServerClosed) {
 			result = e
 		}
 	case <-ctx.Done():
+		// No new checks from here on: a handler still running when Shutdown
+		// gives up must not start one after the drain below.
+		app.CloseRecallChecks()
 		shutdown, c := context.WithTimeout(context.Background(), 15*time.Second)
 		defer c()
 		result = httpServer.Shutdown(shutdown)

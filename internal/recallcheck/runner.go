@@ -133,6 +133,7 @@ func (r *Runner) trimFor(ctx context.Context, vehicle model.Vehicle) (string, er
 }
 
 func (r *Runner) check(ctx context.Context, vehicle model.Vehicle) (int, error) {
+	startedAt := r.now()
 	trim, err := r.trimFor(ctx, vehicle)
 	if err != nil {
 		return 0, fmt.Errorf("decode VIN for vehicle %s: %w", vehicle.ID, err)
@@ -155,10 +156,15 @@ func (r *Runner) check(ctx context.Context, vehicle model.Vehicle) (int, error) 
 			ParkOutside:      recall.ParkOutside,
 		})
 	}
-	added, err := r.store.SaveRecallCheck(ctx, vehicle, recalls, r.now())
+	added, err := r.store.SaveRecallCheck(ctx, vehicle, recalls, startedAt, r.now)
 	if errors.Is(err, repository.ErrStaleVehicle) {
 		// Edited while NHTSA was queried; the edit's own check covers it.
 		r.logger.Info("recall check dropped: vehicle changed", "vehicle_id", vehicle.ID)
+		return 0, nil
+	}
+	if errors.Is(err, repository.ErrStaleCheck) {
+		// A check that began later was saved first; keep its result.
+		r.logger.Info("recall check dropped: a newer check was saved", "vehicle_id", vehicle.ID)
 		return 0, nil
 	}
 	if err != nil {

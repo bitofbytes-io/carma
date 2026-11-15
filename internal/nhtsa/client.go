@@ -106,10 +106,10 @@ func (c *Client) DecodeVIN(ctx context.Context, vin string) (Vehicle, error) {
 // files campaigns under whatever model name the manufacturer reported, such as
 // "E 450 4MATIC" for a vehicle decoded as "E-Class", so it queries the model,
 // the trim, their spacing variants, and NHTSA's own model names for the make
-// and year in the same family, then merges the campaigns by number. Only when
-// every name comes back empty is the vehicle treated as having no recalls, and
-// not even then when names had to be skipped to bound the requests: that is an
-// error, since the skipped names might have had campaigns.
+// and year in the same family, then merges the campaigns by number. When names
+// had to be skipped to bound the requests it is an error, whatever was found:
+// the skipped names might have had campaigns, and a partial list saved over the
+// previous one would drop them.
 func (c *Client) RecallsForVehicle(ctx context.Context, vehicleMake, model, trim string, year int) ([]Recall, error) {
 	products, err := c.productModels(ctx, vehicleMake, year)
 	if err != nil {
@@ -130,7 +130,7 @@ func (c *Client) RecallsForVehicle(ctx context.Context, vehicleMake, model, trim
 			}
 		}
 	}
-	if truncated && len(recalls) == 0 {
+	if truncated {
 		return nil, fmt.Errorf("NHTSA recalls: more than %d model names for %s %s %d, not all checked", maxCandidates, vehicleMake, model, year)
 	}
 	return recalls, nil
