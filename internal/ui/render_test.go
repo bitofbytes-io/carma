@@ -332,6 +332,7 @@ func TestVehicleTemplateRendersThroughExportControls(t *testing.T) {
 		Reminders     []any
 
 		Recalls, DismissedRecalls []model.Recall
+		RecallsCheckedAt          *time.Time
 		Spend                     model.SpendSummary
 		SpendYear                 int
 	}
@@ -389,6 +390,7 @@ func TestVehicleTemplateRendersReminderIntervals(t *testing.T) {
 				Reminders     []reminder.Result
 
 				Recalls, DismissedRecalls []model.Recall
+				RecallsCheckedAt          *time.Time
 				Spend                     model.SpendSummary
 				SpendYear                 int
 			}
@@ -510,6 +512,7 @@ func TestRecallTemplates(t *testing.T) {
 	section := struct {
 		Vehicle                   model.Vehicle
 		Recalls, DismissedRecalls []model.Recall
+		RecallsCheckedAt          *time.Time
 		Spend                     model.SpendSummary
 		SpendYear                 int
 	}{
@@ -552,8 +555,35 @@ func TestRecallTemplates(t *testing.T) {
 	}
 	b.Reset()
 	section.Recalls, section.DismissedRecalls = nil, nil
-	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil || strings.TrimSpace(b.String()) != "" {
-		t.Fatalf("no recalls should render nothing: %q err=%v", b.String(), err)
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {
+		t.Fatal(err)
+	}
+	if body = b.String(); !strings.Contains(body, `id="recalls"`) || !strings.Contains(body, "Safety recalls") || !strings.Contains(body, "Not checked yet") ||
+		strings.Contains(body, "No open recalls") || strings.Contains(body, "Last checked") || !strings.Contains(body, "shortly after a vehicle is saved") {
+		t.Fatalf("a vehicle never checked should say so: %s", body)
+	}
+	b.Reset()
+	section.Vehicle.Model = ""
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil || !strings.Contains(b.String(), "Not checked yet") || !strings.Contains(b.String(), "Add a year, make, and model") {
+		t.Fatalf("a vehicle that cannot be checked should say what is missing: %q err=%v", b.String(), err)
+	}
+	b.Reset()
+	checked := time.Date(2026, time.November, 13, 15, 4, 0, 0, time.UTC)
+	section.Vehicle.Model = "Outback"
+	section.RecallsCheckedAt = &checked
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {
+		t.Fatal(err)
+	}
+	if body = b.String(); !strings.Contains(body, "No open recalls") || !strings.Contains(body, "Last checked Nov 13, 2026.") || strings.Contains(body, "Not checked yet") || strings.Contains(body, `class="recall"`) {
+		t.Fatalf("a checked vehicle without recalls should say none are open: %s", body)
+	}
+	b.Reset()
+	section.Recalls = []model.Recall{{VehicleID: vehicleID, CampaignNumber: "19V493000", Component: "STRUCTURE"}}
+	if err = r.RenderNamed(&b, "vehicle", "recalls-section", section); err != nil {
+		t.Fatal(err)
+	}
+	if body = b.String(); !strings.Contains(body, "Campaign 19V493000") || !strings.Contains(body, "Last checked Nov 13, 2026.") || strings.Contains(body, "Not checked yet") {
+		t.Fatalf("a checked vehicle with recalls should list them and when it was checked: %s", body)
 	}
 }
 
@@ -603,17 +633,18 @@ func TestHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 		{OccurredOn: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC), ServiceTypeName: "Repair", OdometerMiles: &miles, CostCents: &tires, Vendor: "Tire Barn", Notes: "four new tires"},
 	}
 	type data struct {
-		Title         string
-		Flash         string
-		Authenticated bool
-		User          *model.User
-		NavVehicles   []model.Vehicle
-		Vehicle       model.Vehicle
-		Records       []model.Record
-		Recalls       []model.Recall
-		History       carmaexport.HistorySummary
-		Generated     time.Time
-		HideCosts     bool
+		Title            string
+		Flash            string
+		Authenticated    bool
+		User             *model.User
+		NavVehicles      []model.Vehicle
+		Vehicle          model.Vehicle
+		Records          []model.Record
+		Recalls          []model.Recall
+		RecallsCheckedAt *time.Time
+		History          carmaexport.HistorySummary
+		Generated        time.Time
+		HideCosts        bool
 	}
 	page := data{
 		Authenticated: true,
@@ -693,6 +724,7 @@ func TestWarrantyBadgeAndHistoryColumn(t *testing.T) {
 		Reminders           []any
 		Recalls             []model.Recall
 		DismissedRecalls    []model.Recall
+		RecallsCheckedAt    *time.Time
 		Spend               model.SpendSummary
 		SpendYear           int
 		History             carmaexport.HistorySummary
@@ -794,6 +826,7 @@ func TestVehicleTemplateLinksToHistoryPrint(t *testing.T) {
 		Reminders        []any
 		Recalls          []model.Recall
 		DismissedRecalls []model.Recall
+		RecallsCheckedAt *time.Time
 		Spend            model.SpendSummary
 		SpendYear        int
 	}

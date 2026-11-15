@@ -56,7 +56,7 @@ func TestRecallsPostgresIntegration(t *testing.T) {
 		{CampaignNumber: "19V493000", Component: "STRUCTURE", Summary: "Spot welds.", ReportReceivedOn: &received, ParkIt: true},
 		{CampaignNumber: "21V587000", Component: "FUEL PUMP"},
 	}
-	if added, err := store.SaveRecallCheck(ctx, outback, recalls, now); err != nil || added != 2 {
+	if added, err := testdb.SaveRecallCheckAt(ctx, store, outback, recalls, now); err != nil || added != 2 {
 		t.Fatalf("first save added=%d err=%v", added, err)
 	}
 	if ids := dueIDs(now); len(ids) != 0 {
@@ -83,7 +83,7 @@ func TestRecallsPostgresIntegration(t *testing.T) {
 	// A refresh keeps the dismissal and first-seen time of a campaign still
 	// listed, drops one NHTSA no longer lists, and counts only new ones.
 	refreshed := []model.Recall{{CampaignNumber: "19V493000", Component: "STRUCTURE (UPDATED)"}, {CampaignNumber: "24V100000", Component: "BRAKES"}}
-	if added, err := store.SaveRecallCheck(ctx, outback, refreshed, now.Add(7*24*time.Hour)); err != nil || added != 1 {
+	if added, err := testdb.SaveRecallCheckAt(ctx, store, outback, refreshed, now.Add(7*24*time.Hour)); err != nil || added != 1 {
 		t.Fatalf("refresh added=%d err=%v", added, err)
 	}
 	all, err := store.ListRecalls(ctx, &outback.ID, true)
@@ -122,7 +122,7 @@ func TestRecallsPostgresIntegration(t *testing.T) {
 	if ids := dueIDs(now); len(ids) != 1 || ids[0] != outback.ID {
 		t.Fatalf("due after model change = %v", ids)
 	}
-	if added, err := store.SaveRecallCheck(ctx, outback, nil, now.Add(8*24*time.Hour)); err != nil || added != 0 {
+	if added, err := testdb.SaveRecallCheckAt(ctx, store, outback, nil, now.Add(8*24*time.Hour)); err != nil || added != 0 {
 		t.Fatalf("empty save added=%d err=%v", added, err)
 	}
 	if all, err = store.ListRecalls(ctx, &outback.ID, true); err != nil || len(all) != 0 {

@@ -48,7 +48,7 @@ func TestRecallNotificationsPostgresIntegration(t *testing.T) {
 	// The first check is the baseline: its campaigns count as notified.
 	baseline := []model.Recall{{CampaignNumber: "19V493000"}, {CampaignNumber: "21V587000"}}
 	for _, vehicle := range []model.Vehicle{outback, archived} {
-		if _, err := store.SaveRecallCheck(ctx, vehicle, baseline, now); err != nil {
+		if _, err := testdb.SaveRecallCheckAt(ctx, store, vehicle, baseline, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -63,7 +63,7 @@ func TestRecallNotificationsPostgresIntegration(t *testing.T) {
 	}
 	later := append(baseline, model.Recall{CampaignNumber: "26V100000", Component: "BRAKES"}, model.Recall{CampaignNumber: "26V200000"})
 	for _, vehicle := range []model.Vehicle{outback, archived} {
-		if _, err := store.SaveRecallCheck(ctx, vehicle, later, now.Add(7*24*time.Hour)); err != nil {
+		if _, err := testdb.SaveRecallCheckAt(ctx, store, vehicle, later, now.Add(7*24*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -120,16 +120,16 @@ func TestRecallNotificationsPostgresIntegration(t *testing.T) {
 	}
 	// Later checks keep the notification, even when NHTSA drops an announced
 	// campaign and lists it again.
-	if _, err := store.SaveRecallCheck(ctx, outback, later, now.Add(14*24*time.Hour)); err != nil {
+	if _, err := testdb.SaveRecallCheckAt(ctx, store, outback, later, now.Add(14*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got := unnotified(); len(got) != 1 || got[0] != "26V200000" {
 		t.Fatalf("after another check = %v", got)
 	}
-	if _, err := store.SaveRecallCheck(ctx, outback, []model.Recall{{CampaignNumber: "19V493000"}}, now.Add(21*24*time.Hour)); err != nil {
+	if _, err := testdb.SaveRecallCheckAt(ctx, store, outback, []model.Recall{{CampaignNumber: "19V493000"}}, now.Add(21*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if added, err := store.SaveRecallCheck(ctx, outback, later, now.Add(28*24*time.Hour)); err != nil || added != 3 {
+	if added, err := testdb.SaveRecallCheckAt(ctx, store, outback, later, now.Add(28*24*time.Hour)); err != nil || added != 3 {
 		t.Fatalf("relisted added=%d err=%v", added, err)
 	}
 	if got := unnotified(); len(got) != 1 || got[0] != "26V200000" {
@@ -141,7 +141,7 @@ func TestRecallNotificationsPostgresIntegration(t *testing.T) {
 	if _, _, err := store.UpdateVehicle(ctx, outback); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SaveRecallCheck(ctx, outback, []model.Recall{{CampaignNumber: "18V001000"}}, now.Add(15*24*time.Hour)); err != nil {
+	if _, err := testdb.SaveRecallCheckAt(ctx, store, outback, []model.Recall{{CampaignNumber: "18V001000"}}, now.Add(35*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if got := unnotified(); len(got) != 0 {
@@ -199,7 +199,7 @@ func TestRecallDismissalSurvivesRelistingPostgresIntegration(t *testing.T) {
 		for _, campaign := range campaigns {
 			recalls = append(recalls, model.Recall{CampaignNumber: campaign})
 		}
-		if _, err := store.SaveRecallCheck(ctx, vehicle, recalls, at); err != nil {
+		if _, err := testdb.SaveRecallCheckAt(ctx, store, vehicle, recalls, at); err != nil {
 			t.Fatal(err)
 		}
 	}

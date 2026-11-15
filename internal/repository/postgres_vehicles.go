@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const vehicleCols = `v.id,v.nickname,v.year,v.make,v.model,v.vin,v.license_plate,v.photo_key,v.notes,v.archived_at,v.created_at,v.updated_at,v.current_odometer_miles`
+const vehicleCols = `v.id,v.nickname,v.year,v.make,v.model,v.trim,v.vin,v.license_plate,v.photo_key,v.notes,v.archived_at,v.created_at,v.updated_at,v.current_odometer_miles`
 
 // selectVehicleSQL loads one vehicle by ID with its effective latest mileage.
 const selectVehicleSQL = `SELECT ` + vehicleCols + `,GREATEST(v.current_odometer_miles,(SELECT max(odometer_miles) FROM records WHERE vehicle_id=v.id))
@@ -21,7 +21,7 @@ func scanVehicle(row pgx.Row) (model.Vehicle, error) {
 	var vehicle model.Vehicle
 	err := row.Scan(
 		&vehicle.ID, &vehicle.Nickname, &vehicle.Year,
-		&vehicle.Make, &vehicle.Model, &vehicle.VIN,
+		&vehicle.Make, &vehicle.Model, &vehicle.Trim, &vehicle.VIN,
 		&vehicle.LicensePlate, &vehicle.PhotoKey, &vehicle.Notes,
 		&vehicle.ArchivedAt, &vehicle.CreatedAt, &vehicle.UpdatedAt,
 		&vehicle.CurrentOdometer, &vehicle.LatestOdometer,
@@ -62,7 +62,7 @@ func (p *Postgres) ListVehicles(ctx context.Context, archived bool) ([]model.Veh
 		var vendor, notes, typeName *string
 		err = rows.Scan(
 			&vehicle.ID, &vehicle.Nickname, &vehicle.Year,
-			&vehicle.Make, &vehicle.Model, &vehicle.VIN,
+			&vehicle.Make, &vehicle.Model, &vehicle.Trim, &vehicle.VIN,
 			&vehicle.LicensePlate, &vehicle.PhotoKey, &vehicle.Notes,
 			&vehicle.ArchivedAt, &vehicle.CreatedAt, &vehicle.UpdatedAt,
 			&vehicle.CurrentOdometer, &vehicle.LatestOdometer, &recordID,
@@ -106,18 +106,18 @@ func (p *Postgres) CreateVehicle(ctx context.Context, vehicle model.Vehicle, rem
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	err = tx.QueryRow(
-		ctx, `INSERT INTO vehicles(id,nickname,year,make,model,vin,license_plate,photo_key,notes,current_odometer_miles,
+		ctx, `INSERT INTO vehicles(id,nickname,year,make,model,trim,vin,license_plate,photo_key,notes,current_odometer_miles,
 			created_at,updated_at,current_odometer_on)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $10::bigint IS NOT NULL THEN $13::date END)
-		RETURNING id,nickname,year,make,model,vin,license_plate,photo_key,notes,archived_at,created_at,updated_at,
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,CASE WHEN $11::bigint IS NOT NULL THEN $14::date END)
+		RETURNING id,nickname,year,make,model,trim,vin,license_plate,photo_key,notes,archived_at,created_at,updated_at,
 			current_odometer_miles`, vehicle.ID,
 		vehicle.Nickname, vehicle.Year, vehicle.Make,
-		vehicle.Model, vehicle.VIN, vehicle.LicensePlate,
+		vehicle.Model, vehicle.Trim, vehicle.VIN, vehicle.LicensePlate,
 		vehicle.PhotoKey, vehicle.Notes, vehicle.CurrentOdometer,
 		vehicle.CreatedAt, vehicle.UpdatedAt, vehicle.CurrentOdometerOn,
 	).Scan(
 		&vehicle.ID, &vehicle.Nickname, &vehicle.Year,
-		&vehicle.Make, &vehicle.Model, &vehicle.VIN,
+		&vehicle.Make, &vehicle.Model, &vehicle.Trim, &vehicle.VIN,
 		&vehicle.LicensePlate, &vehicle.PhotoKey, &vehicle.Notes,
 		&vehicle.ArchivedAt, &vehicle.CreatedAt, &vehicle.UpdatedAt,
 		&vehicle.CurrentOdometer,
@@ -154,7 +154,7 @@ func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 	// that record's date; any other new mileage is dated $12.
 	var previousPhotoKey string
 	err = tx.QueryRow(
-		ctx, `UPDATE vehicles v SET nickname=$2,year=$3,make=$4,model=$5,vin=$6,license_plate=$7,
+		ctx, `UPDATE vehicles v SET nickname=$2,year=$3,make=$4,model=$5,trim=$13,vin=$6,license_plate=$7,
 			photo_key=COALESCE(NULLIF($8,''),v.photo_key),notes=$9,current_odometer_miles=$10,updated_at=$11,
 			current_odometer_on=CASE
 				WHEN $10::bigint IS NULL THEN NULL
@@ -170,7 +170,7 @@ func (p *Postgres) UpdateVehicle(ctx context.Context, vehicle model.Vehicle) (mo
 		vehicle.Nickname, vehicle.Year, vehicle.Make,
 		vehicle.Model, vehicle.VIN, vehicle.LicensePlate,
 		vehicle.PhotoKey, vehicle.Notes, vehicle.CurrentOdometer,
-		vehicle.UpdatedAt, vehicle.CurrentOdometerOn,
+		vehicle.UpdatedAt, vehicle.CurrentOdometerOn, vehicle.Trim,
 	).Scan(&previousPhotoKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return vehicle, "", ErrNotFound

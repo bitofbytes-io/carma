@@ -95,7 +95,7 @@ func TestVehicleHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 	if _, err = f.store.SaveRecallCheck(t.Context(), v, []model.Recall{
 		{CampaignNumber: "19V493000", Component: "AIR BAGS", Summary: "The inflator may rupture.", Consequence: "Injury.", Remedy: "Replace the inflator.", ReportReceivedOn: &reported, ParkIt: true},
 		{CampaignNumber: "20V123000", Component: "SEATS", Summary: "Already fixed at the dealer."},
-	}, f.s.now()); err != nil {
+	}, f.s.now(), f.s.now); err != nil {
 		t.Fatal(err)
 	}
 	dismissed := f.s.now()

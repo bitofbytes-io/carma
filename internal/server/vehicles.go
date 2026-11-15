@@ -119,13 +119,15 @@ func (s *Server) createVehicle(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	vehicle.PhotoKey = photoKey
-	if _, err := s.store.CreateVehicle(request.Context(), vehicle, reminders); err != nil {
+	created, err := s.store.CreateVehicle(request.Context(), vehicle, reminders)
+	if err != nil {
 		s.countUploads(uploadVehiclePhoto, metrics.ResultFailure, []string{photoKey})
 		deferPhotoCleanup(vehicle.ID, photoKey, err)
 		s.fail(response, err)
 		return
 	}
 	s.countUploads(uploadVehiclePhoto, metrics.ResultSuccess, []string{photoKey})
+	s.checkRecallsSoon(created)
 	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), http.StatusSeeOther)
 }
 
@@ -154,7 +156,7 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 	// An empty key keeps whatever photo is stored now, which may be newer than
 	// the one loaded above.
 	vehicle.PhotoKey = photoKey
-	_, replacedKey, err := s.store.UpdateVehicle(request.Context(), vehicle)
+	updated, replacedKey, err := s.store.UpdateVehicle(request.Context(), vehicle)
 	if err != nil {
 		s.countUploads(uploadVehiclePhoto, metrics.ResultFailure, []string{photoKey})
 		deferPhotoCleanup(vehicle.ID, photoKey, err)
@@ -165,6 +167,7 @@ func (s *Server) updateVehicle(response http.ResponseWriter, request *http.Reque
 		_ = s.assets.Delete(request.Context(), replacedKey)
 	}
 	s.countUploads(uploadVehiclePhoto, metrics.ResultSuccess, []string{photoKey})
+	s.checkRecallsSoon(updated)
 	http.Redirect(response, request, "/vehicles/"+vehicle.ID.String(), http.StatusSeeOther)
 }
 
@@ -269,6 +272,7 @@ func vehicleFromForm(request *http.Request) (model.Vehicle, string) {
 		Nickname:     strings.TrimSpace(request.FormValue("nickname")),
 		Make:         strings.TrimSpace(request.FormValue("make")),
 		Model:        strings.TrimSpace(request.FormValue("model")),
+		Trim:         strings.TrimSpace(request.FormValue("trim")),
 		VIN:          strings.TrimSpace(request.FormValue("vin")),
 		LicensePlate: strings.TrimSpace(request.FormValue("license_plate")),
 		Notes:        strings.TrimSpace(request.FormValue("notes")),
@@ -351,6 +355,10 @@ func (s *Server) vehicle(response http.ResponseWriter, request *http.Request) {
 	}
 	recalls, err := s.store.ListRecalls(request.Context(), &vehicle.ID, true)
 	if err != nil {
+		s.fail(response, err)
+		return
+	}
+	if data.RecallsCheckedAt, err = s.store.RecallCheckedAt(request.Context(), vehicle.ID); err != nil {
 		s.fail(response, err)
 		return
 	}

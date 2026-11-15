@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bitofbytes-io/carma/internal/database"
+	"github.com/bitofbytes-io/carma/internal/model"
 	"github.com/bitofbytes-io/carma/internal/repository"
 	"github.com/bitofbytes-io/carma/migrations"
 	"github.com/google/uuid"
@@ -95,4 +96,10 @@ func WithParameter(databaseURL, key, value string) (string, error) {
 	query.Set(key, value)
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+// SaveRecallCheckAt saves a recall check as looked up and saved at the same
+// instant, for tests that choose the time themselves.
+func SaveRecallCheckAt(ctx context.Context, store *repository.Postgres, vehicle model.Vehicle, recalls []model.Recall, at time.Time) (int, error) {
+	return store.SaveRecallCheck(ctx, vehicle, recalls, at, func() time.Time { return at })
 }

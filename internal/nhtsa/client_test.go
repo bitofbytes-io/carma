@@ -21,7 +21,7 @@ func TestDecodeVIN(t *testing.T) {
 	var path string
 	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path + "?" + r.URL.RawQuery
-		_, _ = w.Write([]byte(`{"Count":1,"Results":[{"Make":"MERCEDES-BENZ","Model":"GLC","ModelYear":"2019","ErrorCode":"1","ErrorText":"1 - Check Digit (9th position) does not calculate properly"}]}`))
+		_, _ = w.Write([]byte(`{"Count":1,"Results":[{"Make":"MERCEDES-BENZ","Model":"GLC","Trim":" 300 4MATIC ","ModelYear":"2019","ErrorCode":"1","ErrorText":"1 - Check Digit (9th position) does not calculate properly"}]}`))
 	})
 	got, err := client.DecodeVIN(context.Background(), " wdc-0g4kb5kv123456 ")
 	if err != nil {
@@ -30,7 +30,7 @@ func TestDecodeVIN(t *testing.T) {
 	if path != "/api/vehicles/DecodeVinValues/WDC0G4KB5KV123456?format=json" {
 		t.Fatalf("path = %s", path)
 	}
-	if got.Make != "Mercedes-Benz" || got.Model != "GLC" || got.Year == nil || *got.Year != 2019 || !strings.Contains(got.Warning, "Check Digit") {
+	if got.Make != "Mercedes-Benz" || got.Model != "GLC" || got.Trim != "300 4MATIC" || got.Year == nil || *got.Year != 2019 || !strings.Contains(got.Warning, "Check Digit") {
 		t.Fatalf("decoded = %+v", got)
 	}
 }
