@@ -141,13 +141,17 @@ func (p *Postgres) SaveRecallCheck(ctx context.Context, vehicle model.Vehicle, r
 }
 
 // RecallCheckedAt returns when the vehicle's recalls were last checked for its
-// current year, make, and model, or nil when they have not been (or the vehicle
-// has changed since), matching what ListRecalls shows.
+// current year, make, model, trim, and VIN under the current RecallMatchVersion,
+// or nil when they have not been (or the vehicle has changed since). That is
+// stricter than ListRecalls, which keeps showing campaigns found for the same
+// year, make, and model until a recheck succeeds; a stale check must never read
+// as a clean "No open recalls".
 func (p *Postgres) RecallCheckedAt(ctx context.Context, vehicleID uuid.UUID) (*time.Time, error) {
 	var checkedAt time.Time
 	err := p.pool.QueryRow(ctx, `SELECT c.checked_at FROM vehicle_recall_checks c
 		JOIN vehicles v ON v.id=c.vehicle_id
-		WHERE c.vehicle_id=$1 AND c.model_year=v.year AND c.make=v.make AND c.model=v.model`, vehicleID).Scan(&checkedAt)
+		WHERE c.vehicle_id=$1 AND c.model_year=v.year AND c.make=v.make AND c.model=v.model
+			AND c.trim=v.trim AND c.vin=v.vin AND c.match_version=$2`, vehicleID, RecallMatchVersion).Scan(&checkedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

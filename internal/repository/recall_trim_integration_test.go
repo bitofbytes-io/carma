@@ -65,7 +65,8 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 		t.Fatalf("checked at = %v err=%v", checkedAt, err)
 	}
 
-	// A trim change is due again, but keeps the recalls and check time shown.
+	// A trim change is due again and keeps the recalls shown, but the check no
+	// longer counts as done until a lookup for the edited vehicle is saved.
 	vehicle.Trim, vehicle.UpdatedAt = "E 450 4MATIC", now.Add(time.Minute)
 	if _, _, err = store.UpdateVehicle(ctx, vehicle); err != nil {
 		t.Fatal(err)
@@ -76,12 +77,28 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	if recalls, err := store.ListRecalls(ctx, &vehicle.ID, false); err != nil || len(recalls) != 1 {
 		t.Fatalf("recalls after a trim edit = %+v err=%v", recalls, err)
 	}
+	if checkedAt, err = store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt != nil {
+		t.Fatalf("checked after a trim edit with no new check: %v err=%v", checkedAt, err)
+	}
+	trimCheckedAt := now.Add(time.Minute + time.Second)
+	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, trimCheckedAt); err != nil {
+		t.Fatal(err)
+	}
+	if checkedAt, err = store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt == nil || !checkedAt.Equal(trimCheckedAt) {
+		t.Fatalf("checked at after checking the new trim = %v err=%v", checkedAt, err)
+	}
 	vehicle.Trim = "E450 4MATIC"
 	if _, _, err = store.UpdateVehicle(ctx, vehicle); err != nil {
 		t.Fatal(err)
 	}
-	if vehicles := due(); len(vehicles) != 0 {
+	if vehicles := due(); len(vehicles) != 1 {
 		t.Fatalf("due after the trim is restored = %+v", vehicles)
+	}
+	if _, err = store.SaveRecallCheck(ctx, vehicle, []model.Recall{{CampaignNumber: "24V224000"}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if vehicles := due(); len(vehicles) != 0 {
+		t.Fatalf("due after rechecking the restored trim = %+v", vehicles)
 	}
 
 	// A VIN change is due again too, since the VIN supplies the trim when none
@@ -92,6 +109,9 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	}
 	if vehicles := due(); len(vehicles) != 1 || vehicles[0].VIN != "W1KLF6BB7VA343747" {
 		t.Fatalf("due after a VIN edit = %+v", vehicles)
+	}
+	if checkedAt, err = store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt != nil {
+		t.Fatalf("checked after a VIN edit with no new check: %v err=%v", checkedAt, err)
 	}
 	// A result looked up for the vehicle as it was before the edit is refused
 	// instead of replacing the campaigns of the edited vehicle.
@@ -109,6 +129,9 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	if vehicles := due(); len(vehicles) != 0 {
 		t.Fatalf("due after checking the new VIN = %+v", vehicles)
 	}
+	if checkedAt, err = store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt == nil || !checkedAt.Equal(now.Add(2*time.Minute)) {
+		t.Fatalf("checked at after checking the new VIN = %v err=%v", checkedAt, err)
+	}
 
 	// Checks made before the current matching are redone once.
 	if _, err = db.Exec(ctx, `UPDATE vehicle_recall_checks SET match_version=$1`, repository.RecallMatchVersion-1); err != nil {
@@ -116,6 +139,9 @@ func TestVehicleTrimAndRecallCheckStatusPostgresIntegration(t *testing.T) {
 	}
 	if vehicles := due(); len(vehicles) != 1 {
 		t.Fatalf("due after older matching = %+v", vehicles)
+	}
+	if checkedAt, err = store.RecallCheckedAt(ctx, vehicle.ID); err != nil || checkedAt != nil {
+		t.Fatalf("checked under older matching: %v err=%v", checkedAt, err)
 	}
 
 	// A changed model hides the check, so the page says it is not checked.
