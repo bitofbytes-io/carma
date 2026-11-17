@@ -95,6 +95,14 @@ declared by this project. The HTTP handler and repository tests need PostgreSQL:
 against it, each test in its own migrated schema. CI sets the variable, and those
 tests fail there if it is missing.
 
+On pull requests, CI also builds the image, checks its contents, and smoke-tests it
+with `scripts/smoke-image.sh IMAGE`. The script starts the container on the host
+network against the CI Postgres (`CARMA_TEST_DATABASE_URL`) with development auth,
+fails unless `/health` answers within 30 seconds and Docker reports the container
+healthy (the Dockerfile's HEALTHCHECK, run every 2 s instead of 30 s), and prints
+the container logs on failure. It needs no extra secrets, and you can run it locally
+against any Postgres with the same variable set.
+
 The server also runs asset cleanup at startup and every seven days.
 Only generated, unreferenced objects and `temporary/upload-*` files older than 48
 hours are eligible. Replicas coordinate with a dedicated PostgreSQL advisory lock.

@@ -50,6 +50,9 @@ jobs:
             test -f /app/static/app.js
             test "$(id -u)" -ne 0
           '
+      - name: Smoke-test PR image
+        if: github.event_name == 'pull_request'
+        run: scripts/smoke-image.sh carma-pr-check:local
   build-and-trigger:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
