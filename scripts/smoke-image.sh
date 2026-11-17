@@ -2,12 +2,23 @@
 # Starts a built carma image against Postgres with development auth and fails
 # unless it serves /health within 30 s and Docker reports the container healthy.
 # Usage: scripts/smoke-image.sh IMAGE   (needs CARMA_TEST_DATABASE_URL)
+# The database must be a disposable test database: the server runs session
+# cleanup and background jobs against it as soon as it starts. Without the
+# variable a local run skips; CI (CI set) fails.
 set -euo pipefail
 
 image="${1:?usage: smoke-image.sh IMAGE}"
-: "${CARMA_TEST_DATABASE_URL:?CARMA_TEST_DATABASE_URL is required}"
+if [ -z "${CARMA_TEST_DATABASE_URL:-}" ]; then
+	if [ -n "${CI:-}" ]; then
+		echo "CARMA_TEST_DATABASE_URL is required in CI" >&2
+		exit 1
+	fi
+	echo "skipping image smoke test: set CARMA_TEST_DATABASE_URL to a disposable test database to run it"
+	exit 0
+fi
 name="carma-smoke-$$"
 port=4700 # The image's HEALTHCHECK and default PORT.
+limit_ms=30000
 
 cleanup() {
 	status=$?
@@ -22,15 +33,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
-serves_health() { curl -fs --max-time 2 -o /dev/null "http://127.0.0.1:${port}/health"; }
-is_healthy() { [ "$(docker inspect --format '{{.State.Health.Status}}' "$name")" = healthy ]; }
+now_ms() {
+	local t="${EPOCHREALTIME:-}"
+	if [ -n "$t" ]; then
+		t="${t/[.,]/}"
+		echo $((t / 1000))
+	else
+		echo $((SECONDS * 1000))
+	fi
+}
 
-# The container shares the host network, so anything already on the port would
-# answer /health in its place.
-if curl -s --max-time 2 -o /dev/null "http://127.0.0.1:${port}/"; then
-	echo "port ${port} is already in use on the host" >&2
-	exit 1
-fi
+fmt_s() { printf '%d.%03d' $(($1 / 1000)) $(($1 % 1000)); } # milliseconds -> seconds
+
+# bounded SECONDS COMMAND...: run COMMAND, killing it after SECONDS when
+# timeout is installed.
+bounded() {
+	local secs="$1"
+	shift
+	if command -v timeout >/dev/null 2>&1; then
+		timeout "$secs" "$@"
+	else
+		"$@"
+	fi
+}
+
+# The container shares the host network, so anything already listening on the
+# port would answer /health in its place. Connect directly so stalled and
+# non-HTTP listeners count too.
+for host in 127.0.0.1 ::1; do
+	if bounded 2 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$host" "$port" 2>/dev/null; then
+		echo "port ${port} is already in use on the host" >&2
+		exit 1
+	fi
+done
 
 # Host networking lets the container reach a Postgres published on the host.
 # The health flags only shorten the image's 30 s interval; the probe command
@@ -42,23 +77,41 @@ DATABASE_URL="$CARMA_TEST_DATABASE_URL" docker run --detach --name "$name" \
 	--health-interval 2s --health-start-period 0s --health-retries 3 \
 	"$image" >/dev/null
 
-wait_for() { # wait_for DESCRIPTION SECONDS COMMAND...
-	local what="$1" limit="$2" started="$SECONDS"
-	shift 2
-	while [ $((SECONDS - started)) -lt "$limit" ]; do
-		if [ "$(docker inspect --format '{{.State.Running}}' "$name")" != true ]; then
-			echo "container exited while waiting for $what" >&2
-			return 1
-		fi
-		if "$@"; then
-			echo "$what after $((SECONDS - started))s"
-			return 0
-		fi
-		sleep 1
-	done
-	echo "timed out waiting for $what (${limit}s)" >&2
+# One 30 s budget covers both checks. Every command below is bounded by the
+# time left, and the deadline is rechecked before a success is accepted, so
+# nothing past 30 s can pass.
+started_ms=$(now_ms)
+remaining_ms() { echo $((limit_ms - ($(now_ms) - started_ms))); }
+
+expired() {
+	echo "timed out waiting for $1 (30s)" >&2
 	return 1
 }
 
-wait_for "/health served" 30 serves_health
-wait_for "container healthy" 30 is_healthy
+serves_health() { curl -fs --max-time "$1" -o /dev/null "http://127.0.0.1:${port}/health"; }
+is_healthy() { [ "$(bounded "$1" docker inspect --format '{{.State.Health.Status}}' "$name")" = healthy ]; }
+
+wait_for() { # wait_for DESCRIPTION PROBE; PROBE gets the seconds left
+	local what="$1" probe="$2" left running
+	while :; do
+		left=$(remaining_ms)
+		[ "$left" -gt 0 ] || { expired "$what"; return 1; }
+		running=$(bounded "$(fmt_s "$left")" docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)
+		left=$(remaining_ms)
+		[ "$left" -gt 0 ] || { expired "$what"; return 1; }
+		if [ "$running" != true ]; then
+			echo "container exited or could not be inspected while waiting for $what" >&2
+			return 1
+		fi
+		if "$probe" "$(fmt_s "$left")" 2>/dev/null && [ "$(remaining_ms)" -gt 0 ]; then
+			echo "$what after $(fmt_s $(($(now_ms) - started_ms)))s"
+			return 0
+		fi
+		left=$(remaining_ms)
+		[ "$left" -gt 0 ] || { expired "$what"; return 1; }
+		sleep "$(fmt_s $((left < 1000 ? left : 1000)))"
+	done
+}
+
+wait_for "/health served" serves_health
+wait_for "container healthy" is_healthy
