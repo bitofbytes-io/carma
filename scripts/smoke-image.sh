@@ -16,6 +16,12 @@ if [ -z "${CARMA_TEST_DATABASE_URL:-}" ]; then
 	echo "skipping image smoke test: set CARMA_TEST_DATABASE_URL to a disposable test database to run it"
 	exit 0
 fi
+# Every probe is bounded by timeout(1) so the 30 s budget holds even when
+# docker stalls, so refuse to run without it (macOS: brew install coreutils).
+if ! command -v timeout >/dev/null 2>&1; then
+	echo "timeout(1) is required to bound the smoke test's probes; install coreutils" >&2
+	exit 1
+fi
 name="carma-smoke-$$"
 port=4700 # The image's HEALTHCHECK and default PORT.
 limit_ms=30000
@@ -45,22 +51,14 @@ now_ms() {
 
 fmt_s() { printf '%d.%03d' $(($1 / 1000)) $(($1 % 1000)); } # milliseconds -> seconds
 
-# bounded SECONDS COMMAND...: run COMMAND, killing it after SECONDS when
-# timeout is installed.
-bounded() {
-	local secs="$1"
-	shift
-	if command -v timeout >/dev/null 2>&1; then
-		timeout "$secs" "$@"
-	else
-		"$@"
-	fi
-}
+# bounded SECONDS COMMAND...: run COMMAND, killing it after SECONDS.
+bounded() { timeout "$@"; }
 
 # The container shares the host network, so anything already listening on the
 # port would answer /health in its place. Connect directly so stalled and
 # non-HTTP listeners count too.
 for host in 127.0.0.1 ::1; do
+	# shellcheck disable=SC2016 # $0 and $1 are meant for the inner bash.
 	if bounded 2 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$host" "$port" 2>/dev/null; then
 		echo "port ${port} is already in use on the host" >&2
 		exit 1
@@ -88,7 +86,7 @@ expired() {
 	return 1
 }
 
-serves_health() { curl -fs --max-time "$1" -o /dev/null "http://127.0.0.1:${port}/health"; }
+serves_health() { curl -fs --noproxy '*' --max-time "$1" -o /dev/null "http://127.0.0.1:${port}/health"; }
 is_healthy() { [ "$(bounded "$1" docker inspect --format '{{.State.Health.Status}}' "$name")" = healthy ]; }
 
 wait_for() { # wait_for DESCRIPTION PROBE; PROBE gets the seconds left
