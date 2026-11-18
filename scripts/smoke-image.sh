@@ -38,7 +38,11 @@ cleanup() {
 		echo "::endgroup::"
 		timeout "$cleanup_limit" docker inspect --format '{{json .State.Health}}' "$name" 2>&1 || true
 	fi
-	timeout "$cleanup_limit" docker rm -f "$name" >/dev/null 2>&1 || true
+	# A failed removal is reported but does not change the exit status; the
+	# leftover container would keep holding the port for the next run.
+	if ! timeout "$cleanup_limit" docker rm -f "$name" >/dev/null 2>&1; then
+		echo "could not remove container ${name}; remove it manually: docker rm -f ${name}" >&2
+	fi
 	exit "$status"
 }
 trap cleanup EXIT
