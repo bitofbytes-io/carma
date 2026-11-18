@@ -107,12 +107,36 @@ fi
 # One 30 s budget covers both checks. Every command below is bounded by the
 # time left, and the deadline is rechecked before a success is accepted, so
 # nothing past 30 s can pass.
-started_ms=$(now_ms)
-remaining_ms() { echo $((limit_ms - ($(now_ms) - started_ms))); }
+#
+# The clock is read into its own checked variable, never inside an arithmetic
+# expansion: a read that fails without output would otherwise vanish into the
+# sum (limit_ms - ( - started_ms)) and stretch the budget. A failed or
+# non-numeric read aborts the wait instead.
+clock_ms() { # clock_ms VAR: set VAR to the monotonic clock in ms, or fail
+	local reading # not named like any VAR a caller passes: locals shadow it
+	reading=$(now_ms) || return 1
+	[[ "$reading" =~ ^[0-9]+$ ]] || return 1
+	printf -v "$1" '%s' "$reading"
+}
+
+started_ms=
+clock_ms started_ms || { echo "could not read the monotonic clock" >&2; exit 1; }
 
 expired() {
 	echo "timed out waiting for $1 (30s)" >&2
 	return 1
+}
+
+# refresh_left WHAT: set the caller's `left` to the ms remaining. Fails, with
+# a message, when the clock cannot be read or the budget is spent.
+refresh_left() {
+	local now
+	if ! clock_ms now; then
+		echo "could not read the monotonic clock while waiting for $1" >&2
+		return 1
+	fi
+	left=$((limit_ms - (now - started_ms)))
+	[ "$left" -gt 0 ] || { expired "$1"; return 1; }
 }
 
 serves_health() { curl -fs --noproxy '*' --max-time "$1" -o /dev/null "http://127.0.0.1:${port}/health"; }
@@ -121,21 +145,19 @@ is_healthy() { [ "$(bounded "$1" docker inspect --format '{{.State.Health.Status
 wait_for() { # wait_for DESCRIPTION PROBE; PROBE gets the seconds left
 	local what="$1" probe="$2" left running
 	while :; do
-		left=$(remaining_ms)
-		[ "$left" -gt 0 ] || { expired "$what"; return 1; }
+		refresh_left "$what" || return 1
 		running=$(bounded "$(fmt_s "$left")" docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null || true)
-		left=$(remaining_ms)
-		[ "$left" -gt 0 ] || { expired "$what"; return 1; }
+		refresh_left "$what" || return 1
 		if [ "$running" != true ]; then
 			echo "container exited or could not be inspected while waiting for $what" >&2
 			return 1
 		fi
-		if "$probe" "$(fmt_s "$left")" 2>/dev/null && [ "$(remaining_ms)" -gt 0 ]; then
-			echo "$what after $(fmt_s $(($(now_ms) - started_ms)))s"
+		if "$probe" "$(fmt_s "$left")" 2>/dev/null; then
+			refresh_left "$what" || return 1
+			echo "$what after $(fmt_s $((limit_ms - left)))s"
 			return 0
 		fi
-		left=$(remaining_ms)
-		[ "$left" -gt 0 ] || { expired "$what"; return 1; }
+		refresh_left "$what" || return 1
 		sleep "$(fmt_s $((left < 1000 ? left : 1000)))"
 	done
 }
