@@ -100,7 +100,9 @@ with `scripts/smoke-image.sh IMAGE`. The script starts the container on the host
 network against the CI Postgres (`CARMA_TEST_DATABASE_URL`) with development auth,
 fails unless `/health` answers and Docker reports the container healthy, both within
 a single 30-second budget (the Dockerfile's HEALTHCHECK, run every 2 s instead of
-30 s), and prints the container logs on failure. It also fails if anything is already
+30 s), and prints the container logs on failure. The budget is timed on a monotonic
+clock (`/proc/uptime`, or perl's `CLOCK_MONOTONIC` where that is missing), so a system
+clock adjustment cannot shorten or extend it. It also fails if anything is already
 listening on port 4700. It needs no extra secrets. To run it locally, point
 `CARMA_TEST_DATABASE_URL` at a **disposable test database** (for example the
 Compose Postgres from `make test-integration`), never a database holding real data:
