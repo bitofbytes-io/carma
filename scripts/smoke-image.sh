@@ -60,13 +60,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Milliseconds on a monotonic clock, so a wall-clock adjustment (NTP step,
+# manual change) during the run cannot shorten or extend the 30 s budget.
+# /proc/uptime (Linux) is monotonic; elsewhere (macOS) perl's CLOCK_MONOTONIC is.
+# EPOCHREALTIME and SECONDS follow the wall clock, so they are not used.
 now_ms() {
-	local t="${EPOCHREALTIME:-}"
-	if [ -n "$t" ]; then
-		t="${t/[.,]/}"
-		echo $((t / 1000))
+	local up _
+	if [ -r /proc/uptime ] && read -r up _ </proc/uptime && [ -n "$up" ]; then
+		up="${up/[.,]/}" # centiseconds; the fraction always has two digits
+		echo $((10#$up * 10))
 	else
-		echo $((SECONDS * 1000))
+		perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%d\n", clock_gettime(CLOCK_MONOTONIC) * 1000'
 	fi
 }
 
