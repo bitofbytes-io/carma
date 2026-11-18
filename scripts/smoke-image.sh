@@ -26,15 +26,19 @@ name="carma-smoke-$$"
 port=4700 # The image's HEALTHCHECK and default PORT.
 limit_ms=30000
 
+# Each docker call in cleanup is bounded on its own so a stalled daemon cannot
+# hang the exit path; the original exit status is kept whatever they do.
+cleanup_limit=5
 cleanup() {
 	status=$?
-	if [ "$status" -ne 0 ] && docker inspect "$name" >/dev/null 2>&1; then
+	trap - EXIT
+	if [ "$status" -ne 0 ] && timeout "$cleanup_limit" docker inspect "$name" >/dev/null 2>&1; then
 		echo "::group::container logs"
-		docker logs "$name" 2>&1 || true
+		timeout "$cleanup_limit" docker logs "$name" 2>&1 || true
 		echo "::endgroup::"
-		docker inspect --format '{{json .State.Health}}' "$name" 2>&1 || true
+		timeout "$cleanup_limit" docker inspect --format '{{json .State.Health}}' "$name" 2>&1 || true
 	fi
-	docker rm -f "$name" >/dev/null 2>&1 || true
+	timeout "$cleanup_limit" docker rm -f "$name" >/dev/null 2>&1 || true
 	exit "$status"
 }
 trap cleanup EXIT
@@ -68,12 +72,16 @@ done
 # Host networking lets the container reach a Postgres published on the host.
 # The health flags only shorten the image's 30 s interval; the probe command
 # itself is the Dockerfile's HEALTHCHECK.
-DATABASE_URL="$CARMA_TEST_DATABASE_URL" docker run --detach --name "$name" \
+launch_limit=20
+if ! DATABASE_URL="$CARMA_TEST_DATABASE_URL" timeout "$launch_limit" docker run --detach --name "$name" \
 	--network host \
 	--env APP_ENV=development --env AUTH_MODE=development --env DATABASE_URL \
 	--env METRICS_ADDR=off \
 	--health-interval 2s --health-start-period 0s --health-retries 3 \
-	"$image" >/dev/null
+	"$image" >/dev/null; then
+	echo "docker run did not start the container within ${launch_limit}s (or failed)" >&2
+	exit 1
+fi
 
 # One 30 s budget covers both checks. Every command below is bounded by the
 # time left, and the deadline is rechecked before a success is accepted, so
