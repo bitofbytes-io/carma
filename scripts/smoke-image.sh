@@ -22,26 +22,39 @@ if ! command -v timeout >/dev/null 2>&1; then
 	echo "timeout(1) is required to bound the smoke test's probes; install coreutils" >&2
 	exit 1
 fi
-name="carma-smoke-$$"
+# The PID alone can repeat across runs, so identify this run by a unique id and
+# only touch containers carrying its label.
+run_id="$(date +%s)-$$-$RANDOM$RANDOM"
+name="carma-smoke-$run_id"
+label="carma.smoke.run=$run_id"
 port=4700 # The image's HEALTHCHECK and default PORT.
 limit_ms=30000
 
 # Each docker call in cleanup is bounded on its own so a stalled daemon cannot
 # hang the exit path; the original exit status is kept whatever they do.
+# Only a container labelled with this run's id is collected or removed, so an
+# older container left behind is never touched.
 cleanup_limit=5
 cleanup() {
 	status=$?
 	trap - EXIT
-	if [ "$status" -ne 0 ] && timeout "$cleanup_limit" docker inspect "$name" >/dev/null 2>&1; then
-		echo "::group::container logs"
-		timeout "$cleanup_limit" docker logs "$name" 2>&1 || true
-		echo "::endgroup::"
-		timeout "$cleanup_limit" docker inspect --format '{{json .State.Health}}' "$name" 2>&1 || true
+	local owned
+	if ! owned=$(timeout "$cleanup_limit" docker ps --all --quiet --no-trunc --filter "label=$label" 2>/dev/null); then
+		echo "could not look up this run's container $name; remove it manually: docker rm -f $name" >&2
+		exit "$status"
 	fi
-	# A failed removal is reported but does not change the exit status; the
-	# leftover container would keep holding the port for the next run.
-	if ! timeout "$cleanup_limit" docker rm -f "$name" >/dev/null 2>&1; then
-		echo "could not remove container ${name}; remove it manually: docker rm -f ${name}" >&2
+	if [ -n "$owned" ]; then
+		if [ "$status" -ne 0 ]; then
+			echo "::group::container logs"
+			timeout "$cleanup_limit" docker logs "$owned" 2>&1 || true
+			echo "::endgroup::"
+			timeout "$cleanup_limit" docker inspect --format '{{json .State.Health}}' "$owned" 2>&1 || true
+		fi
+		# A failed removal is reported but does not change the exit status; the
+		# leftover container would keep holding the port for the next run.
+		if ! timeout "$cleanup_limit" docker rm -f "$owned" >/dev/null 2>&1; then
+			echo "could not remove container $name; remove it manually: docker rm -f $name" >&2
+		fi
 	fi
 	exit "$status"
 }
@@ -77,7 +90,7 @@ done
 # The health flags only shorten the image's 30 s interval; the probe command
 # itself is the Dockerfile's HEALTHCHECK.
 launch_limit=20
-if ! DATABASE_URL="$CARMA_TEST_DATABASE_URL" timeout "$launch_limit" docker run --detach --name "$name" \
+if ! DATABASE_URL="$CARMA_TEST_DATABASE_URL" timeout "$launch_limit" docker run --detach --name "$name" --label "$label" \
 	--network host \
 	--env APP_ENV=development --env AUTH_MODE=development --env DATABASE_URL \
 	--env METRICS_ADDR=off \
