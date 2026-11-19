@@ -2,7 +2,11 @@
 <section class="card reminders-card">
   <div class="section-head"><h1>Reminders · {{.Vehicle.Nickname}}</h1><a class="secondary" href="/vehicles/{{.Vehicle.ID}}">Back to vehicle</a></div>
   {{template "reminder-list" .}}
-  <p class="muted reminder-help">A new reminder starts from the date you add it and the vehicle's current mileage. If mileage is unknown, mileage tracking starts after the first matching service record. Snooze hides a reminder until a date or mileage. Logging that service clears the snooze.</p>
+  <p class="muted reminder-help">
+    A new reminder starts from the date you add it and the vehicle's current mileage. If mileage is unknown, mileage
+    tracking starts after the first matching service record. Snooze hides a reminder until a date or mileage. Logging
+    that service clears the snooze.
+  </p>
 </section>
 {{end}}
 
@@ -11,37 +15,75 @@
   {{if .Error}}<div class="error" role="alert">{{.Error}}</div>{{end}}
   <div class="reminder-table">
     <div class="reminder-row header" aria-hidden="true">
-      <div class="reminder-header-fields"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span><span class="reminder-header-status">Status</span><span class="reminder-header-enabled">Enabled</span></div>
+      <div class="reminder-header-fields"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span>
+      {{- /* line break only; the spans stay adjacent */ -}}
+      <span class="reminder-header-status">Status</span><span class="reminder-header-enabled">Enabled</span></div>
       <span>Actions</span>
     </div>
     {{range .Reminders}}
     <div class="reminder-row reminder-entry">
-      <form id="reminder-{{.Reminder.ID}}" class="reminder-update" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders" hx-target="#reminder-list" hx-swap="outerHTML">
+      <form id="reminder-{{.Reminder.ID}}" class="reminder-update" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders"
+        hx-post="/vehicles/{{$.Vehicle.ID}}/reminders" hx-target="#reminder-list" hx-swap="outerHTML">
         <input type="hidden" name="service_type_id" value="{{.Reminder.ServiceTypeID}}">
-        <label class="reminder-field reminder-service"><span class="field-label">Service type</span><select aria-label="Service type for {{.Reminder.ServiceTypeName}} reminder" disabled><option>{{.Reminder.ServiceTypeName}}</option></select></label>
-        <label class="reminder-field"><span class="field-label">Every (months)</span><input type="number" min="1" name="months" aria-label="Interval months for {{.Reminder.ServiceTypeName}} reminder" value="{{if .Reminder.IntervalMonths}}{{.Reminder.IntervalMonths}}{{end}}"></label>
-        <label class="reminder-field"><span class="field-label">Every (miles)</span><input type="number" min="1" name="miles" aria-label="Interval miles for {{.Reminder.ServiceTypeName}} reminder" value="{{if .Reminder.IntervalMiles}}{{.Reminder.IntervalMiles}}{{end}}"></label>
+        <label class="reminder-field reminder-service">
+          <span class="field-label">Service type</span>
+          <select aria-label="Service type for {{.Reminder.ServiceTypeName}} reminder" disabled>
+            <option>{{.Reminder.ServiceTypeName}}</option>
+          </select>
+        </label>
+        <label class="reminder-field">
+          <span class="field-label">Every (months)</span>
+          <input type="number" min="1" name="months"
+            aria-label="Interval months for {{.Reminder.ServiceTypeName}} reminder"
+            value="{{if .Reminder.IntervalMonths}}{{.Reminder.IntervalMonths}}{{end}}">
+        </label>
+        <label class="reminder-field">
+          <span class="field-label">Every (miles)</span>
+          <input type="number" min="1" name="miles"
+            aria-label="Interval miles for {{.Reminder.ServiceTypeName}} reminder"
+            value="{{if .Reminder.IntervalMiles}}{{.Reminder.IntervalMiles}}{{end}}">
+        </label>
         <div class="reminder-field reminder-status"><span class="field-label">Status</span><span class="status {{.Status}}">{{.Status}}</span></div>
-        <label class="reminder-field reminder-enabled"><span class="field-label">Enabled</span><input type="checkbox" name="enabled" value="true" aria-label="Enable {{.Reminder.ServiceTypeName}} reminder" {{checked .Reminder.Enabled}} hx-post="/vehicles/{{$.Vehicle.ID}}/reminders" hx-include="closest form" hx-target="#reminder-list" hx-swap="outerHTML"></label>
+        <label class="reminder-field reminder-enabled">
+          <span class="field-label">Enabled</span>
+          <input type="checkbox" name="enabled" value="true" aria-label="Enable {{.Reminder.ServiceTypeName}} reminder"
+            {{checked .Reminder.Enabled}} hx-post="/vehicles/{{$.Vehicle.ID}}/reminders" hx-include="closest form"
+            hx-target="#reminder-list" hx-swap="outerHTML">
+        </label>
         {{if .Detail}}<p class="reminder-detail muted">{{.Detail}}</p>{{end}}
       </form>
       <div class="reminder-actions">
         <button class="secondary" type="submit" form="reminder-{{.Reminder.ID}}">Save</button>
         <label class="secondary snooze-toggle-label" for="snooze-{{.Reminder.ID}}" aria-label="Snooze {{.Reminder.ServiceTypeName}} reminder">Snooze</label>
-        <form method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/delete" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/delete" hx-target="#reminder-list" hx-swap="outerHTML" hx-confirm="Delete this reminder?"><button class="link danger-text" type="submit">Delete</button></form>
+        <form method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/delete"
+          hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/delete" hx-target="#reminder-list"
+          hx-swap="outerHTML" hx-confirm="Delete this reminder?">
+          <button class="link danger-text" type="submit">Delete</button>
+        </form>
       </div>
-      <input type="checkbox" class="snooze-toggle" id="snooze-{{.Reminder.ID}}" aria-controls="snooze-panel-{{.Reminder.ID}}" {{if and $.Error (eq $.SnoozeReminderID .Reminder.ID)}}checked{{end}}>
+      <input type="checkbox" class="snooze-toggle"
+        id="snooze-{{.Reminder.ID}}" aria-controls="snooze-panel-{{.Reminder.ID}}" {{if and $.Error (eq $.SnoozeReminderID .Reminder.ID)}}checked{{end}}>
       <div class="reminder-snooze-panel" id="snooze-panel-{{.Reminder.ID}}">
         <p class="muted snooze-panel-help">Hide this reminder until a date or mileage.</p>
-        <form class="snooze-presets" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-target="#reminder-list" hx-swap="outerHTML" aria-label="Snooze presets for {{.Reminder.ServiceTypeName}}">
+        <form class="snooze-presets" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze"
+          hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-target="#reminder-list"
+          hx-swap="outerHTML" aria-label="Snooze presets for {{.Reminder.ServiceTypeName}}">
           <button class="secondary" type="submit" name="preset" value="2w">2 weeks</button>
           <button class="secondary" type="submit" name="preset" value="1m">1 month</button>
           <button class="secondary" type="submit" name="preset" value="500mi">+500 mi</button>
-          {{if or .Reminder.SnoozedUntilOn .Reminder.SnoozedUntilMiles}}<button class="link" type="submit" name="preset" value="clear">Clear snooze</button>{{end}}
+          {{if or .Reminder.SnoozedUntilOn .Reminder.SnoozedUntilMiles}}
+            <button class="link" type="submit" name="preset" value="clear">Clear snooze</button>
+          {{end}}
         </form>
-        <form class="snooze-custom" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-target="#reminder-list" hx-swap="outerHTML">
+        <form class="snooze-custom" method="post" action="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze"
+          hx-post="/vehicles/{{$.Vehicle.ID}}/reminders/{{.Reminder.ID}}/snooze" hx-target="#reminder-list"
+          hx-swap="outerHTML">
           <label><span>Until date</span><input type="date" name="until_on" aria-label="Snooze {{.Reminder.ServiceTypeName}} until date"></label>
-          <label><span>Until mileage</span><input type="number" min="1" step="1" inputmode="numeric" name="until_miles" placeholder="Mileage" aria-label="Snooze {{.Reminder.ServiceTypeName}} until mileage"></label>
+          <label>
+            <span>Until mileage</span>
+            <input type="number" min="1" step="1" inputmode="numeric" name="until_miles" placeholder="Mileage"
+              aria-label="Snooze {{.Reminder.ServiceTypeName}} until mileage">
+          </label>
           <button class="primary" type="submit" name="preset" value="custom">Apply</button>
         </form>
       </div>
@@ -52,8 +94,11 @@
   </div>
   <div class="add-reminder-section">
     <h2>Add reminder</h2>
-    <form method="post" action="/vehicles/{{.Vehicle.ID}}/reminders" class="add-reminder-form" hx-post="/vehicles/{{.Vehicle.ID}}/reminders" hx-target="#reminder-list" hx-swap="outerHTML">
-      <label><span>Service type</span><select name="service_type_id" aria-label="Service type for new reminder" required>{{range .Types}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <form method="post" action="/vehicles/{{.Vehicle.ID}}/reminders" class="add-reminder-form"
+      hx-post="/vehicles/{{.Vehicle.ID}}/reminders" hx-target="#reminder-list" hx-swap="outerHTML">
+      <label><span>Service type</span><select name="service_type_id" aria-label="Service type for new reminder" required>
+        {{- range .Types}}<option value="{{.ID}}">{{.Name}}</option>{{end -}}
+      </select></label>
       <label><span>Every (months)</span><input type="number" min="1" name="months" aria-label="Interval months for new reminder" placeholder="Optional"></label>
       <label><span>Every (miles)</span><input type="number" min="1" name="miles" aria-label="Interval miles for new reminder" placeholder="Optional"></label>
       <input type="hidden" name="enabled" value="true">

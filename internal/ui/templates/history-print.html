@@ -11,7 +11,11 @@
   <header class="history-head">
     <div>
       <p class="muted">Service history</p>
-      <h1>{{if .Vehicle.Year}}{{.Vehicle.Year}} {{end}}{{.Vehicle.Make}} {{.Vehicle.Model}}{{if not (or .Vehicle.Make .Vehicle.Model)}}{{.Vehicle.Nickname}}{{end}}</h1>
+      <h1>
+        {{if .Vehicle.Year}}{{.Vehicle.Year}} {{end -}}
+        {{.Vehicle.Make}} {{.Vehicle.Model}}
+        {{- if not (or .Vehicle.Make .Vehicle.Model)}}{{.Vehicle.Nickname}}{{end}}
+      </h1>
     </div>
     <p class="muted">Prepared {{date .Generated}} with Carma</p>
   </header>
@@ -40,7 +44,13 @@
       <td class="number" data-label="Mileage">{{num .OdometerMiles}}</td>
       {{if not $.HideCosts}}<td class="number history-cost" data-label="Cost">{{money .CostCents}}</td>{{end}}
       <td data-label="Shop">{{.Vendor}}</td>
-      <td class="history-warranty" data-label="Warranty">{{if .HasWarranty}}Until {{.WarrantyLimits}}<br><span class="muted">{{if index $.WarrantyActive .ID}}Active{{else}}Expired{{end}}</span>{{else}}—{{end}}</td>
+      <td class="history-warranty" data-label="Warranty">
+        {{if .HasWarranty}}
+          Until {{.WarrantyLimits}}<br><span class="muted">{{if index $.WarrantyActive .ID}}Active{{else}}Expired{{end}}</span>
+        {{else}}
+          —
+        {{end}}
+      </td>
       <td class="history-notes" data-label="Notes">{{.Notes}}</td>
       <td class="number" data-label="Receipts">{{if .AttachmentCount}}{{.AttachmentCount}}{{else}}—{{end}}</td>
     </tr>{{end}}</tbody>
