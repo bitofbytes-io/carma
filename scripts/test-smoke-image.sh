@@ -50,12 +50,12 @@ run_bounded() {
 	pid=$!
 	set +m
 	(
-		sleeper=
 		# On TERM, take the sleep down too and leave without killing anything.
-		trap 'kill "$sleeper" 2>/dev/null; exit 0' TERM
+		# jobs -p lists the sleep as soon as it is forked, so this holds even
+		# if TERM lands before $! could have been saved.
+		trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
 		sleep "$limit" &
-		sleeper=$!
-		wait "$sleeper"
+		wait
 		: >"$work/timed-out"
 		kill -KILL -- "-$pid"
 	) >/dev/null 2>&1 &
