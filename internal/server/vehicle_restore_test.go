@@ -18,14 +18,18 @@ func TestRestoreVehicleReturnsArchivedVehicleToGarageWithHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	types, _ := f.store.ListServiceTypes(t.Context())
+	types, err := f.store.ListServiceTypes(t.Context())
+	if err != nil || len(types) == 0 {
+		t.Fatalf("service types=%v err=%v", types, err)
+	}
 	months := 6
-	if _, err = f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMonths: &months, Enabled: true, CreatedAt: time.Now()}); err != nil {
+	seeded, err := f.store.UpsertReminder(t.Context(), model.Reminder{ID: uuid.New(), VehicleID: v.ID, ServiceTypeID: types[0].ID, IntervalMonths: &months, Enabled: true, CreatedAt: time.Now()})
+	if err != nil {
 		t.Fatal(err)
 	}
 	remindersBefore, err := f.store.ListReminders(t.Context(), &v.ID, true)
-	if err != nil || len(remindersBefore) == 0 {
-		t.Fatalf("reminders=%v err=%v", remindersBefore, err)
+	if err != nil || len(remindersBefore) != 1 || remindersBefore[0].ID != seeded.ID {
+		t.Fatalf("reminders=%v err=%v, want only %s", remindersBefore, err, seeded.ID)
 	}
 	if w := f.do(t, "POST", "/vehicles/"+v.ID.String()+"/archive", nil, ""); w.Code != http.StatusSeeOther {
 		t.Fatalf("archive: %d", w.Code)
@@ -49,8 +53,8 @@ func TestRestoreVehicleReturnsArchivedVehicleToGarageWithHistory(t *testing.T) {
 	if err != nil || len(garage) != 1 || garage[0].ID != v.ID || garage[0].ArchivedAt != nil {
 		t.Fatalf("garage after restore = %+v err=%v", garage, err)
 	}
-	if archived, _ := f.store.ListVehicles(t.Context(), true); len(archived) != 0 {
-		t.Fatalf("still archived: %+v", archived)
+	if archived, err := f.store.ListVehicles(t.Context(), true); err != nil || len(archived) != 0 {
+		t.Fatalf("still archived: %+v err=%v", archived, err)
 	}
 	if body := f.do(t, "GET", "/", nil, "").Body.String(); !strings.Contains(body, `href="/vehicles/`+v.ID.String()+`"`) {
 		t.Fatalf("garage does not list the restored vehicle: %s", body)
@@ -64,8 +68,8 @@ func TestRestoreVehicleReturnsArchivedVehicleToGarageWithHistory(t *testing.T) {
 		t.Fatalf("records after restore = %+v err=%v", records, err)
 	}
 	remindersAfter, err := f.store.ListReminders(t.Context(), &v.ID, true)
-	if err != nil || len(remindersAfter) != len(remindersBefore) {
-		t.Fatalf("reminders after restore = %+v err=%v, want %d", remindersAfter, err, len(remindersBefore))
+	if err != nil || len(remindersAfter) != 1 || remindersAfter[0].ID != seeded.ID {
+		t.Fatalf("reminders after restore = %+v err=%v, want only %s", remindersAfter, err, seeded.ID)
 	}
 }
 
