@@ -58,6 +58,7 @@ own_sleepers() {
 
 ready_tries=200 # Polls of 0.05s, about ten seconds, for a watchdog to register.
 mark_ready() { : >"$work/watchdog-ready"; } # The watchdog's readiness signal.
+await_setup() { :; } # Runs once the watchdog is forked, before the readiness wait.
 
 # run_bounded LIMIT OUTFILE COMMAND...: run COMMAND with its output in OUTFILE
 # and return its status, or 124 if it was still running after LIMIT seconds.
@@ -89,6 +90,7 @@ run_bounded() {
 	) >/dev/null 2>&1 &
 	watcher=$!
 	set +m
+	await_setup
 	until [ -e "$work/watchdog-ready" ]; do
 		tries=$((tries + 1))
 		if [ "$tries" -gt "$ready_tries" ]; then
@@ -189,15 +191,33 @@ else
 fi
 
 # A watchdog that starts its sleep but never reports ready is killed with
-# SIGKILL, which skips its TERM trap. The sleep must go down with it.
+# SIGKILL, which skips its TERM trap. The sleep must go down with it. The
+# readiness window is shortened so the case is quick, but a loaded runner may
+# not schedule the watchdog within it, and then there would be no sleep to
+# check. So the parent first waits, under its own ten second deadline, for the
+# watchdog to log its sleeper pid, and only then lets the short readiness
+# window run out. The case must also have logged a new sleeper pid.
+logged_before=$(wc -l <"$sleeper_log")
 mark_ready() { :; }
+await_setup() {
+	local setup_tries=0
+	while [ "$(wc -l <"$sleeper_log")" -le "$logged_before" ] && [ "$setup_tries" -lt 200 ]; do
+		setup_tries=$((setup_tries + 1))
+		sleep 0.05
+	done
+}
 ready_tries=20
 startup_out=$(run_case "watchdog startup" zero "" 2>&1)
+logged_after=$(wc -l <"$sleeper_log")
 mark_ready() { : >"$work/watchdog-ready"; }
+await_setup() { :; }
 ready_tries=200
 if ! grep -qF "FAIL watchdog startup: watchdog did not start" <<<"$startup_out"; then
 	echo "FAIL watchdog startup failure is reported: output was:"
 	echo "$startup_out"
+	failures=$((failures + 1))
+elif [ "$logged_after" -le "$logged_before" ]; then
+	echo "FAIL watchdog startup failure logged no new sleeper pid, so there is no sleep to check"
 	failures=$((failures + 1))
 else
 	leaked=$(own_sleepers)
