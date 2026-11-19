@@ -125,17 +125,25 @@ run_case "clock read returns a non-numeric value" nonzero \
 	"could not read the monotonic clock while waiting for /health served"
 
 # Cleanup: a case that ends before its limit must take the watchdog's sleep
-# down with it. The limit is unique to this run (it embeds this shell's pid),
-# so any `sleep` carrying it afterwards was leaked by the watchdog, and would
-# otherwise linger for the rest of the limit after every finished case.
-case_limit=$((100000 + $$))
+# down with it. The limit is picked from this shell's pid so it is unlikely to
+# match another `sleep` on the machine (and stays under 20 minutes, so the
+# watchdog still bounds these cases), and any `sleep` carrying it afterwards
+# was leaked by the watchdog.
+case_limit=$((100 + $$ % 900))
 stub curl 'exit 0'
 stub perl 'exit 1'
 run_case "watchdog cleanup case (passing)" zero "container healthy after"
 stub curl 'rm -f "$CARMA_SMOKE_UPTIME_FILE"; exit 0'
 run_case "watchdog cleanup case (failing)" nonzero \
 	"could not read the monotonic clock while waiting for /health served"
+# The watchdog's TERM trap signals the sleep and exits without waiting for it,
+# so give a sleep that was just signalled a moment to die before calling it a leak.
 leaked=$(sleepers "$case_limit")
+for _ in 1 2 3; do
+	[ -n "$leaked" ] || break
+	sleep 1
+	leaked=$(sleepers "$case_limit")
+done
 if [ -z "$leaked" ]; then
 	echo "ok   watchdog sleep exits when a case finishes early"
 else
