@@ -37,6 +37,13 @@ esac'
 
 failures=0
 
+# sleepers LIMIT: print the pids of running `sleep LIMIT` processes. ps -eo is
+# POSIX, so this works on both Linux and macOS.
+sleepers() {
+	ps -eo pid=,args= | awk -v limit="$1" \
+		'$2 ~ /(^|\/)sleep$/ && $3 == limit { print $1 }'
+}
+
 # run_bounded LIMIT OUTFILE COMMAND...: run COMMAND with its output in OUTFILE
 # and return its status, or 124 if it was still running after LIMIT seconds.
 # A background sleeper kills the command's whole process group (job control
@@ -116,6 +123,28 @@ run_case "clock read fails right after a successful probe" nonzero \
 stub perl 'echo not-a-number'
 run_case "clock read returns a non-numeric value" nonzero \
 	"could not read the monotonic clock while waiting for /health served"
+
+# Cleanup: a case that ends before its limit must take the watchdog's sleep
+# down with it. The limit is unique to this run (it embeds this shell's pid),
+# so any `sleep` carrying it afterwards was leaked by the watchdog, and would
+# otherwise linger for the rest of the limit after every finished case.
+case_limit=$((100000 + $$))
+stub curl 'exit 0'
+stub perl 'exit 1'
+run_case "watchdog cleanup case (passing)" zero "container healthy after"
+stub curl 'rm -f "$CARMA_SMOKE_UPTIME_FILE"; exit 0'
+run_case "watchdog cleanup case (failing)" nonzero \
+	"could not read the monotonic clock while waiting for /health served"
+leaked=$(sleepers "$case_limit")
+if [ -z "$leaked" ]; then
+	echo "ok   watchdog sleep exits when a case finishes early"
+else
+	echo "FAIL watchdog sleep exits when a case finishes early: leaked sleep pid(s): $leaked"
+	# shellcheck disable=SC2086 # one pid per word
+	kill $leaked 2>/dev/null || true
+	failures=$((failures + 1))
+fi
+case_limit=20
 
 # The watchdog itself: a probe that never succeeds under the frozen clock polls
 # forever, so the case must be killed and reported rather than hang. The case
