@@ -56,13 +56,18 @@ own_sleepers() {
 	done <"$sleeper_log"
 }
 
+ready_tries=200 # Polls of 0.05s, about ten seconds, for a watchdog to register.
+mark_ready() { : >"$work/watchdog-ready"; } # The watchdog's readiness signal.
+
 # run_bounded LIMIT OUTFILE COMMAND...: run COMMAND with its output in OUTFILE
 # and return its status, or 124 if it was still running after LIMIT seconds.
 # A background sleeper kills the command's whole process group (job control
-# gives it one), so stubs it spawned cannot linger. The command is not waited
-# on until the watchdog has logged its sleep, so a command that ends at once
-# cannot send TERM before the sleep is registered in $sleeper_log. It returns
-# 125 if the watchdog never registers. Portable bash only.
+# gives it one), so stubs it spawned cannot linger. The watchdog gets its own
+# group too. The command is not waited on until the watchdog has logged its
+# sleep, so a command that ends at once cannot send TERM before the sleep is
+# registered in $sleeper_log. If the watchdog never registers, both groups are
+# killed with SIGKILL, which skips the watchdog's trap but still takes its
+# sleep down, and it returns 125. Portable bash only.
 run_bounded() {
 	local limit="$1" outfile="$2" pid watcher status=0 tries=0
 	shift 2
@@ -70,7 +75,6 @@ run_bounded() {
 	set -m
 	"$@" >"$outfile" 2>&1 &
 	pid=$!
-	set +m
 	(
 		# On TERM, take the sleep down too and leave without killing anything.
 		# jobs -p lists the sleep as soon as it is forked, so this holds even
@@ -78,16 +82,17 @@ run_bounded() {
 		trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
 		sleep "$limit" &
 		echo "$!" >>"$sleeper_log"
-		: >"$work/watchdog-ready"
+		mark_ready
 		wait
 		: >"$work/timed-out"
 		kill -KILL -- "-$pid"
 	) >/dev/null 2>&1 &
 	watcher=$!
+	set +m
 	until [ -e "$work/watchdog-ready" ]; do
 		tries=$((tries + 1))
-		if [ "$tries" -gt 200 ]; then # about ten seconds
-			kill -KILL -- "-$pid" "$watcher" 2>/dev/null || true
+		if [ "$tries" -gt "$ready_tries" ]; then
+			kill -KILL -- "-$pid" "-$watcher" 2>/dev/null || true
 			wait "$pid" "$watcher" 2>/dev/null || true
 			return 125
 		fi
@@ -155,10 +160,11 @@ run_case "clock read returns a non-numeric value" nonzero \
 
 # Cleanup: a case that ends before its limit must take the watchdog's sleep
 # down with it. Each watchdog logs the pid of its sleep, and any of those still
-# running afterwards was leaked by the watchdog. run_bounded holds each case
-# back until its watchdog has logged, so a case cannot finish before its sleep
-# is registered. Only logged pids are checked or signalled, so no other
-# process on the machine is touched.
+# running afterwards was leaked by the watchdog. run_bounded holds back its
+# cleanup signal until the watchdog has logged, so a case that finishes at once
+# cannot signal before its sleep is registered; the case itself may still end
+# first. Only logged pids are checked or signalled, so no other process on the
+# machine is touched.
 stub curl 'exit 0'
 stub perl 'exit 1'
 run_case "watchdog cleanup case (passing)" zero "container healthy after"
@@ -180,6 +186,34 @@ else
 	# shellcheck disable=SC2086 # one pid per word
 	kill $leaked 2>/dev/null || true
 	failures=$((failures + 1))
+fi
+
+# A watchdog that starts its sleep but never reports ready is killed with
+# SIGKILL, which skips its TERM trap. The sleep must go down with it.
+mark_ready() { :; }
+ready_tries=20
+startup_out=$(run_case "watchdog startup" zero "" 2>&1)
+mark_ready() { : >"$work/watchdog-ready"; }
+ready_tries=200
+if ! grep -qF "FAIL watchdog startup: watchdog did not start" <<<"$startup_out"; then
+	echo "FAIL watchdog startup failure is reported: output was:"
+	echo "$startup_out"
+	failures=$((failures + 1))
+else
+	leaked=$(own_sleepers)
+	for _ in 1 2 3; do
+		[ -n "$leaked" ] || break
+		sleep 1
+		leaked=$(own_sleepers)
+	done
+	if [ -z "$leaked" ]; then
+		echo "ok   watchdog startup failure takes its sleep down"
+	else
+		echo "FAIL watchdog startup failure takes its sleep down: leaked sleep pid(s): $leaked"
+		# shellcheck disable=SC2086 # one pid per word
+		kill $leaked 2>/dev/null || true
+		failures=$((failures + 1))
+	fi
 fi
 
 # The watchdog itself: a probe that never succeeds under the frozen clock polls
