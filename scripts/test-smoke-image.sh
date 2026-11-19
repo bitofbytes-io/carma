@@ -37,6 +37,25 @@ esac'
 
 failures=0
 
+# Every watchdog appends the pid of the sleep it starts to this file, so the
+# test only ever looks at (and signals) sleeps that its own watchdogs started.
+sleeper_log="$work/sleeper-pids"
+: >"$sleeper_log"
+
+# own_sleepers: print the pids logged in $sleeper_log that are still running
+# `sleep $case_limit`. The command line is checked too, so a logged pid the
+# system has since reused for another process is not mistaken for a sleeper.
+# ps -p -o is POSIX, so this works on both Linux and macOS.
+own_sleepers() {
+	local pid
+	while read -r pid; do
+		if ps -p "$pid" -o args= 2>/dev/null | awk -v limit="$case_limit" \
+			'$1 ~ /(^|\/)sleep$/ && $2 == limit { found = 1 } END { exit !found }'; then
+			echo "$pid"
+		fi
+	done <"$sleeper_log"
+}
+
 # run_bounded LIMIT OUTFILE COMMAND...: run COMMAND with its output in OUTFILE
 # and return its status, or 124 if it was still running after LIMIT seconds.
 # A background sleeper kills the command's whole process group (job control
@@ -55,6 +74,7 @@ run_bounded() {
 		# if TERM lands before $! could have been saved.
 		trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
 		sleep "$limit" &
+		echo "$!" >>"$sleeper_log"
 		wait
 		: >"$work/timed-out"
 		kill -KILL -- "-$pid"
@@ -116,6 +136,33 @@ run_case "clock read fails right after a successful probe" nonzero \
 stub perl 'echo not-a-number'
 run_case "clock read returns a non-numeric value" nonzero \
 	"could not read the monotonic clock while waiting for /health served"
+
+# Cleanup: a case that ends before its limit must take the watchdog's sleep
+# down with it. Each watchdog logs the pid of its sleep, and any of those still
+# running afterwards was leaked by the watchdog. Only logged pids are checked or
+# signalled, so no other process on the machine is touched.
+stub curl 'exit 0'
+stub perl 'exit 1'
+run_case "watchdog cleanup case (passing)" zero "container healthy after"
+stub curl 'rm -f "$CARMA_SMOKE_UPTIME_FILE"; exit 0'
+run_case "watchdog cleanup case (failing)" nonzero \
+	"could not read the monotonic clock while waiting for /health served"
+# The watchdog's TERM trap signals the sleep and exits without waiting for it,
+# so give a sleep that was just signalled a moment to die before calling it a leak.
+leaked=$(own_sleepers)
+for _ in 1 2 3; do
+	[ -n "$leaked" ] || break
+	sleep 1
+	leaked=$(own_sleepers)
+done
+if [ -z "$leaked" ]; then
+	echo "ok   watchdog sleep exits when a case finishes early"
+else
+	echo "FAIL watchdog sleep exits when a case finishes early: leaked sleep pid(s): $leaked"
+	# shellcheck disable=SC2086 # one pid per word
+	kill $leaked 2>/dev/null || true
+	failures=$((failures + 1))
+fi
 
 # The watchdog itself: a probe that never succeeds under the frozen clock polls
 # forever, so the case must be killed and reported rather than hang. The case
