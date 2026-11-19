@@ -480,6 +480,9 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 	if !strings.Contains(header[1], `aria-hidden="true"`) {
 		t.Fatalf("reminder header is not aria-hidden: %q", header[1])
 	}
+	if !strings.Contains(header[2], `class="reminder-header-fields"`) {
+		t.Fatalf("reminder header is missing its fields grid wrapper: %q", header[2])
+	}
 	var labels, classes []string
 	for _, m := range headerSpanRe.FindAllStringSubmatch(header[2], -1) {
 		classes = append(classes, m[1])
