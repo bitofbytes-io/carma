@@ -40,6 +40,10 @@ type Store interface {
 	// existing one, the replaced key is returned so its object can be deleted.
 	UpdateVehicle(context.Context, model.Vehicle) (updated model.Vehicle, replacedPhotoKey string, err error)
 	ArchiveVehicle(context.Context, uuid.UUID) error
+	// RestoreVehicle clears the archived flag; the vehicle's records and
+	// reminders were never removed. Restoring a vehicle that is not archived
+	// is a no-op.
+	RestoreVehicle(context.Context, uuid.UUID) error
 	// AddOdometerReading stores a mileage check-in and raises the vehicle's
 	// current odometer to it, returning the updated vehicle. A reading below the
 	// latest known mileage fails with ErrOdometerBelowLatest unless allowLower
