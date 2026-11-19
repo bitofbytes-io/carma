@@ -180,6 +180,19 @@ func (s *Server) archiveVehicle(response http.ResponseWriter, request *http.Requ
 	redirectAfterPost(response, request, "/")
 }
 
+func (s *Server) restoreVehicle(response http.ResponseWriter, request *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(request, "vehicleID"))
+	if err != nil {
+		http.NotFound(response, request)
+		return
+	}
+	if err = s.store.RestoreVehicle(request.Context(), id); err != nil {
+		s.notFound(response, err)
+		return
+	}
+	redirectAfterPost(response, request, "/")
+}
+
 func (s *Server) getVehicle(request *http.Request) (model.Vehicle, error) {
 	id, err := uuid.Parse(chi.URLParam(request, "vehicleID"))
 	if err != nil {

@@ -201,6 +201,14 @@ func (p *Postgres) ArchiveVehicle(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+func (p *Postgres) RestoreVehicle(ctx context.Context, id uuid.UUID) error {
+	tag, err := p.pool.Exec(ctx, `UPDATE vehicles SET archived_at=NULL,updated_at=CASE WHEN archived_at IS NULL THEN updated_at ELSE now() END WHERE id=$1`, id)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
 func replacedPhotoKey(newKey, previousKey string) string {
 	if newKey == "" || newKey == previousKey {
 		return ""
