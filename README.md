@@ -109,8 +109,10 @@ Compose Postgres from `make test-integration`), never a database holding real da
 starting Carma runs session cleanup and background jobs against it. Without the
 variable a local run skips; in CI (`CI` set) a missing variable fails the script.
 `make test` also runs `scripts/test-smoke-image.sh`, which drives the script with stubbed
-`docker`, `curl` and clock sources (no Docker, Postgres or sleeping) to check that an
-unreadable clock fails the run with a diagnostic.
+`docker`, `curl` and clock sources (no Docker or Postgres) to check that an
+unreadable clock fails the run with a diagnostic. Each case runs under a pure-bash
+watchdog that kills a case which never finishes, and the test checks that the
+watchdog's own `sleep` does not outlive a case that ends early.
 
 The server also runs asset cleanup at startup and every seven days.
 Only generated, unreferenced objects and `temporary/upload-*` files older than 48

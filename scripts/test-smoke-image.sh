@@ -59,11 +59,14 @@ own_sleepers() {
 # run_bounded LIMIT OUTFILE COMMAND...: run COMMAND with its output in OUTFILE
 # and return its status, or 124 if it was still running after LIMIT seconds.
 # A background sleeper kills the command's whole process group (job control
-# gives it one), so stubs it spawned cannot linger. Portable bash only.
+# gives it one), so stubs it spawned cannot linger. The command is not waited
+# on until the watchdog has logged its sleep, so a command that ends at once
+# cannot send TERM before the sleep is registered in $sleeper_log. It returns
+# 125 if the watchdog never registers. Portable bash only.
 run_bounded() {
-	local limit="$1" outfile="$2" pid watcher status=0
+	local limit="$1" outfile="$2" pid watcher status=0 tries=0
 	shift 2
-	rm -f "$work/timed-out"
+	rm -f "$work/timed-out" "$work/watchdog-ready"
 	set -m
 	"$@" >"$outfile" 2>&1 &
 	pid=$!
@@ -75,11 +78,21 @@ run_bounded() {
 		trap 'kill $(jobs -p) 2>/dev/null; exit 0' TERM
 		sleep "$limit" &
 		echo "$!" >>"$sleeper_log"
+		: >"$work/watchdog-ready"
 		wait
 		: >"$work/timed-out"
 		kill -KILL -- "-$pid"
 	) >/dev/null 2>&1 &
 	watcher=$!
+	until [ -e "$work/watchdog-ready" ]; do
+		tries=$((tries + 1))
+		if [ "$tries" -gt 200 ]; then # about ten seconds
+			kill -KILL -- "-$pid" "$watcher" 2>/dev/null || true
+			wait "$pid" "$watcher" 2>/dev/null || true
+			return 125
+		fi
+		sleep 0.05
+	done
 	wait "$pid" 2>/dev/null || status=$?
 	kill "$watcher" 2>/dev/null || true
 	wait "$watcher" 2>/dev/null || true
@@ -101,7 +114,10 @@ run_case() {
 		CARMA_TEST_DATABASE_URL=postgres://stub CI= \
 		"$BASH" "$script" stub-image || status=$?
 	out=$(<"$work/out")
-	if [ "$status" -eq 124 ]; then
+	if [ "$status" -eq 125 ]; then
+		echo "FAIL $name: watchdog did not start"
+		failures=$((failures + 1))
+	elif [ "$status" -eq 124 ]; then
 		echo "FAIL $name: still running after ${case_limit}s (watchdog)"
 		echo "$out"
 		failures=$((failures + 1))
@@ -139,8 +155,10 @@ run_case "clock read returns a non-numeric value" nonzero \
 
 # Cleanup: a case that ends before its limit must take the watchdog's sleep
 # down with it. Each watchdog logs the pid of its sleep, and any of those still
-# running afterwards was leaked by the watchdog. Only logged pids are checked or
-# signalled, so no other process on the machine is touched.
+# running afterwards was leaked by the watchdog. run_bounded holds each case
+# back until its watchdog has logged, so a case cannot finish before its sleep
+# is registered. Only logged pids are checked or signalled, so no other
+# process on the machine is touched.
 stub curl 'exit 0'
 stub perl 'exit 1'
 run_case "watchdog cleanup case (passing)" zero "container healthy after"
