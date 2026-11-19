@@ -45,6 +45,10 @@ func TestRestoreVehiclePostgresIntegration(t *testing.T) {
 	if err = store.ArchiveVehicle(ctx, vehicleID); err != nil {
 		t.Fatal(err)
 	}
+	// Pin updated_at to a fixed, older value so the restore bump is independent of wall-clock ordering.
+	if _, err = connection.Exec(ctx, `UPDATE vehicles SET updated_at=$2 WHERE id=$1`, vehicleID, time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
 	archived, err := store.GetVehicle(ctx, vehicleID)
 	if err != nil || archived.ArchivedAt == nil {
 		t.Fatalf("vehicle not archived: %+v err=%v", archived, err)
