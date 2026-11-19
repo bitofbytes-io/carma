@@ -1,17 +1,80 @@
 {{/* Shared by every page. Pages that render "records-section" set .RecordsURL and define "records-heading" and "records-filter-actions". */}}
-{{define "records-section"}}<section class="card records-card" id="records-section">
-  <div class="section-head">{{template "records-heading" .}}</div>
-  <form method="get" class="filters" hx-get="{{.RecordsURL}}" hx-trigger="submit, input changed delay:300ms, change" hx-target="#records-section" hx-swap="outerHTML" hx-push-url="true">
+{{define "records-section"}}
+<section class="card records-card" id="records-section">
+  <div class="section-head">
+    {{template "records-heading" .}}
+  </div>
+  <form method="get" class="filters" hx-get="{{.RecordsURL}}" hx-trigger="submit, input changed delay:300ms, change"
+    hx-target="#records-section" hx-swap="outerHTML" hx-push-url="true">
     <input name="q" aria-label="Search records" placeholder="Search records…" value="{{.Params.Get "q"}}">
-    <select name="type" aria-label="Filter by service type"><option value="">All types</option>{{range .Types}}<option value="{{.ID}}" {{selected .ID.String ($.Params.Get "type")}}>{{.Name}}</option>{{end}}</select>
-    <input type="date" name="from" value="{{.Params.Get "from"}}" aria-label="From date"><input type="date" name="to" value="{{.Params.Get "to"}}" aria-label="To date">
-    <select name="sort" aria-label="Sort records by"><option value="date">Date</option><option value="mileage" {{selected "mileage" (.Params.Get "sort")}}>Mileage</option><option value="cost" {{selected "cost" (.Params.Get "sort")}}>Cost</option></select>
-    <select name="direction" aria-label="Sort direction"><option value="desc">Newest/highest</option><option value="asc" {{selected "asc" (.Params.Get "direction")}}>Oldest/lowest</option></select>
-    <button class="secondary">Apply</button>{{template "records-filter-actions" .}}
+    <select name="type" aria-label="Filter by service type">
+      <option value="">All types</option>
+      {{range .Types}}
+        <option value="{{.ID}}" {{selected .ID.String ($.Params.Get "type")}}>{{.Name}}</option>
+      {{end}}
+    </select>
+    <input type="date" name="from" value="{{.Params.Get "from"}}" aria-label="From date">
+    <input type="date" name="to" value="{{.Params.Get "to"}}" aria-label="To date">
+    <select name="sort" aria-label="Sort records by">
+      <option value="date">Date</option>
+      <option value="mileage" {{selected "mileage" (.Params.Get "sort")}}>Mileage</option>
+      <option value="cost" {{selected "cost" (.Params.Get "sort")}}>Cost</option>
+    </select>
+    <select name="direction" aria-label="Sort direction">
+      <option value="desc">Newest/highest</option>
+      <option value="asc" {{selected "asc" (.Params.Get "direction")}}>Oldest/lowest</option>
+    </select>
+    <button class="secondary">Apply</button>
+    {{template "records-filter-actions" .}}
   </form>
   {{template "record-list" .}}
-</section>{{end}}
+</section>
+{{end}}
+
 {{/* Quick mileage update. On the dashboard htmx swaps the whole vehicle card; on the vehicle page it swaps the form. */}}
-{{define "odometer-form"}}<form class="odometer-form" method="post" action="/vehicles/{{.Vehicle.ID}}/odometer" hx-post="/vehicles/{{.Vehicle.ID}}/odometer" hx-target="{{if eq .Return "dashboard"}}#vehicle-card-{{.Vehicle.ID}}{{else}}this{{end}}" hx-swap="outerHTML"><input type="hidden" name="return" value="{{.Return}}">{{if .Confirm}}<input type="hidden" name="confirm" value="1">{{end}}<input type="number" name="odometer_miles" min="0" step="1" inputmode="numeric" required placeholder="Current mileage" value="{{.Value}}" aria-label="Current mileage for {{.Vehicle.Nickname}}"><button class="secondary" type="submit">{{if .Confirm}}Save anyway{{else}}Update{{end}}</button>{{if .Error}}<p class="odometer-error" role="alert">{{.Error}}</p>{{end}}</form>{{end}}
-{{define "records-export"}}<span class="export-links"><a class="secondary" href="{{.RecordsURL}}/export.csv?{{query .Params}}">⇩ Export CSV</a><a class="secondary" href="{{.RecordsURL}}/export.xlsx?{{query .Params}}">⇩ Export XLSX</a></span>{{end}}
-{{define "record-list"}}<div class="record-list" id="records-list"><div class="record-row header"><span>Date</span><span>Service type</span><span>Mileage</span><span>Cost</span><span></span></div>{{range .Records}}<a class="record-row" href="/records/{{.ID}}"><span data-label="Date">{{date .OccurredOn}}</span><strong data-label="Service">{{.ServiceTypeName}}{{if index $.WarrantyActive .ID}} <small class="warranty-badge">Under warranty until {{.WarrantyLimits}}</small>{{end}}</strong><span data-label="Mileage">{{num .OdometerMiles}}</span><span data-label="Cost">{{money .CostCents}}</span><span>{{if .AttachmentCount}}📎 {{.AttachmentCount}}{{end}}</span></a>{{else}}<p class="empty-row">No records match this view.</p>{{end}}</div>{{end}}
+{{define "odometer-form"}}
+<form class="odometer-form" method="post" action="/vehicles/{{.Vehicle.ID}}/odometer"
+  hx-post="/vehicles/{{.Vehicle.ID}}/odometer"
+  hx-target="{{if eq .Return "dashboard"}}#vehicle-card-{{.Vehicle.ID}}{{else}}this{{end}}" hx-swap="outerHTML">
+  <input type="hidden" name="return" value="{{.Return}}">{{if .Confirm}}<input type="hidden" name="confirm" value="1">{{end}}
+  <input type="number" name="odometer_miles" min="0" step="1" inputmode="numeric" required placeholder="Current mileage"
+    value="{{.Value}}" aria-label="Current mileage for {{.Vehicle.Nickname}}">
+  <button class="secondary" type="submit">{{if .Confirm}}Save anyway{{else}}Update{{end}}</button>
+  {{if .Error}}
+    <p class="odometer-error" role="alert">{{.Error}}</p>
+  {{end}}
+</form>
+{{end}}
+
+{{define "records-export"}}
+<span class="export-links">
+  <a class="secondary" href="{{.RecordsURL}}/export.csv?{{query .Params}}">⇩ Export CSV</a>
+  <a class="secondary" href="{{.RecordsURL}}/export.xlsx?{{query .Params}}">⇩ Export XLSX</a>
+</span>
+{{end}}
+
+{{define "record-list"}}
+<div class="record-list" id="records-list">
+  <div class="record-row header">
+    <span>Date</span>
+    <span>Service type</span>
+    <span>Mileage</span>
+    <span>Cost</span>
+    <span></span>
+  </div>
+  {{range .Records}}
+    <a class="record-row" href="/records/{{.ID}}">
+      <span data-label="Date">{{date .OccurredOn}}</span>
+      <strong data-label="Service">
+        {{- .ServiceTypeName -}}
+        {{if index $.WarrantyActive .ID}} <small class="warranty-badge">Under warranty until {{.WarrantyLimits}}</small>{{end -}}
+      </strong>
+      <span data-label="Mileage">{{num .OdometerMiles}}</span>
+      <span data-label="Cost">{{money .CostCents}}</span>
+      <span>{{if .AttachmentCount}}📎 {{.AttachmentCount}}{{end}}</span>
+    </a>
+  {{else}}
+    <p class="empty-row">No records match this view.</p>
+  {{end}}
+</div>
+{{end}}
