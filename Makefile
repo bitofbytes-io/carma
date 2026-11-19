@@ -22,6 +22,7 @@ check-entrypoints:
 	done
 
 test: check-entrypoints
+	bash scripts/test-smoke-image.sh
 	GOCACHE=$(GOCACHE) $(GO) test -race ./...
 
 test-integration:

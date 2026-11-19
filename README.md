@@ -108,6 +108,9 @@ listening on port 4700. It needs no extra secrets. To run it locally, point
 Compose Postgres from `make test-integration`), never a database holding real data:
 starting Carma runs session cleanup and background jobs against it. Without the
 variable a local run skips; in CI (`CI` set) a missing variable fails the script.
+`make test` also runs `scripts/test-smoke-image.sh`, which drives the script with stubbed
+`docker`, `curl` and clock sources (no Docker, Postgres or sleeping) to check that an
+unreadable clock fails the run with a diagnostic.
 
 The server also runs asset cleanup at startup and every seven days.
 Only generated, unreferenced objects and `temporary/upload-*` files older than 48

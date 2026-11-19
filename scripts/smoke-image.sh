@@ -64,9 +64,11 @@ trap cleanup EXIT
 # manual change) during the run cannot shorten or extend the 30 s budget.
 # /proc/uptime (Linux) is monotonic; elsewhere (macOS) perl's CLOCK_MONOTONIC is.
 # EPOCHREALTIME and SECONDS follow the wall clock, so they are not used.
+# CARMA_SMOKE_UPTIME_FILE only exists so scripts/test-smoke-image.sh can
+# script the clock; leave it unset.
 now_ms() {
-	local up _
-	if [ -r /proc/uptime ] && read -r up _ </proc/uptime && [ -n "$up" ]; then
+	local up _ uptime_file="${CARMA_SMOKE_UPTIME_FILE:-/proc/uptime}"
+	if [ -r "$uptime_file" ] && read -r up _ <"$uptime_file" && [ -n "$up" ]; then
 		up="${up/[.,]/}" # centiseconds; the fraction always has two digits
 		echo $((10#$up * 10))
 	else
