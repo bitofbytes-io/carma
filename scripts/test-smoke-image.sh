@@ -189,15 +189,23 @@ else
 fi
 
 # A watchdog that starts its sleep but never reports ready is killed with
-# SIGKILL, which skips its TERM trap. The sleep must go down with it.
+# SIGKILL, which skips its TERM trap. The sleep must go down with it. The
+# shortened readiness window can end before a delayed watchdog has logged its
+# sleep, and then there is nothing to check, so the case must also have logged
+# a new sleeper pid.
 mark_ready() { :; }
 ready_tries=20
+logged_before=$(wc -l <"$sleeper_log")
 startup_out=$(run_case "watchdog startup" zero "" 2>&1)
+logged_after=$(wc -l <"$sleeper_log")
 mark_ready() { : >"$work/watchdog-ready"; }
 ready_tries=200
 if ! grep -qF "FAIL watchdog startup: watchdog did not start" <<<"$startup_out"; then
 	echo "FAIL watchdog startup failure is reported: output was:"
 	echo "$startup_out"
+	failures=$((failures + 1))
+elif [ "$logged_after" -le "$logged_before" ]; then
+	echo "FAIL watchdog startup failure logged no new sleeper pid, so there is no sleep to check"
 	failures=$((failures + 1))
 else
 	leaked=$(own_sleepers)
