@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -448,10 +449,6 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 	body := b.String()
 	for _, want := range []string{
 		`class="reminder-row reminder-entry"`,
-		`<div class="reminder-row header" aria-hidden="true">
-      <div class="reminder-header-fields"><span>Service type</span><span>Every (months)</span><span>Every (miles)</span><span class="reminder-header-status">Status</span><span class="reminder-header-enabled">Enabled</span></div>
-      <span>Actions</span>
-    </div>`,
 		`class="reminder-field reminder-enabled"`,
 		`class="reminder-actions"`,
 		`form="reminder-` + reminderID.String() + `"`,
@@ -475,7 +472,36 @@ func TestRemindersTemplateUsesLabeledResponsiveStructure(t *testing.T) {
 			t.Fatalf("missing responsive/accessibility structure %q in %s", want, body)
 		}
 	}
+
+	header := reminderHeaderRe.FindStringSubmatch(body)
+	if header == nil {
+		t.Fatalf("missing reminder header row in %s", body)
+	}
+	if !strings.Contains(header[1], `aria-hidden="true"`) {
+		t.Fatalf("reminder header is not aria-hidden: %q", header[1])
+	}
+	if !strings.Contains(header[2], `class="reminder-header-fields"`) {
+		t.Fatalf("reminder header is missing its fields grid wrapper: %q", header[2])
+	}
+	var labels, classes []string
+	for _, m := range headerSpanRe.FindAllStringSubmatch(header[2], -1) {
+		classes = append(classes, m[1])
+		labels = append(labels, strings.TrimSpace(m[2]))
+	}
+	wantLabels := []string{"Service type", "Every (months)", "Every (miles)", "Status", "Enabled", "Actions"}
+	if strings.Join(labels, "|") != strings.Join(wantLabels, "|") {
+		t.Fatalf("reminder header labels = %q, want %q", labels, wantLabels)
+	}
+	if !strings.Contains(classes[3], "reminder-header-status") || !strings.Contains(classes[4], "reminder-header-enabled") {
+		t.Fatalf("reminder header status/enabled classes = %q", classes)
+	}
 }
+
+var (
+	// The header row holds a nested div, so match up to the row's own closing tags.
+	reminderHeaderRe = regexp.MustCompile(`(?s)<div class="reminder-row header"([^>]*)>(.*?</div>\s*<span>Actions</span>)\s*</div>`)
+	headerSpanRe     = regexp.MustCompile(`(?s)<span([^>]*)>(.*?)</span>`)
+)
 
 func TestGroupRecallsCountsPerVehicle(t *testing.T) {
 	outback, civic := uuid.New(), uuid.New()
