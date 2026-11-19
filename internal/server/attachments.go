@@ -145,7 +145,7 @@ func (s *Server) serveObject(response http.ResponseWriter, request *http.Request
 		http.NotFound(response, request)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	end, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
 		s.fail(response, err)

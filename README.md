@@ -84,10 +84,13 @@ to `vpic.nhtsa.dot.gov` and `api.nhtsa.gov`. No configuration is needed.
 Validation commands are `make test`, `make lint`, `make build`, and `make vuln`.
 Both `make test` (also used in CI) and `make test-integration` run the Go race
 detector; a detected race fails the test run.
-The lint target lists unformatted Go files without rewriting them, then runs
-`go vet` and pinned `staticcheck@v0.8.2` using the project's Go toolchain. Run
-`gofmt -w` on the listed files to fix formatting; the first staticcheck run may
-download its pinned tool dependencies.
+The lint target runs `golangci-lint` (errcheck, staticcheck, govet, ineffassign,
+gosec, bodyclose, and the gofmt formatter, configured in `.golangci.yml`) using
+the project's Go toolchain. The version is pinned by `GOLANGCI_LINT_VERSION` in
+the Makefile, which Renovate tracks; the first run may download the pinned tool
+and its dependencies. Run `gofmt -w` on any files it reports as unformatted.
+Suppress a finding only with a `//nolint:<linter> // reason` comment that says
+why it is safe.
 The vulnerability target runs the pinned `govulncheck@v1.6.0` with the Go version
 declared by this project. The HTTP handler and repository tests need PostgreSQL:
 `make test` skips them unless `CARMA_TEST_DATABASE_URL` is set, so run

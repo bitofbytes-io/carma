@@ -28,7 +28,7 @@ func TestLocalStoreDetectsBytesAndRanges(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, e = f.Seek(5, io.SeekStart); e != nil {
 		t.Fatal(e)
 	}

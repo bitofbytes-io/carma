@@ -39,10 +39,10 @@ func RequireAuth(s *auth.Service, secure bool) func(http.Handler) http.Handler {
 	}
 }
 func SetSession(w http.ResponseWriter, token string, secure bool, ttl time.Duration) {
-	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())})
+	http.SetCookie(w, &http.Cookie{Name: CookieName, Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds())}) //nolint:gosec // G124: Secure follows config so plain-HTTP development still gets a session
 }
 func ClearSession(w http.ResponseWriter, secure bool) {
-	http.SetCookie(w, &http.Cookie{Name: CookieName, Path: "/", Value: "", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(0, 0)})
+	http.SetCookie(w, &http.Cookie{Name: CookieName, Path: "/", Value: "", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(0, 0)}) //nolint:gosec // G124: Secure follows config so plain-HTTP development still gets a session
 }
 func redirect(w http.ResponseWriter, r *http.Request) {
 	target := "/login"

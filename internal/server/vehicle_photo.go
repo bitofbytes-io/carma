@@ -18,7 +18,7 @@ func (s *Server) savePhoto(request *http.Request, validation string) (string, st
 	if err != nil {
 		return "", validation
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	object, err := s.assets.Save(request.Context(), file, s.cfg.MaxUploadBytes)
 	if err != nil {
 		s.metrics.Upload(uploadVehiclePhoto, uploadResult(err))

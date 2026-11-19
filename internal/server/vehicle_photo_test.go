@@ -159,7 +159,7 @@ func assertPhotoExists(t *testing.T, store assets.Store, key string) {
 	if err != nil {
 		t.Fatalf("photo %q missing: %v", key, err)
 	}
-	defer photo.Close()
+	defer func() { _ = photo.Close() }()
 	if _, err := io.ReadAll(photo); err != nil {
 		t.Fatal(err)
 	}

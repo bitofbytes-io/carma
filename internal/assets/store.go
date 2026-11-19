@@ -90,7 +90,7 @@ func (s *LocalStore) Save(_ context.Context, source io.Reader, max int64) (Objec
 		return Object{}, err
 	}
 	name := tmp.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	h := sha256.New()
 	n, copyErr := io.Copy(io.MultiWriter(tmp, h), br)
 	if syncErr := tmp.Sync(); copyErr == nil {
@@ -143,7 +143,7 @@ func (s *LocalStore) Open(_ context.Context, key string) (ReadSeekCloser, error)
 	if e != nil {
 		return nil, e
 	}
-	return os.Open(p)
+	return os.Open(p) //nolint:gosec // G304: p comes from path(), which validates the key and confines it to the objects root
 }
 func (s *LocalStore) Delete(_ context.Context, key string) error {
 	p, e := s.path(key)

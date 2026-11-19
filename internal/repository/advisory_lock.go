@@ -81,8 +81,8 @@ func (p *Postgres) LeaderLocksHeld(ctx context.Context) (map[string]bool, error)
 	p.leaderMu.Lock()
 	for i, lock := range locks {
 		pids[i] = int64(p.leaderSessions[lock.id])
-		high[i] = int64(uint64(lock.id) >> 32)
-		low[i] = int64(uint64(lock.id) & 0xffffffff)
+		high[i] = int64(uint64(lock.id) >> 32)       //nolint:gosec // G115: reinterprets the int64 lock id bit pattern; no value is lost
+		low[i] = int64(uint64(lock.id) & 0xffffffff) //nolint:gosec // G115: reinterprets the int64 lock id bit pattern; no value is lost
 	}
 	p.leaderMu.Unlock()
 	rows, err := p.pool.Query(ctx, `SELECT wanted.ordinality, EXISTS (

@@ -115,7 +115,7 @@ func requiredSecretFile(key string) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("%s is required when reminder email is enabled", key)
 	}
-	contents, err := os.ReadFile(path)
+	contents, err := os.ReadFile(path) //nolint:gosec // G304: operator-supplied secret file path from environment
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", key, err)
 	}
@@ -187,7 +187,7 @@ func LoadDatabaseURL() (string, error) {
 }
 func env(k, d string) string {
 	if f := os.Getenv(k + "_FILE"); f != "" {
-		if b, e := os.ReadFile(f); e == nil {
+		if b, e := os.ReadFile(f); e == nil { //nolint:gosec // G304: operator-supplied secret file path from environment
 			return strings.TrimSpace(string(b))
 		}
 	}
@@ -207,7 +207,7 @@ func envOrFile(k, d string) (string, error) {
 	if p == "" {
 		return "", nil
 	}
-	b, e := os.ReadFile(p)
+	b, e := os.ReadFile(p) //nolint:gosec // G304: operator-supplied secret file path from environment
 	if errors.Is(e, os.ErrNotExist) {
 		return "", nil
 	}
