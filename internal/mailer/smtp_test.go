@@ -92,7 +92,9 @@ func TestSMTPRejectsUntrustedCertificateAndWrongHostname(t *testing.T) {
 		if _, err := sender.Send(context.Background(), Message{Recipients: []string{"one@example.com"}, Subject: "subject"}); err == nil || !strings.Contains(err.Error(), "TLS handshake") {
 			t.Fatalf("error = %v", err)
 		}
-		t.Logf("peer result: %v", <-done) // the peer observes the rejected handshake
+		if serverErr := <-done; serverErr == nil { // the peer observes the rejected handshake
+			t.Fatal("peer did not observe the rejected handshake")
+		}
 	})
 	t.Run("wrong hostname", func(t *testing.T) {
 		address, _, done := startSMTPServer(t, serverTLS, "carma", "password", false)
@@ -102,7 +104,9 @@ func TestSMTPRejectsUntrustedCertificateAndWrongHostname(t *testing.T) {
 		if _, err := sender.Send(context.Background(), Message{Recipients: []string{"one@example.com"}, Subject: "subject"}); err == nil || !strings.Contains(err.Error(), "TLS handshake") {
 			t.Fatalf("error = %v", err)
 		}
-		t.Logf("peer result: %v", <-done)
+		if serverErr := <-done; serverErr == nil {
+			t.Fatal("peer did not observe the rejected handshake")
+		}
 	})
 }
 
