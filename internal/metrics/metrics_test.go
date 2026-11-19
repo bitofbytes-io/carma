@@ -139,7 +139,7 @@ func TestStartServesOnlyMetricsAndShutsDown(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		body, _ := io.ReadAll(response.Body)
 		return response.StatusCode, string(body)
 	}
@@ -152,7 +152,8 @@ func TestStartServesOnlyMetricsAndShutsDown(t *testing.T) {
 	if err := server.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := http.Get("http://" + server.Addr() + "/metrics"); err == nil {
+	if response, err := http.Get("http://" + server.Addr() + "/metrics"); err == nil {
+		_ = response.Body.Close()
 		t.Fatal("listener still serving after shutdown")
 	}
 }
@@ -168,7 +169,7 @@ func TestStartIsDisabledByOffAndSurvivesBindFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer taken.Close()
+	defer func() { _ = taken.Close() }()
 	if server := Start(taken.Addr().String(), New().Handler(), log); server != nil {
 		t.Fatal("bound an address already in use")
 	}

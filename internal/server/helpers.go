@@ -55,7 +55,7 @@ func redirectAfterPost(response http.ResponseWriter, request *http.Request, targ
 		response.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(response, request, target, http.StatusSeeOther)
+	http.Redirect(response, request, target, http.StatusSeeOther) //nolint:gosec // G710: callers pass server-built or safeRedirectTarget-validated local paths
 }
 
 func (s *Server) parseMultipart(response http.ResponseWriter, request *http.Request, memory int64) error {
@@ -64,7 +64,7 @@ func (s *Server) parseMultipart(response http.ResponseWriter, request *http.Requ
 		limit = 128 << 20
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, limit)
-	return request.ParseMultipartForm(memory)
+	return request.ParseMultipartForm(memory) //nolint:gosec // G120: the body is capped by http.MaxBytesReader above
 }
 
 func (s *Server) multipartError(response http.ResponseWriter, err error) {

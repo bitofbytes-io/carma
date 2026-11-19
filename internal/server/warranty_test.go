@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -17,14 +18,14 @@ func warrantyQuery(vehicleID uuid.UUID, search string) model.RecordQuery {
 }
 
 // warrantyRecord posts a new record for the vehicle and returns the response.
-func warrantyRecord(t *testing.T, f fixture, vehicleID, typeID string, fields map[string]string) *http.Response {
+func warrantyRecord(t *testing.T, f fixture, vehicleID, typeID string, fields map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	body := map[string]string{"occurred_on": "2026-07-01", "service_type_id": typeID}
 	for key, value := range fields {
 		body[key] = value
 	}
 	b, ct := formBody(t, body, "", nil)
-	return f.do(t, http.MethodPost, "/vehicles/"+vehicleID+"/records", b, ct).Result()
+	return f.do(t, http.MethodPost, "/vehicles/"+vehicleID+"/records", b, ct)
 }
 
 func TestRecordWarrantySavesDateMilesBothOrNeither(t *testing.T) {
@@ -46,8 +47,8 @@ func TestRecordWarrantySavesDateMilesBothOrNeither(t *testing.T) {
 			response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), map[string]string{
 				"vendor": tc.name, "warranty_until": tc.date, "warranty_miles": tc.miles,
 			})
-			if response.StatusCode != http.StatusSeeOther {
-				t.Fatalf("status=%d", response.StatusCode)
+			if response.Code != http.StatusSeeOther {
+				t.Fatalf("status=%d", response.Code)
 			}
 			records, err := f.store.ListRecords(t.Context(), warrantyQuery(v.ID, tc.name))
 			if err != nil || len(records) != 1 {
@@ -86,8 +87,8 @@ func TestRecordWarrantyRejectsInvalidValues(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), tc.fields)
-			if response.StatusCode != http.StatusBadRequest {
-				t.Fatalf("status=%d want 400", response.StatusCode)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d want 400", response.Code)
 			}
 			body, err := io.ReadAll(response.Body)
 			if err != nil {
@@ -108,8 +109,8 @@ func TestRecordWarrantyEditCanSetAndClear(t *testing.T) {
 	f := setup(t)
 	v := createVehicle(t, f)
 	types, _ := f.store.ListServiceTypes(t.Context())
-	if response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), nil); response.StatusCode != http.StatusSeeOther {
-		t.Fatalf("create status=%d", response.StatusCode)
+	if response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), nil); response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d", response.Code)
 	}
 	records, _ := f.store.ListRecords(t.Context(), warrantyQuery(v.ID, ""))
 	id := records[0].ID.String()
@@ -143,8 +144,8 @@ func TestWarrantyBadgeFollowsDateAndOdometer(t *testing.T) {
 	response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), map[string]string{
 		"warranty_until": "2026-12-31", "warranty_miles": "36000",
 	})
-	if response.StatusCode != http.StatusSeeOther {
-		t.Fatalf("create status=%d", response.StatusCode)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d", response.Code)
 	}
 	records, _ := f.store.ListRecords(t.Context(), warrantyQuery(v.ID, ""))
 	recordPage := "/records/" + records[0].ID.String()
@@ -182,8 +183,8 @@ func TestWarrantyBadgeEndsAfterDateInHouseholdTimezone(t *testing.T) {
 	f.s.cfg.Location = loc
 	v := createVehicle(t, f)
 	types, _ := f.store.ListServiceTypes(t.Context())
-	if response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), map[string]string{"warranty_until": "2026-07-31"}); response.StatusCode != http.StatusSeeOther {
-		t.Fatalf("create status=%d", response.StatusCode)
+	if response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), map[string]string{"warranty_until": "2026-07-31"}); response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d", response.Code)
 	}
 	vehiclePage := "/vehicles/" + v.ID.String()
 
@@ -205,8 +206,8 @@ func TestWarrantyAppearsInExportsAndPrintableHistory(t *testing.T) {
 	types, _ := f.store.ListServiceTypes(t.Context())
 	if response := warrantyRecord(t, f, v.ID.String(), types[0].ID.String(), map[string]string{
 		"vendor": "Dealer", "warranty_until": "2028-03-03", "warranty_miles": "36000",
-	}); response.StatusCode != http.StatusSeeOther {
-		t.Fatalf("create status=%d", response.StatusCode)
+	}); response.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d", response.Code)
 	}
 
 	csvBody := f.do(t, http.MethodGet, "/vehicles/"+v.ID.String()+"/export.csv", nil, "")

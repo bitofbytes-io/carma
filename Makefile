@@ -8,6 +8,8 @@ IMAGE_REPO ?= carma
 TAG ?= dev
 PLATFORMS ?= linux/arm64/v8
 GOCACHE ?= /tmp/carma-go-cache
+# renovate: datasource=github-releases depName=golangci/golangci-lint
+GOLANGCI_LINT_VERSION := v2.15.0
 
 .PHONY: run test test-integration check-entrypoints lint vuln build migrate db-up db-down docker-build docker-buildx
 
@@ -30,14 +32,8 @@ test-integration:
 	CARMA_TEST_DATABASE_URL='$(DATABASE_URL)' GOCACHE=$(GOCACHE) $(GO) test -race -count=1 ./...
 
 lint:
-	@unformatted="$$("$$($(GO) env GOROOT)/bin/gofmt" -l .)" || exit $$?; \
-		if [ -n "$$unformatted" ]; then \
-			printf '%s\n' 'Go files need formatting:' "$$unformatted"; \
-			exit 1; \
-		fi
-	GOCACHE=$(GOCACHE) $(GO) vet ./...
 	@toolchain="$$($(GO) env GOVERSION)"; \
-		GOTOOLCHAIN="$$toolchain" GOCACHE=$(GOCACHE) $(GO) run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+		GOTOOLCHAIN="$$toolchain" GOCACHE=$(GOCACHE) $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run
 
 vuln:
 	@toolchain="$$($(GO) env GOVERSION)"; \

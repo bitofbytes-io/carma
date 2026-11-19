@@ -52,7 +52,7 @@ func ReminderPresets(selected []string) []ReminderPreset {
 // Dollars formats cents exactly as dollars, such as "$1234.50" or "-$0.05".
 func Dollars(cents int64) string {
 	sign := ""
-	magnitude := uint64(cents)
+	magnitude := uint64(cents) //nolint:gosec // G115: two's-complement reinterpretation so math.MinInt64 formats correctly
 	if cents < 0 {
 		sign = "-"
 		magnitude = -magnitude
@@ -91,7 +91,7 @@ func NewWithAssets(assetURL func(name string) string) (*Renderer, error) {
 				return template.HTMLAttr("selected")
 			}
 			return template.HTMLAttr("")
-		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "asset": assetURL, "lower": strings.ToLower, "lookupVIN": nhtsa.LookupVIN, "odometerForm": func(v model.Vehicle, ret string) OdometerForm {
+		}, "query": func(v url.Values) template.URL { return template.URL(v.Encode()) }, "asset": assetURL, "lower": strings.ToLower, "lookupVIN": nhtsa.LookupVIN, "odometerForm": func(v model.Vehicle, ret string) OdometerForm { //nolint:gosec // G203: template.URL wraps url.Values.Encode output, which is already escaped
 			return OdometerForm{Vehicle: v, Return: ret}
 		}}).ParseFS(files, "templates/base.html", "templates/partials.html", "templates/"+n+".html")
 		if e != nil {

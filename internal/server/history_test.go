@@ -42,7 +42,7 @@ func TestVehicleHistoryListsRecordsOldestFirstWithTotals(t *testing.T) {
 		}
 	}
 	first, second, third := strings.Index(body, "Jiffy Lube"), strings.Index(body, "Driveway"), strings.Index(body, "Tire Barn")
-	if first < 0 || !(first < second && second < third) {
+	if first < 0 || first >= second || second >= third {
 		t.Fatalf("records not oldest first: %d %d %d", first, second, third)
 	}
 
@@ -128,7 +128,7 @@ func TestVehicleHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 			t.Fatalf("dismissed recall rendered:\n%s", body)
 		}
 		first, second, third := strings.Index(body, "Jiffy Lube"), strings.Index(body, "Driveway"), strings.Index(body, "Tire Barn")
-		if first < 0 || !(first < second && second < third) {
+		if first < 0 || first >= second || second >= third {
 			t.Fatalf("records not oldest first: %d %d %d", first, second, third)
 		}
 	}

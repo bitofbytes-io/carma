@@ -138,7 +138,7 @@ func (s *Server) createServiceType(response http.ResponseWriter, request *http.R
 		return
 	}
 	dest, _ := safeRedirectTarget(request.FormValue("return_to"))
-	http.Redirect(response, request, dest, http.StatusSeeOther)
+	http.Redirect(response, request, dest, http.StatusSeeOther) //nolint:gosec // G710: dest is validated by safeRedirectTarget
 }
 
 func (s *Server) getRecord(request *http.Request) (model.Record, []model.Attachment, error) {

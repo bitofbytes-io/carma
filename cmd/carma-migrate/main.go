@@ -53,7 +53,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 	logger.Info("migration starting", "version", version)
 	if err := database.Migrate(ctx, conn, migrations.FS, location); err != nil {
 		return err

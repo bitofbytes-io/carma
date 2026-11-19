@@ -674,7 +674,7 @@ func TestHistoryPrintRendersCostsShownAndHidden(t *testing.T) {
 			}
 		}
 		first, second, third := strings.Index(html, "Jiffy Lube"), strings.Index(html, "Driveway"), strings.Index(html, "Tire Barn")
-		if !(first >= 0 && first < second && second < third) {
+		if first < 0 || first >= second || second >= third {
 			t.Fatalf("hideCosts=%v records not oldest first", hideCosts)
 		}
 		if hideCosts {

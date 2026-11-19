@@ -70,7 +70,7 @@ func (s *Server) oauthStart(response http.ResponseWriter, request *http.Request)
 		s.fail(response, err)
 		return
 	}
-	http.SetCookie(response, &http.Cookie{
+	http.SetCookie(response, &http.Cookie{ //nolint:gosec // G124: Secure follows config so plain-HTTP development still gets a session
 		Name:     oauthStateCookie,
 		Value:    state,
 		Path:     "/api/auth/google/callback",
@@ -79,7 +79,7 @@ func (s *Server) oauthStart(response http.ResponseWriter, request *http.Request)
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   600,
 	})
-	http.Redirect(response, request, s.google.AuthURL(state), http.StatusFound)
+	http.Redirect(response, request, s.google.AuthURL(state), http.StatusFound) //nolint:gosec // G710: redirects to the configured Google OAuth authorization URL
 }
 
 func (s *Server) oauthCallback(response http.ResponseWriter, request *http.Request) {
@@ -91,7 +91,7 @@ func (s *Server) oauthCallback(response http.ResponseWriter, request *http.Reque
 		http.Redirect(response, request, loginErrorLocation(loginErrorExpired), http.StatusSeeOther)
 		return
 	}
-	http.SetCookie(response, &http.Cookie{
+	http.SetCookie(response, &http.Cookie{ //nolint:gosec // G124: Secure follows config so plain-HTTP development still gets a session
 		Name:     oauthStateCookie,
 		Path:     "/api/auth/google/callback",
 		MaxAge:   -1,

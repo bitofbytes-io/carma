@@ -223,7 +223,7 @@ func (c *Client) getJSON(ctx context.Context, endpoint string, target any) (int,
 	if err != nil {
 		return 0, fmt.Errorf("NHTSA request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusBadRequest {
 		return response.StatusCode, fmt.Errorf("NHTSA request: HTTP %d", response.StatusCode)
 	}

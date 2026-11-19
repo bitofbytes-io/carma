@@ -213,7 +213,7 @@ func assertSchemaVersion(t *testing.T, databaseURL, want string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(ctx)
+	defer func() { _ = conn.Close(ctx) }()
 	var got string
 	if err := conn.QueryRow(ctx, `SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1`).Scan(&got); err != nil {
 		t.Fatal(err)

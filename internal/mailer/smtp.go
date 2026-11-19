@@ -74,7 +74,7 @@ func (s *SMTP) Send(ctx context.Context, message Message) (messageID string, err
 	if err != nil {
 		return "", fmt.Errorf("SMTP connect: %w", err)
 	}
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	deadline := s.now().Add(s.timeout)
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		deadline = contextDeadline
@@ -97,7 +97,7 @@ func (s *SMTP) Send(ctx context.Context, message Message) (messageID string, err
 	if err != nil {
 		return "", fmt.Errorf("SMTP greeting: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	if err = client.Auth(smtp.PlainAuth("", s.username, s.password, s.host)); err != nil {
 		return "", fmt.Errorf("SMTP authentication: %w", err)
 	}
